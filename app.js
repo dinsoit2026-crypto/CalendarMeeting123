@@ -11,7 +11,7 @@
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }, escapeHtml = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ESC[c]);
 
   const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', USER: 'CAL_USER_V2' };
-  const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdilEhkvSke--ro/exec';
+  const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdiIEhkvSke--ro/exec';
   const DEFAULT_PASSCODE = 'CALL1234';
 
   const state = {
@@ -28,7 +28,7 @@
       const u = localStorage.getItem(STORAGE.USER); if (u) state.activeUser = Logic.sanitizeNoEmoji(u) || 'ผู้ดูแลระบบ';
       if ($('activeUserInput')) $('activeUserInput').value = state.activeUser;
       const c = JSON.parse(localStorage.getItem(STORAGE.CFG) || 'null');
-      if (c && c.gasUrl) {
+      if (c && c.gasUrl && !c.gasUrl.includes('AKfycwEq') && !c.gasUrl.includes('AdilEhkvSke')) {
         state.gasUrl = (c.gasUrl || '').trim();
         state.passcode = c.passcode || '';
         state.isLive = Boolean(c.isLive && state.gasUrl);
@@ -36,6 +36,7 @@
         state.gasUrl = DEFAULT_GAS_URL;
         state.passcode = DEFAULT_PASSCODE;
         state.isLive = true;
+        localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: true }));
       }
       if ($('cfgGasUrl')) $('cfgGasUrl').value = state.gasUrl;
       if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode;
