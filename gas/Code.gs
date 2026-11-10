@@ -47,8 +47,19 @@ function ensureSheet_(ss, name, cols) {
 }
 function formatPlainText_(sh, colCount) { sh.getRange(1, 1, Math.max(sh.getMaxRows(), 500), colCount).setNumberFormat('@'); }
 
-function installTriggerEvery15Minutes() {
+function removeNotificationTriggers() {
   ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'runNotificationEngine') ScriptApp.deleteTrigger(t); });
+  return 'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย';
+}
+
+function installTriggerDailyAt8AM() {
+  removeNotificationTriggers();
+  ScriptApp.newTrigger('runNotificationEngine').timeBased().everyDays(1).atHour(8).create();
+  return 'ติดตั้ง Trigger แจ้งเตือนวันละ 1 ครั้ง (ช่วง 08:00 น.) เรียบร้อย';
+}
+
+function installTriggerEvery15Minutes() {
+  removeNotificationTriggers();
   ScriptApp.newTrigger('runNotificationEngine').timeBased().everyMinutes(15).create();
   return 'ติดตั้ง Trigger เรียบร้อย';
 }
@@ -130,7 +141,7 @@ function fmtThaiDate_(d) {
 }
 
 // --- Data Operations ---
-function readAllApts_() {
+function readAllApts_(includeDeleted) {
   var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) return [];
   return sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues().reduce(function (arr, r) {
@@ -138,7 +149,7 @@ function readAllApts_() {
     o.status = normalizeStatus_(o.status);
     o.remindDaysBefore = Number(o.remindDaysBefore || 1); o.remindHoursBefore = Number(o.remindHoursBefore || 1);
     o.rescheduleCount = Number(o.rescheduleCount || 0);
-    if (o.id && !o.deletedAt) arr.push(o);
+    if (o.id && (includeDeleted || !o.deletedAt)) arr.push(o);
     return arr;
   }, []);
 }
@@ -146,7 +157,7 @@ function readAllApts_() {
 function createApt_(inp) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS);
   var now = getBkkNow_(), pfx = 'APT-' + now.dateStr.replace(/-/g, '') + '-';
-  var max = readAllApts_().reduce(function (m, x) { return x.id && x.id.indexOf(pfx) === 0 ? Math.max(m, +x.id.slice(pfx.length) || 0) : m; }, 0);
+  var max = readAllApts_(true).reduce(function (m, x) { return x.id && x.id.indexOf(pfx) === 0 ? Math.max(m, +x.id.slice(pfx.length) || 0) : m; }, 0);
   var rec = {
     id: pfx + String(max + 1).padStart(3, '0'), title: sanitizeNoEmoji(inp.title), appointmentDate: sanitizeNoEmoji(inp.appointmentDate),
     appointmentTime: sanitizeNoEmoji(inp.appointmentTime), location: sanitizeNoEmoji(inp.location), contactPerson: sanitizeNoEmoji(inp.contactPerson),
@@ -165,8 +176,9 @@ function updateApt_(id, patch, expUpdated, reason) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) throw new Error('ไม่พบนัดหมาย');
   var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues(), targetRow = -1, cur = null;
-  for (var r = 0; r < vals.length; r++) {
-    if (String(vals[r][0]).trim() === String(id).trim()) {
+  var delIdx = APT_COLS.indexOf('deletedAt');
+  for (var r = vals.length - 1; r >= 0; r--) {
+    if (String(vals[r][0]).trim() === String(id).trim() && !String(vals[r][delIdx] || '').trim()) {
       targetRow = r + 2; cur = {}; APT_COLS.forEach(function (c, i) { cur[c] = String(vals[r][i] || '').trim(); });
       break;
     }
@@ -198,7 +210,10 @@ function updateApt_(id, patch, expUpdated, reason) {
 }
 
 function deleteApt_(id, user) {
-  return updateApt_(id, { deletedAt: getBkkNow_().isoStr, updatedBy: user || 'ผู้ใช้งานระบบ' }, null, 'ลบนัดหมาย').appointment;
+  var now = getBkkNow_().isoStr, u = user || 'ผู้ใช้งานระบบ';
+  var res = updateApt_(id, { deletedAt: now, updatedBy: u }, null, 'ลบนัดหมาย').appointment;
+  try { while (true) updateApt_(id, { deletedAt: now, updatedBy: u }, null, 'ลบนัดหมาย'); } catch (_) {}
+  return res;
 }
 
 function validateApt_(r) {
@@ -281,10 +296,10 @@ function applySlotUpdates_(ups) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) return;
   var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues();
-  var dCol = APT_COLS.indexOf('notifiedDayForSlot') + 1, hCol = APT_COLS.indexOf('notifiedHourForSlot') + 1;
+  var dCol = APT_COLS.indexOf('notifiedDayForSlot') + 1, hCol = APT_COLS.indexOf('notifiedHourForSlot') + 1, delIdx = APT_COLS.indexOf('deletedAt');
   ups.forEach(function (u) {
-    for (var r = 0; r < vals.length; r++) {
-      if (String(vals[r][0]).trim() === u.id) {
+    for (var r = vals.length - 1; r >= 0; r--) {
+      if (String(vals[r][0]).trim() === u.id && !String(vals[r][delIdx] || '').trim()) {
         sh.getRange(r + 2, dCol).setValue(u.dSlot); sh.getRange(r + 2, hCol).setValue(u.hSlot); break;
       }
     }

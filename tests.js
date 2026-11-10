@@ -195,10 +195,12 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.2.0 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 4, 'ต้องมีประวัติอย่างน้อย 4 เวอร์ชัน');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.2.0 และ 2.3.0 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 5, 'ต้องมีประวัติอย่างน้อย 5 เวอร์ชัน');
     const v220 = PatchNotes.find(p => p.version === '2.2.0');
+    const v230 = PatchNotes.find(p => p.version === '2.3.0');
     assert(v220 && v220.changes && v220.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.2.0');
+    assert(v230 && v230.changes && v230.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.3.0');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 
