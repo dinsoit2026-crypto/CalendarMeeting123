@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ระบบนัดคิวทำงาน v2.1.0</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="header-inner">
+      <div class="brand-row">
+        <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
+        <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.1.0</button>
+        <span id="connectionModeBadge" class="mode-badge demo">[Demo]</span>
+      </div>
+      <div class="header-actions">
+        <div class="user-inline">
+          <label for="activeUserInput">ผู้บันทึก:</label>
+          <input type="text" id="activeUserInput" value="ผู้ดูแลระบบ" placeholder="ชื่อของคุณ">
+        </div>
+        <button type="button" id="btnSyncNow" class="btn btn-outline btn-sm">ซิงก์</button>
+        <button type="button" id="btnOpenCreateModal" class="btn btn-primary btn-sm">+ นัดหมายใหม่</button>
+      </div>
+    </div>
+    <div class="quota-bar-strip">
+      <div class="quota-progress-wrap">
+        <span id="quotaTextLabel">โควตา LINE: 0 / 300</span>
+        <div class="quota-progress-track"><div id="quotaProgressFill" class="quota-progress-fill" style="width: 0%;"></div></div>
+      </div>
+      <div id="triggerStatusText" class="meta-status">Trigger: ยังไม่เชื่อมต่อ</div>
+      <div id="bangkokClockDisplay" class="meta-clock">เวลา (BKK): -</div>
+    </div>
+  </header>
+
+  <nav class="nav-tabs-bar" aria-label="เมนูหลัก">
+    <button type="button" class="tab-btn active" data-tab="tabList">1. คิวงาน</button>
+    <button type="button" class="tab-btn" data-tab="tabMonth">2. ปฏิทินเดือน</button>
+    <button type="button" class="tab-btn" data-tab="tabYear">3. ภาพรวมท้ายปี</button>
+    <button type="button" class="tab-btn" data-tab="tabSettings">4. ตั้งค่า / บอท</button>
+  </nav>
+
+  <main class="main-container">
+    <!-- TAB 1: คิวงาน -->
+    <section id="tabList" class="tab-panel active">
+      <div class="stat-pills" id="statPillsContainer">
+        <div class="stat-pill stat-all" data-filter-status=""><span>ทั้งหมด</span><strong id="statTotal">0</strong></div>
+        <div class="stat-pill stat-confirmed" data-filter-status="นัดหมายแล้ว"><span>นัดหมายแล้ว</span><strong id="statConfirmed">0</strong></div>
+        <div class="stat-pill stat-completed" data-filter-status="สิ้นสุดการนัดหมาย"><span>สิ้นสุด</span><strong id="statCompleted">0</strong></div>
+        <div class="stat-pill stat-cancelled" data-filter-status="ยกเลิกการนัดหมาย"><span>ยกเลิก</span><strong id="statCancelled">0</strong></div>
+        <div class="stat-pill stat-overdue" data-filter-status="OVERDUE"><span>เลยกำหนด</span><strong id="statOverdue">0</strong></div>
+      </div>
+
+      <div class="filter-toolbar">
+        <input type="search" id="filterSearch" class="input-search" placeholder="ค้นหาหัวข้อ, ผู้นัดพบ, สถานที่, รหัส...">
+        <select id="filterStatus" class="select-filter">
+          <option value="">-- ทุกสถานะ --</option>
+          <option value="ACTIVE_ONLY">งานรอดำเนินการ</option>
+          <option value="นัดหมายแล้ว">นัดหมายแล้ว</option>
+          <option value="สิ้นสุดการนัดหมาย">สิ้นสุดการนัดหมาย</option>
+          <option value="ยกเลิกการนัดหมาย">ยกเลิกการนัดหมาย</option>
+          <option value="OVERDUE">[เลยกำหนด]</option>
+        </select>
+        <input type="date" id="filterDate" class="input-date">
+        <button type="button" id="btnClearFilters" class="btn btn-outline btn-sm">ล้างตัวกรอง</button>
+      </div>
+
+      <div id="appointmentsListContainer" class="appointments-list"></div>
+    </section>
+
+    <!-- TAB 2: ปฏิทินเดือน -->
+    <section id="tabMonth" class="tab-panel">
+      <div class="calendar-controls">
+        <div class="cal-nav-group">
+          <button type="button" id="btnPrevMonth" class="btn btn-outline btn-sm">&lt; ก่อนหน้า</button>
+          <button type="button" id="btnCurrentMonth" class="btn btn-outline btn-sm">เดือนนี้</button>
+          <button type="button" id="btnNextMonth" class="btn btn-outline btn-sm">ถัดไป &gt;</button>
+          <strong id="calendarMonthTitle" class="cal-month-title">-</strong>
+        </div>
+        <div class="cal-jump-group">
+          <select id="calSelectMonth"></select>
+          <input type="number" id="calInputYear" placeholder="พ.ศ. หรือ ค.ศ.">
+          <button type="button" id="btnJumpMonth" class="btn btn-primary btn-sm">ไป</button>
+        </div>
+      </div>
+
+      <div id="calendarGridContainer" class="calendar-grid"></div>
+
+      <div class="panel-card">
+        <h3 id="monthlyListHeader">รายการนัดหมายในเดือน</h3>
+        <div id="monthlyAppointmentsList" class="appointments-list"></div>
+      </div>
+    </section>
+
+    <!-- TAB 3: ภาพรวมท้ายปี & สถิติ -->
+    <section id="tabYear" class="tab-panel">
+      <div class="panel-card-row">
+        <div class="cal-jump-group">
+          <label for="yearOverviewInput">เลือกปี:</label>
+          <input type="number" id="yearOverviewInput" placeholder="พ.ศ./ค.ศ.">
+          <button type="button" id="btnJumpYearOverview" class="btn btn-primary btn-sm">แสดงสถิติ</button>
+        </div>
+      </div>
+
+      <!-- Year Selector Strip -->
+      <div id="multiYearCardsContainer" class="year-cards-strip"></div>
+
+      <!-- Year-End Statistics Summary Panel -->
+      <div class="panel-card" id="yearEndStatsPanel">
+        <h3 id="selectedYearHeader">สรุปสถิติตลอดทั้งปี</h3>
+        <div id="yearEndSummaryCards" class="year-stats-grid"></div>
+      </div>
+
+      <!-- 12-Month Breakdown -->
+      <div class="panel-card">
+        <h3>สรุปผลงานแยกรายเดือน (12 เดือน)</h3>
+        <div id="yearMonthsGrid" class="months-12-grid"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: ตั้งค่า / บอท -->
+    <section id="tabSettings" class="tab-panel">
+      <div class="form-row-2">
+        <div class="panel-card">
+          <h3>เชื่อมต่อ Google Apps Script (Sheets)</h3>
+          <div class="input-stack">
+            <label for="cfgGasUrl">Web App URL (/exec)</label>
+            <input type="text" id="cfgGasUrl" placeholder="https://script.google.com/macros/s/.../exec">
+            <label for="cfgPasscode">รหัสผ่านทีม (API Passcode)</label>
+            <input type="password" id="cfgPasscode">
+            <div class="btn-group">
+              <button type="button" id="btnSaveConnection" class="btn btn-primary btn-sm">บันทึกเชื่อมต่อ</button>
+              <button type="button" id="btnSwitchLocalDemo" class="btn btn-outline btn-sm">ใช้โหมด Demo</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel-card">
+          <h3>นโยบายการเตือน LINE</h3>
+          <div class="input-stack">
+            <div class="form-row-2">
+              <div>
+                <label for="cfgDigestHour">เวลาสรุปประจำวัน (ชม.)</label>
+                <input type="number" id="cfgDigestHour" min="0" max="23" value="8">
+              </div>
+              <div>
+                <label for="cfgQuietHours">ช่วงห้ามรบกวน</label>
+                <input type="text" id="cfgQuietHours" value="22:00 - 07:00" readonly>
+              </div>
+            </div>
+            <label class="checkbox-label"><input type="checkbox" id="cfgEnableBotQuery" checked> เปิดถามตารางงานในแชท (คิว ...)</label>
+            <label class="checkbox-label"><input type="checkbox" id="cfgPrivacyMask"> ย่อชื่อผู้นัดพบในแชท</label>
+            <div class="btn-group">
+              <button type="button" id="btnSavePolicy" class="btn btn-primary btn-sm">บันทึก</button>
+              <button type="button" id="btnTestValidateLine" class="btn btn-outline btn-sm">ตรวจ Validate</button>
+              <button type="button" id="btnTestRealPush" class="btn btn-warning btn-sm">ทดสอบส่งจริง</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel-card">
+        <h3>จำลอง LINE Bot (ขึ้นต้นด้วย "คิว")</h3>
+        <div class="cal-jump-group" style="margin-bottom: 8px;">
+          <input type="text" id="botSimInput" value="คิว ปีนี้" style="flex: 1;">
+          <button type="button" id="btnRunBotSim" class="btn btn-primary btn-sm">ถามบอท</button>
+          <button type="button" id="btnPreviewNotificationPlan" class="btn btn-outline btn-sm">จำลองรอบเตือน</button>
+        </div>
+        <div class="quick-cmd-strip">
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ช่วยเหลือ">ช่วยเหลือ</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว วันนี้">วันนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว พรุ่งนี้">พรุ่งนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว สัปดาห์นี้">สัปดาห์นี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ค้างอยู่">ค้างอยู่</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว เดือนนี้">เดือนนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ปีนี้">ปีนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว โควตา">โควตา</button>
+        </div>
+        <div id="botSimOutput" class="terminal-output">ผลลัพธ์แสดงที่นี่...</div>
+      </div>
+
+      <div class="panel-card">
+        <h3>ประวัติการเลื่อนนัด / แก้ไขข้อมูล (RescheduleLogs)</h3>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>วันเวลา</th><th>รหัส</th><th>ผู้แก้ไข</th><th>ฟิลด์</th><th>ค่าเดิม</th><th>ค่าใหม่</th><th>เหตุผล</th></tr></thead>
+            <tbody id="rescheduleLogsTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- MODAL: สร้าง / แก้ไข / เลื่อนนัด -->
+  <div id="appointmentModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2 id="modalTitle">นัดหมายใหม่</h2>
+        <button type="button" id="btnCloseModalTop" class="btn-close">&times;</button>
+      </div>
+      <form id="appointmentForm">
+        <div class="modal-body">
+          <input type="hidden" id="formAptId">
+          <input type="hidden" id="formExpectedUpdatedAt">
+
+          <div>
+            <label for="formTitle">หัวข้องาน *</label>
+            <input type="text" id="formTitle" required placeholder="ระบุหัวข้องาน">
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label for="formStatus">สถานะ *</label>
+              <select id="formStatus" required>
+                <option value="นัดหมายแล้ว">นัดหมายแล้ว</option>
+                <option value="สิ้นสุดการนัดหมาย">สิ้นสุดการนัดหมาย</option>
+                <option value="ยกเลิกการนัดหมาย">ยกเลิกการนัดหมาย</option>
+              </select>
+            </div>
+            <div>
+              <label for="formContactPerson">ผู้นัดพบ *</label>
+              <input type="text" id="formContactPerson" required placeholder="ชื่อผู้ติดต่อ">
+            </div>
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label for="formDate">วันที่นัดหมาย *</label>
+              <input type="date" id="formDate" required>
+              <div id="formDateThaiPreview" class="hint-text">-</div>
+            </div>
+            <div>
+              <label for="formTime">เวลานัดหมาย *</label>
+              <input type="time" id="formTime" required>
+            </div>
+          </div>
+
+          <div>
+            <label for="formLocation">สถานที่ *</label>
+            <input type="text" id="formLocation" required placeholder="สถานที่ / ลิงก์ประชุม">
+          </div>
+
+          <div class="form-row-2">
+            <div>
+              <label for="formRemindDays">เตือนล่วงหน้า (วัน)</label>
+              <input type="number" id="formRemindDays" min="0" max="365" value="1">
+            </div>
+            <div>
+              <label for="formRemindHours">เตือนก่อนนัด (ชม.)</label>
+              <input type="number" id="formRemindHours" min="0" max="168" value="1">
+            </div>
+          </div>
+
+          <div>
+            <label for="formNotes">หมายเหตุ</label>
+            <textarea id="formNotes" rows="2" placeholder="รายละเอียดเพิ่มเติม"></textarea>
+          </div>
+
+          <div id="rescheduleReasonGroup" style="display: none;">
+            <label for="formRescheduleReason">สาเหตุการเลื่อนนัด / แก้ไข</label>
+            <input type="text" id="formRescheduleReason" placeholder="ระบุเหตุผล">
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" id="btnDeleteApt" class="btn btn-danger btn-sm" style="display: none; margin-right: auto;">ลบ</button>
+          <button type="button" id="btnCancelModal" class="btn btn-outline btn-sm">ยกเลิก</button>
+          <button type="submit" id="btnSubmitModal" class="btn btn-primary btn-sm">บันทึกนัดหมาย</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: Patch Notes -->
+  <div id="patchNotesModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog">
+      <div class="modal-header">
+        <h2>ประวัติการอัปเดต (Patch Notes)</h2>
+        <button type="button" id="btnClosePatchNotesModalTop" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body" id="patchNotesContainer"></div>
+      <div class="modal-footer">
+        <a href="tests.html" target="_blank" class="btn btn-outline btn-sm" style="margin-right: auto;">ชุดทดสอบระบบ (tests.html)</a>
+        <button type="button" id="btnClosePatchNotesModal" class="btn btn-outline btn-sm">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="patchnotes.js"></script>
+  <script src="logic.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

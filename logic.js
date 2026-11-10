@@ -1,0 +1,426 @@
+/**
+ * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
+ * Notification Engine, Multi-Year & Year-End Statistics (v2.1.0)
+ * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.CalendarLogic = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  'use strict';
+
+  const API_VERSION = '2.1.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const STATUS = Object.freeze({
+    CONFIRMED: 'นัดหมายแล้ว',
+    COMPLETED: 'สิ้นสุดการนัดหมาย',
+    CANCELLED: 'ยกเลิกการนัดหมาย'
+  });
+  const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
+  const THAI_MONTHS_SHORT = Object.freeze(['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']);
+  const THAI_MONTHS_FULL = Object.freeze(['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']);
+
+  // --- Zero-Emoji Sanitizer ---
+  const EMOJI_EXT_RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
+  const EMOJI_MOD_RE = /[\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/gu;
+  const hasEmoji = s => !s || typeof s !== 'string' ? false : (EMOJI_EXT_RE.lastIndex = EMOJI_MOD_RE.lastIndex = 0, EMOJI_EXT_RE.test(s) || EMOJI_MOD_RE.test(s));
+  const sanitizeNoEmoji = s => s == null ? '' : String(s).replace(EMOJI_EXT_RE, '').replace(EMOJI_MOD_RE, '').replace(/[ \t]{2,}/g, ' ').trim();
+
+  // Normalize legacy status names
+  const normalizeStatus = st => {
+    const s = sanitizeNoEmoji(st || STATUS.CONFIRMED);
+    if (s === 'กำลังนัดหมายวันเวลา' || s === 'พบหมายแล้ว' || s === STATUS.CONFIRMED) return STATUS.CONFIRMED;
+    if (s === STATUS.COMPLETED || s === STATUS.CANCELLED) return s;
+    return STATUS.CONFIRMED;
+  };
+
+  // --- Time & Date Helpers (Asia/Bangkok UTC+07:00) ---
+  const pad2 = n => String(Math.floor(Math.abs(Number(n) || 0))).padStart(2, '0');
+  const normalizeYearToCE = y => { const n = Number(String(y || '').trim()); return !Number.isInteger(n) || n < 1900 || n > 3000 ? null : (n > 2400 ? n - 543 : n); };
+  const toBuddhistYear = ce => { const y = normalizeYearToCE(ce); return y ? y + 543 : null; };
+  const isLeapYearCE = y => (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+  const getDaysInMonth = (y, m) => {
+    const ce = normalizeYearToCE(y), mi = Number(m);
+    return !ce || mi < 1 || mi > 12 ? 0 : [31, isLeapYearCE(ce) ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][mi - 1];
+  };
+
+  function parseFlexibleDateInput(raw) {
+    const s = String(raw || '').trim(); if (!s) return '';
+    let y, m, d, m1 = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/), m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (m1) [y, m, d] = [normalizeYearToCE(m1[1]), +m1[2], +m1[3]];
+    else if (m2) [d, m, y] = [+m2[1], +m2[2], normalizeYearToCE(m2[3])];
+    else return null;
+    return !y || m < 1 || m > 12 || d < 1 || d > getDaysInMonth(y, m) ? null : `${y}-${pad2(m)}-${pad2(d)}`;
+  }
+
+  function parseTimeInput(raw) {
+    const s = String(raw || '').trim(); if (!s) return '';
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    return !m || +m[1] < 0 || +m[1] > 23 || +m[2] < 0 || +m[2] > 59 ? null : `${pad2(m[1])}:${pad2(m[2])}`;
+  }
+
+  function bangkokSlotToEpochMs(dateStr, timeStr) {
+    const d = parseFlexibleDateInput(dateStr), t = parseTimeInput(timeStr || '00:00');
+    if (!d || !t) return null;
+    const [y, m, dy] = d.split('-').map(Number), [hh, mm] = t.split(':').map(Number);
+    return Date.UTC(y, m - 1, dy, hh, mm, 0, 0) - BKK_OFFSET_MS;
+  }
+
+  function parseToEpochMs(isoOrDate) {
+    if (isoOrDate instanceof Date) return isoOrDate.getTime();
+    if (typeof isoOrDate === 'number') return isoOrDate;
+    const s = String(isoOrDate || '').trim(); if (!s) return Date.now();
+    const slot = s.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(?::(\d{2}))?$/);
+    if (slot) {
+      const base = bangkokSlotToEpochMs(slot[1], slot[2]);
+      return base !== null ? base + (slot[3] ? +slot[3] * 1000 : 0) : Date.now();
+    }
+    const parsed = Date.parse(s);
+    return Number.isNaN(parsed) ? Date.now() : parsed;
+  }
+
+  function getBangkokParts(isoOrDate) {
+    const epochMs = parseToEpochMs(isoOrDate), b = new Date(epochMs + BKK_OFFSET_MS);
+    const year = b.getUTCFullYear(), month = b.getUTCMonth() + 1, day = b.getUTCDate();
+    const hour = b.getUTCHours(), minute = b.getUTCMinutes(), second = b.getUTCSeconds();
+    const dateStr = `${year}-${pad2(month)}-${pad2(day)}`, timeStr = `${pad2(hour)}:${pad2(minute)}`;
+    return { epochMs, year, buddhistYear: year + 543, month, day, hour, minute, second, dateStr, timeStr, slotStr: `${dateStr}T${timeStr}`, isoStr: `${dateStr}T${timeStr}:${pad2(second)}+07:00` };
+  }
+
+  const daysBetweenDates = (s, e) => {
+    const sm = bangkokSlotToEpochMs(s, '00:00'), em = bangkokSlotToEpochMs(e, '00:00');
+    return sm === null || em === null ? null : Math.round((em - sm) / 86400000);
+  };
+
+  const formatThaiDateDisplay = (dateStr, includeCE = true) => {
+    const d = parseFlexibleDateInput(dateStr); if (!d) return 'ยังไม่กำหนดวันที่';
+    const [y, m, dy] = d.split('-').map(Number);
+    return `${dy} ${THAI_MONTHS_SHORT[m - 1]} ${y + 543}` + (includeCE ? ` (${d})` : '');
+  };
+
+  // --- Status & Overdue ---
+  const isActiveStatus = st => normalizeStatus(st) === STATUS.CONFIRMED;
+  const buildAppointmentSlot = a => a && a.appointmentDate && a.appointmentTime ? `${a.appointmentDate}T${a.appointmentTime}` : '';
+  const isOverdue = (a, nowIso) => {
+    if (!a || a.deletedAt || !isActiveStatus(a.status) || !a.appointmentDate || !a.appointmentTime) return false;
+    const ep = bangkokSlotToEpochMs(a.appointmentDate, a.appointmentTime);
+    return ep !== null && getBangkokParts(nowIso).epochMs > ep;
+  };
+
+  // --- Validation, Creation & Reschedule Updates ---
+  function validateAppointmentInput(input) {
+    if (!input || typeof input !== 'object') return { valid: false, errors: ['ข้อมูลไม่ถูกต้อง'] };
+    const errs = [];
+    const title = sanitizeNoEmoji(input.title || '');
+    const status = normalizeStatus(input.status);
+    const location = sanitizeNoEmoji(input.location || '');
+    const contactPerson = sanitizeNoEmoji(input.contactPerson || '');
+    const pDate = input.appointmentDate ? parseFlexibleDateInput(input.appointmentDate) : '';
+    const pTime = input.appointmentTime ? parseTimeInput(input.appointmentTime) : '';
+
+    if (!title) errs.push('กรุณาระบุหัวข้องาน');
+    if (!pDate) errs.push('กรุณาระบุวันที่นัดหมาย');
+    if (!pTime) errs.push('กรุณาระบุเวลานัดหมาย (HH:mm)');
+    if (!location) errs.push('กรุณาระบุสถานที่นัดหมาย');
+    if (!contactPerson) errs.push('กรุณาระบุชื่อผู้นัดพบ');
+    if (input.appointmentDate && pDate === null) errs.push('รูปแบบวันที่ไม่ถูกต้อง');
+    if (input.appointmentTime && pTime === null) errs.push('รูปแบบเวลาไม่ถูกต้อง (HH:mm)');
+
+    const rDays = input.remindDaysBefore != null && input.remindDaysBefore !== '' ? Number(input.remindDaysBefore) : 1;
+    const rHours = input.remindHoursBefore != null && input.remindHoursBefore !== '' ? Number(input.remindHoursBefore) : 1;
+    if (!Number.isInteger(rDays) || rDays < 0 || rDays > 365) errs.push('จำนวนวันแจ้งเตือนต้องเป็น 0-365');
+    if (!Number.isInteger(rHours) || rHours < 0 || rHours > 168) errs.push('จำนวนชั่วโมงแจ้งเตือนต้องเป็น 0-168');
+
+    return {
+      valid: !errs.length,
+      errors: errs,
+      sanitized: {
+        title, appointmentDate: pDate || '', appointmentTime: pTime || '', location, contactPerson, status,
+        remindDaysBefore: rDays, remindHoursBefore: rHours, notes: sanitizeNoEmoji(input.notes || ''),
+        updatedBy: sanitizeNoEmoji(input.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ'
+      }
+    };
+  }
+
+  function generateAppointmentId(existing, nowIso) {
+    const prefix = `APT-${getBangkokParts(nowIso).dateStr.replace(/-/g, '')}-`;
+    const max = (existing || []).reduce((m, x) => (x && x.id && x.id.startsWith(prefix) ? Math.max(m, +x.id.slice(prefix.length) || 0) : m), 0);
+    return `${prefix}${pad2(max + 1).padStart(3, '0')}`;
+  }
+
+  function createAppointmentRecord(input, existing, nowIso) {
+    const v = validateAppointmentInput(input);
+    if (!v.valid) throw new Error(v.errors.join(' | '));
+    const now = getBangkokParts(nowIso).isoStr, s = v.sanitized;
+    return {
+      id: input.id ? sanitizeNoEmoji(input.id) : generateAppointmentId(existing, now),
+      ...s, notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0,
+      createdAt: now, updatedAt: now, deletedAt: ''
+    };
+  }
+
+  function updateAppointmentRecord(existing, patch, options) {
+    if (!existing || !existing.id) throw new Error('ไม่พบรายการนัดหมาย');
+    const opts = options || {};
+    if (opts.expectedUpdatedAt && existing.updatedAt && opts.expectedUpdatedAt !== existing.updatedAt) {
+      const err = new Error('ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว กรุณารีเฟรชก่อนทำรายการ');
+      err.code = 'CONCURRENCY_CONFLICT';
+      throw err;
+    }
+    const merged = { ...existing, ...patch };
+    const v = validateAppointmentInput(merged);
+    if (!v.valid) throw new Error(v.errors.join(' | '));
+
+    const s = v.sanitized, bkk = getBangkokParts(opts.nowIso), reason = sanitizeNoEmoji(patch.reason || opts.reason || '');
+    const logs = ['appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status']
+      .filter(f => String(existing[f] || '') !== String(s[f] || ''))
+      .map((f, i) => ({
+        logId: `LOG-${bkk.epochMs}-${i + 1}`, appointmentId: existing.id, changedAt: bkk.isoStr,
+        changedBy: s.updatedBy, fieldChanged: f, oldValue: String(existing[f] || ''), newValue: String(s[f] || ''), reason
+      }));
+
+    const dateChanged = String(existing.appointmentDate || '') !== String(s.appointmentDate || '');
+    const timeChanged = String(existing.appointmentTime || '') !== String(s.appointmentTime || '');
+    const reopened = !isActiveStatus(existing.status) && isActiveStatus(s.status);
+    const countInc = ((existing.appointmentDate || existing.appointmentTime) && (dateChanged || timeChanged)) ? 1 : 0;
+
+    let daySlot = existing.notifiedDayForSlot || '', hourSlot = existing.notifiedHourForSlot || '';
+    if (dateChanged || reopened) daySlot = hourSlot = '';
+    else if (timeChanged) hourSlot = '';
+
+    return {
+      record: {
+        ...existing, ...s, notifiedDayForSlot: daySlot, notifiedHourForSlot: hourSlot,
+        rescheduleCount: (+existing.rescheduleCount || 0) + countInc, updatedAt: bkk.isoStr
+      },
+      logs, dateChanged, timeChanged, reopened
+    };
+  }
+
+  // --- Notification Engine ---
+  const isInQuietHours = (h, s = 22, e = 7) => {
+    const hi = +h, si = +s, ei = +e;
+    return si === ei ? false : (si > ei ? (hi >= si || hi < ei) : (hi >= si && hi < ei));
+  };
+
+  function evaluateAppointmentNotification(apt, nowIso, settings) {
+    const cfg = settings || {};
+    if (!apt || apt.deletedAt || !isActiveStatus(apt.status) || !apt.appointmentDate || !apt.appointmentTime) {
+      return { shouldNotifyDay: false, shouldNotifyHour: false, reason: 'INVALID_OR_INACTIVE' };
+    }
+    const nowBkk = getBangkokParts(nowIso), aptEp = bangkokSlotToEpochMs(apt.appointmentDate, apt.appointmentTime);
+    if (aptEp === null || nowBkk.epochMs >= aptEp) return { shouldNotifyDay: false, shouldNotifyHour: false, reason: 'PAST' };
+
+    const quiet = isInQuietHours(nowBkk.hour, cfg.quietHoursStart, cfg.quietHoursEnd);
+    const curSlot = buildAppointmentSlot(apt), rHours = +apt.remindHoursBefore || 0, rDays = +apt.remindDaysBefore || 0;
+    const diffH = (aptEp - nowBkk.epochMs) / 3600000;
+
+    if (rHours > 0 && apt.notifiedHourForSlot !== curSlot && diffH > 0 && diffH <= rHours && (!quiet || cfg.allowHourlyInQuietHours)) {
+      return { shouldNotifyDay: false, shouldNotifyHour: true, supersedesDay: true, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, diffHours: diffH, reason: 'HOURLY_DUE' };
+    }
+
+    const diffD = daysBetweenDates(nowBkk.dateStr, apt.appointmentDate);
+    if (rDays > 0 && apt.notifiedDayForSlot !== apt.appointmentDate && diffD !== null && diffD >= 0 && diffD <= rDays) {
+      const dHour = cfg.dailyDigestHour != null ? +cfg.dailyDigestHour : 8;
+      if (!quiet && (cfg.requireDigestWindow === false || nowBkk.hour >= dHour)) {
+        return { shouldNotifyDay: true, shouldNotifyHour: false, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, diffCalDays: diffD, reason: 'DAY_DUE' };
+      }
+    }
+    return { shouldNotifyDay: false, shouldNotifyHour: false, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, reason: 'NOT_DUE' };
+  }
+
+  const maskContact = (c, mask) => !mask || !c || c.length <= 2 ? (c || '-') : `${c.slice(0, 2)}***`;
+  const formatAptLine = (a, idx, cfg) => [
+    `${idx ? `${idx}. ` : ''}[${a.id}] ${sanitizeNoEmoji(a.title)}`,
+    `   วันนัด: ${formatThaiDateDisplay(a.appointmentDate, false)} เวลา ${a.appointmentTime || '-'} น.`,
+    `   สถานที่: ${sanitizeNoEmoji(a.location || '-')}`,
+    `   ผู้นัดพบ: ${maskContact(a.contactPerson, cfg && cfg.privacyMaskContact)}`,
+    `   สถานะ: [${sanitizeNoEmoji(normalizeStatus(a.status))}]`
+  ].join('\n');
+
+  function buildNotificationPlan(appointments, nowIso, settings) {
+    const cfg = settings || {}, list = Array.isArray(appointments) ? appointments : [];
+    const hourly = [], digest = [], slotUpdates = [];
+
+    list.forEach(a => {
+      const ev = evaluateAppointmentNotification(a, nowIso, cfg);
+      if (ev.shouldNotifyHour) {
+        hourly.push(a);
+        slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: ev.targetHourSlot, triggerType: 'HOURLY_REMINDER' });
+      } else if (ev.shouldNotifyDay) {
+        digest.push(a);
+        slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: a.notifiedHourForSlot || '', triggerType: 'DAILY_DIGEST' });
+      }
+    });
+
+    const sortFn = (a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b));
+    hourly.sort(sortFn); digest.sort(sortFn);
+    if (!hourly.length && !digest.length) return { shouldPush: false, hourlyItems: [], digestItems: [], slotUpdates: [], messageText: '' };
+
+    const parts = [], bkk = getBangkokParts(nowIso);
+    if (hourly.length) parts.push(`[แจ้งเตือนก่อนถึงเวลานัดหมาย] (${hourly.length} รายการ)\n` + hourly.map((a, i) => formatAptLine(a, i + 1, cfg)).join('\n'));
+    if (digest.length) parts.push(`[สรุปคิวงานล่วงหน้าประจำวัน ${formatThaiDateDisplay(bkk.dateStr, false)}] (${digest.length} รายการ)\n` + digest.map((a, i) => formatAptLine(a, i + 1, cfg)).join('\n'));
+
+    const limit = +cfg.quotaLimit || 300, used = +cfg.quotaUsed || 0;
+    if (limit > 0 && used / limit >= 0.8) parts.push(`[แจ้งเตือนโควตา] เดือนนี้ใช้โควตา LINE ไปแล้ว ${used}/${limit} ข้อความ`);
+    if (cfg.webAppUrl) parts.push(`ดูตารางงาน: ${sanitizeNoEmoji(cfg.webAppUrl)}`);
+
+    let txt = sanitizeNoEmoji(parts.join('\n\n'));
+    if (txt.length > LINE_MAX_LEN) txt = txt.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนหน้าเว็บแอป)';
+    return { shouldPush: true, hourlyItems: hourly, digestItems: digest, slotUpdates, messageText: txt };
+  }
+
+  // --- Year-End Statistics & Querying ---
+  function calculateYearlyStats(list, nowIso) {
+    const stats = {
+      total: 0,
+      active: 0, // นัดหมายแล้ว
+      completed: 0, // สิ้นสุดการนัดหมาย
+      cancelled: 0, // ยกเลิกการนัดหมาย
+      overdue: 0,
+      rescheduleTotal: 0,
+      completionRate: 0,
+      cancellationRate: 0
+    };
+    (list || []).forEach(a => {
+      if (!a || a.deletedAt) return;
+      stats.total += 1;
+      stats.rescheduleTotal += (+a.rescheduleCount || 0);
+      const st = normalizeStatus(a.status);
+      if (st === STATUS.CONFIRMED) stats.active += 1;
+      else if (st === STATUS.COMPLETED) stats.completed += 1;
+      else if (st === STATUS.CANCELLED) stats.cancelled += 1;
+      if (isOverdue(a, nowIso)) stats.overdue += 1;
+    });
+
+    if (stats.total > 0) {
+      stats.completionRate = Math.round((stats.completed / stats.total) * 100);
+      stats.cancellationRate = Math.round((stats.cancelled / stats.total) * 100);
+    }
+    return stats;
+  }
+
+  function queryByMonth(appointments, yInput, mInput, options) {
+    const opts = options || {}, ce = normalizeYearToCE(yInput), m = Number(mInput);
+    if (!ce || m < 1 || m > 12) throw new Error('ระบุเดือนหรือปีไม่ถูกต้อง');
+    const pfx = `${ce}-${pad2(m)}-`;
+    const items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(pfx));
+    items.sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
+    return { ceYear: ce, buddhistYear: ce + 543, month: m, monthNameThai: THAI_MONTHS_FULL[m - 1], items, stats: calculateYearlyStats(items, opts.nowIso) };
+  }
+
+  function queryByYear(appointments, yInput, options) {
+    const opts = options || {}, ce = normalizeYearToCE(yInput);
+    if (!ce) throw new Error('ระบุปีไม่ถูกต้อง');
+    const pfx = `${ce}-`;
+    const items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(pfx));
+    items.sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const mi = i + 1, mItems = items.filter(a => a.appointmentDate.startsWith(`${ce}-${pad2(mi)}-`));
+      return { month: mi, monthNameThai: THAI_MONTHS_FULL[i], monthShortThai: THAI_MONTHS_SHORT[i], items: mItems, stats: calculateYearlyStats(mItems, opts.nowIso) };
+    });
+    return { ceYear: ce, buddhistYear: ce + 543, items, stats: calculateYearlyStats(items, opts.nowIso), months };
+  }
+
+  function queryMultiYearOverview(appointments, startY, endY, options) {
+    const opts = options || {}, sCE = normalizeYearToCE(startY), eCE = normalizeYearToCE(endY);
+    if (!sCE || !eCE || eCE < sCE) throw new Error('ช่วงปีไม่ถูกต้อง');
+    const years = [];
+    for (let y = sCE; y <= eCE; y++) years.push(queryByYear(appointments, y, opts));
+    return { startCE: sCE, endCE: eCE, years };
+  }
+
+  // --- LINE Bot Command Parser (Prefix: "คิว") ---
+  function parseAndExecuteLineCommand(rawText, appointments, nowIso, settings) {
+    const text = sanitizeNoEmoji(rawText || '').trim();
+    if (!/^คิว(?:\s+|$)/.test(text)) return null;
+    const cfg = settings || {};
+    if (cfg.enableLineBotQuery === false) return '[ระบบปิดการค้นหาผ่านแชทชั่วคราว] กรุณาตรวจสอบผ่านหน้าเว็บแอป';
+
+    const arg = text.replace(/^คิว\s*/, '').trim(), bkk = getBangkokParts(nowIso);
+    const list = (appointments || []).filter(a => a && !a.deletedAt);
+    const fmtList = (hdr, itms) => {
+      let o = `${hdr}\n` + itms.map((a, i) => formatAptLine(a, i + 1, cfg)).join('\n\n');
+      return sanitizeNoEmoji(o.length > LINE_MAX_LEN ? o.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนเว็บแอป)' : o);
+    };
+
+    if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
+      return [
+        '[คำสั่งตรวจสอบตารางงาน]', '- คิว วันนี้ : นัดหมายวันนี้', '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้',
+        '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- คิว ค้างอยู่ : งานเลยกำหนดเวลา',
+        '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569',
+        '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- คิว ปี YYYY : เช่น คิว ปี 2570',
+        '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ', '- คิว โควตา : ตรวจสอบโควตารายเดือน'
+      ].join('\n');
+    }
+    if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
+    if (arg === 'วันนี้') {
+      const itms = list.filter(a => a.appointmentDate === bkk.dateStr && a.status !== STATUS.CANCELLED);
+      return itms.length ? fmtList(`[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}] (${itms.length} รายการ)`, itms) : `[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}]\nไม่มีรายการนัดหมาย`;
+    }
+    if (arg === 'พรุ่งนี้') {
+      const tmr = getBangkokParts(bkk.epochMs + 86400000).dateStr;
+      const itms = list.filter(a => a.appointmentDate === tmr && a.status !== STATUS.CANCELLED);
+      return itms.length ? fmtList(`[คิวงานพรุ่งนี้ ${formatThaiDateDisplay(tmr, false)}] (${itms.length} รายการ)`, itms) : `[คิวงานพรุ่งนี้ ${formatThaiDateDisplay(tmr, false)}]\nไม่มีรายการนัดหมาย`;
+    }
+    if (arg === 'สัปดาห์นี้') {
+      const itms = list.filter(a => a.appointmentDate && a.status !== STATUS.CANCELLED && [daysBetweenDates(bkk.dateStr, a.appointmentDate)].some(d => d !== null && d >= 0 && d <= 7));
+      return itms.length ? fmtList(`[คิวงานใน 7 วันข้างหน้า] (${itms.length} รายการ)`, itms) : '[คิวงานใน 7 วันข้างหน้า]\nไม่มีรายการนัดหมาย';
+    }
+    if (arg === 'ค้างอยู่') {
+      const itms = list.filter(a => isOverdue(a, nowIso));
+      return itms.length ? fmtList(`[คิวงานเลยกำหนดเวลา] (${itms.length} รายการ)`, itms) : '[คิวงานเลยกำหนด]\nไม่มีรายการค้าง';
+    }
+    if (arg === 'เดือนนี้') {
+      const r = queryByMonth(list, bkk.year, bkk.month, { nowIso });
+      return r.items.length ? fmtList(`[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear} (${r.ceYear})] รวม ${r.stats.total} รายการ (สิ้นสุด ${r.stats.completed} | ยกเลิก ${r.stats.cancelled})`, r.items) : `[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear}]\nไม่มีรายการนัดหมายในเดือนนี้`;
+    }
+    const mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
+    if (mm) {
+      const y = normalizeYearToCE(mm[2]), m = +mm[1];
+      if (!y || m < 1 || m > 12) return '[ข้อผิดพลาด] รูปแบบเดือนไม่ถูกต้อง เช่น คิว เดือน 12/2569';
+      const r = queryByMonth(list, y, m, { nowIso });
+      return r.items.length ? fmtList(`[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear} (${r.ceYear})] รวม ${r.stats.total} รายการ (สิ้นสุด ${r.stats.completed} | ยกเลิก ${r.stats.cancelled})`, r.items) : `[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear}]\nไม่มีรายการนัดหมาย`;
+    }
+    if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
+      const targetY = arg === 'ปีนี้' ? bkk.year : bkk.year + 1;
+      return formatYearCommandReply(queryByYear(list, targetY, { nowIso }), cfg);
+    }
+    const ym = arg.match(/^ปี\s*(\d{4})$/);
+    if (ym) {
+      const y = normalizeYearToCE(ym[1]);
+      return y ? formatYearCommandReply(queryByYear(list, y, { nowIso }), cfg) : '[ข้อผิดพลาด] รูปแบบปีไม่ถูกต้อง เช่น คิว ปี 2570';
+    }
+    const sm = arg.match(/^ค้นหา\s+(.+)$/);
+    if (sm) {
+      const kw = sm[1].trim().toLowerCase();
+      const itms = list.filter(a => `${a.id} ${a.title} ${a.location} ${a.contactPerson} ${a.status} ${a.notes}`.toLowerCase().includes(kw));
+      return itms.length ? fmtList(`[ผลการค้นหา "${sm[1].trim()}"] (${itms.length} รายการ)`, itms) : `[ผลการค้นหา "${sm[1].trim()}"]\nไม่พบรายการที่ตรงกัน`;
+    }
+    return '[ไม่พบคำสั่งที่ระบุ] พิมพ์ "คิว ช่วยเหลือ" เพื่อดูรายการคำสั่ง';
+  }
+
+  function formatYearCommandReply(r, cfg) {
+    const s = r.stats;
+    const hdr = `[สรุปสถิติประจำปี พ.ศ. ${r.buddhistYear} (ค.ศ. ${r.ceYear})]\nรวมทั้งหมด: ${s.total} งาน | นัดหมายแล้ว: ${s.active} งาน\nสิ้นสุด: ${s.completed} งาน (สำเร็จ ${s.completionRate}%) | ยกเลิก: ${s.cancelled} งาน (${s.cancellationRate}%)\nเลื่อนนัดสะสม: ${s.rescheduleTotal} ครั้ง`;
+    if (!s.total) return `${hdr}\n\nยังไม่มีรายการนัดหมายในปีนี้`;
+    const lines = [hdr, '\n[แยกตามเดือน]'];
+    r.months.forEach(m => {
+      if (m.stats.total > 0) {
+        lines.push(`- ${m.monthNameThai}: รวม ${m.stats.total} งาน (เสร็จ ${m.stats.completed} / ยกเลิก ${m.stats.cancelled})`);
+        m.items.slice(0, 2).forEach(a => lines.push(`   [${a.appointmentDate} ${a.appointmentTime || ''}] ${a.title} - ${normalizeStatus(a.status)}`));
+      }
+    });
+    let o = lines.join('\n');
+    return sanitizeNoEmoji(o.length > LINE_MAX_LEN ? o.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนหน้าเว็บแอป)' : o);
+  }
+
+  return {
+    API_VERSION, STATUS, VALID_STATUSES, THAI_MONTHS_SHORT, THAI_MONTHS_FULL, LINE_MAX_TEXT_LENGTH: LINE_MAX_LEN,
+    hasEmoji, sanitizeNoEmoji, normalizeStatus, normalizeYearToCE, toBuddhistYear, isLeapYearCE, getDaysInMonth,
+    parseFlexibleDateInput, parseTimeInput, bangkokSlotToEpochMs, getBangkokParts, daysBetweenDates,
+    formatThaiDateDisplay, isActiveStatus, isOverdue, buildAppointmentSlot, validateAppointmentInput,
+    generateAppointmentId, createAppointmentRecord, updateAppointmentRecord, isInQuietHours,
+    evaluateAppointmentNotification, buildNotificationPlan, calculateYearlyStats, queryByMonth, queryByYear, queryMultiYearOverview,
+    parseAndExecuteLineCommand
+  };
+});
