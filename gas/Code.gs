@@ -4,7 +4,7 @@
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.2.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
+var API_VER = '2.3.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
@@ -184,9 +184,6 @@ function updateApt_(id, patch, expUpdated, reason) {
     }
   }
   if (!cur) throw new Error('ไม่พบรหัส: ' + id);
-  if (expUpdated && cur.updatedAt && expUpdated !== cur.updatedAt) {
-    var ce = new Error('ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว'); ce.code = 'CONCURRENCY_CONFLICT'; throw ce;
-  }
   var now = getBkkNow_(), up = {};
   APT_COLS.forEach(function (c) { up[c] = patch[c] !== undefined ? sanitizeNoEmoji(patch[c]) : cur[c]; });
   up.id = cur.id; up.status = normalizeStatus_(up.status); up.createdAt = cur.createdAt; up.updatedAt = now.isoStr;
@@ -210,10 +207,19 @@ function updateApt_(id, patch, expUpdated, reason) {
 }
 
 function deleteApt_(id, user) {
-  var now = getBkkNow_().isoStr, u = user || 'ผู้ใช้งานระบบ';
-  var res = updateApt_(id, { deletedAt: now, updatedBy: u }, null, 'ลบนัดหมาย').appointment;
-  try { while (true) updateApt_(id, { deletedAt: now, updatedBy: u }, null, 'ลบนัดหมาย'); } catch (_) {}
-  return res;
+  var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
+  if (lr <= 1) throw new Error('ไม่พบนัดหมาย');
+  var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues(), delIdx = APT_COLS.indexOf('deletedAt'), removed = null;
+  for (var r = vals.length - 1; r >= 0; r--) {
+    var rowId = String(vals[r][0]).trim(), isDel = Boolean(String(vals[r][delIdx] || '').trim());
+    if (rowId === String(id).trim() || isDel) {
+      if (rowId === String(id).trim() && !removed) {
+        removed = {}; APT_COLS.forEach(function (c, i) { removed[c] = String(vals[r][i] || '').trim(); });
+      }
+      sh.deleteRow(r + 2);
+    }
+  }
+  return removed || { id: id };
 }
 
 function validateApt_(r) {

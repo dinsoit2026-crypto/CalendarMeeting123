@@ -361,7 +361,7 @@
       $('btnSubmitModal').disabled = true; $('btnSubmitModal').textContent = 'กำลังบันทึก...';
       if (state.isLive) {
         if (!id) await callGasApi('create', { payload, notifyLine });
-        else await callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine });
+        else await callGasApi('update', { id, payload, reason, notifyLine });
         await syncWithServer(true);
       } else {
         const now = Logic.getBangkokParts().isoStr;
@@ -388,7 +388,7 @@
     const user = Logic.sanitizeNoEmoji($('activeUserInput').value) || 'ผู้ดูแลระบบ';
     try {
       if (state.isLive) {
-        await callGasApi('update', { id, payload: { status: newStatus, updatedBy: user }, expectedUpdatedAt: a.updatedAt, reason: `เปลี่ยนสถานะเป็น ${newStatus}` });
+        await callGasApi('update', { id, payload: { status: newStatus, updatedBy: user }, reason: `เปลี่ยนสถานะเป็น ${newStatus}` });
         await syncWithServer(true);
       } else {
         const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
