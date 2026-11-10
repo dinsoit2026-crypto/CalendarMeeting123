@@ -1,10 +1,10 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.1.0)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.2.0)
  * Timezone: Asia/Bangkok (UTC+07:00)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.1.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
+var API_VER = '2.2.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
@@ -71,8 +71,19 @@ function doPost(e) {
 
     var a = body.action || '';
     if (a === 'list') return json_({ ok: true, data: { appointments: readAllApts_(), rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50), notificationLogs: readLogs_(SH_NOTIF_LOGS, NOTIF_LOG_COLS, 30), meta: getMetaMap_(), serverTime: getBkkNow_().isoStr } });
-    if (a === 'create') return withLock_(function () { return json_({ ok: true, data: { appointment: createApt_(body.payload || {}) } }); });
-    if (a === 'update') return withLock_(function () { return json_({ ok: true, data: updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason) }); });
+    if (a === 'create') return withLock_(function () {
+      var apt = createApt_(body.payload || {});
+      var lineNotification = body.notifyLine !== false ? sendInstantAptNotification_(apt, false) : null;
+      return json_({ ok: true, data: { appointment: apt, lineNotification: lineNotification, meta: getMetaMap_() } });
+    });
+    if (a === 'update') return withLock_(function () {
+      var res = updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason);
+      if (body.notifyLine === true && res && res.appointment) {
+        res.lineNotification = sendInstantAptNotification_(res.appointment, true);
+        res.meta = getMetaMap_();
+      }
+      return json_({ ok: true, data: res });
+    });
     if (a === 'delete') return withLock_(function () { return json_({ ok: true, data: { appointment: deleteApt_(body.id, body.updatedBy) } }); });
     if (a === 'updateMeta') return withLock_(function () { return json_({ ok: true, data: { meta: updateMeta_(body.meta || {}) } }); });
     if (a === 'refreshQuota') return json_({ ok: true, data: refreshLineQuotaCache_() });
@@ -304,6 +315,29 @@ function testNotification_(isDry, custom) {
   return pushLine_(t, custom || '[ทดสอบระบบแจ้งเตือน]\nตรวจสอบรูปแบบสำเร็จ (Zero-Emoji)', Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
 }
 
+function sendInstantAptNotification_(apt, isUpdate) {
+  var target = PropertiesService.getScriptProperties().getProperty('LINE_TARGET_ID') || '';
+  if (!target || !apt) return { sent: false, reason: 'NO_TARGET' };
+  var m = getMetaMap_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
+  var c = sanitizeNoEmoji(apt.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***';
+  var hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+  var lines = [
+    hdr,
+    'รหัส: ' + sanitizeNoEmoji(apt.id || '-'),
+    'หัวข้อ: ' + sanitizeNoEmoji(apt.title || '-'),
+    'วันนัด: ' + fmtThaiDate_(apt.appointmentDate) + ' เวลา ' + sanitizeNoEmoji(apt.appointmentTime || '-') + ' น.',
+    'สถานที่: ' + sanitizeNoEmoji(apt.location || '-'),
+    'ผู้นัดพบ: ' + c,
+    'สถานะ: [' + sanitizeNoEmoji(apt.status) + ']'
+  ];
+  if (apt.notes) lines.push('หมายเหตุ: ' + sanitizeNoEmoji(apt.notes));
+  if (apt.updatedBy) lines.push('ผู้บันทึก: ' + sanitizeNoEmoji(apt.updatedBy));
+  var msg = sanitizeNoEmoji(lines.join('\n'));
+  var pushRes = pushLine_(target, msg, Utilities.getUuid(), false, isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE', apt.id);
+  if (pushRes.ok) refreshLineQuotaCache_();
+  return { sent: pushRes.ok, httpStatus: pushRes.httpStatus, error: pushRes.error };
+}
+
 function refreshLineQuotaCache_() {
   var token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '', m = getMetaMap_();
   var lim = +m.CACHED_QUOTA_LIMIT || 300, used = +m.CACHED_QUOTA_USED || 0;
@@ -352,7 +386,7 @@ function handleLineWebhook_(body, qParams) {
 
 function parseWebhookCmd_(raw) {
   var txt = sanitizeNoEmoji(raw || '').trim();
-  if (!/^คิว(?:\s+|$)/.test(txt)) return null;
+  if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(txt)) return null;
   var m = getMetaMap_(); if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return '[ระบบปิดค้นหาผ่านแชทชั่วคราว] กรุณาดูบนเว็บแอป';
   var arg = txt.replace(/^คิว\s*/, '').trim(), now = getBkkNow_(), list = readAllApts_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
   var fmt = function (hdr, itms) {
@@ -361,9 +395,13 @@ function parseWebhookCmd_(raw) {
   };
 
   if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
-    return '[คำสั่งตรวจสอบตารางงาน]\n- คิว วันนี้ : นัดวันนี้\n- คิว พรุ่งนี้ : นัดพรุ่งนี้\n- คิว สัปดาห์นี้ : นัดใน 7 วัน\n- คิว ค้างอยู่ : นัดเลยกำหนด\n- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน\n- คิว ปีนี้ / คิว ปี YYYY : สรุปสถิติประจำปี\n- คิว ค้นหา <คำค้น> : ค้นหางาน\n- คิว โควตา : เช็คโควตารายเดือน';
+    return '[คำสั่งตรวจสอบตารางงาน]\n- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดที่กำลังจะมาถึงทั้งหมด\n- คิว วันนี้ : นัดวันนี้\n- คิว พรุ่งนี้ : นัดพรุ่งนี้\n- คิว สัปดาห์นี้ : นัดใน 7 วัน\n- คิว ค้างอยู่ : นัดเลยกำหนด\n- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน\n- คิว ปีนี้ / คิว ปี YYYY : สรุปสถิติประจำปี\n- คิว ค้นหา <คำค้น> : ค้นหางาน\n- คิว โควตา : เช็คโควตารายเดือน';
   }
   if (arg === 'โควตา') return '[โควตา LINE เดือนนี้] ใช้ไปแล้ว ' + (m.CACHED_QUOTA_USED || '0') + ' / ' + (m.CACHED_QUOTA_LIMIT || '300') + ' ข้อความ';
+  if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
+    var up = list.filter(function (a) { return a.status === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= now.dateStr; });
+    return up.length ? fmt('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (' + up.length + ' รายการ)', up) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
+  }
   if (arg === 'วันนี้') {
     var td = list.filter(function (a) { return a.appointmentDate === now.dateStr && a.status !== STATUS.CANCELLED; });
     return td.length ? fmt('[คิวงานวันนี้ ' + fmtThaiDate_(now.dateStr) + '] (' + td.length + ' รายการ)', td) : '[คิวงานวันนี้ ' + fmtThaiDate_(now.dateStr) + ']\nไม่มีนัดหมาย';
@@ -371,6 +409,22 @@ function parseWebhookCmd_(raw) {
   if (arg === 'พรุ่งนี้') {
     var tm = getBkkNow_(now.epochMs + 86400000).dateStr, tmi = list.filter(function (a) { return a.appointmentDate === tm && a.status !== STATUS.CANCELLED; });
     return tmi.length ? fmt('[คิวงานพรุ่งนี้ ' + fmtThaiDate_(tm) + '] (' + tmi.length + ' รายการ)', tmi) : '[คิวงานพรุ่งนี้ ' + fmtThaiDate_(tm) + ']\nไม่มีนัดหมาย';
+  }
+  if (arg === 'สัปดาห์นี้') {
+    var wk = list.filter(function (a) {
+      if (!a.appointmentDate || a.status === STATUS.CANCELLED) return false;
+      var d = diffDays_(now.dateStr, a.appointmentDate);
+      return d !== null && d >= 0 && d <= 7;
+    });
+    return wk.length ? fmt('[คิวงานใน 7 วันข้างหน้า] (' + wk.length + ' รายการ)', wk) : '[คิวงานใน 7 วันข้างหน้า]\nไม่มีนัดหมาย';
+  }
+  if (arg === 'ค้างอยู่') {
+    var ov = list.filter(function (a) {
+      if (a.status !== STATUS.CONFIRMED || !a.appointmentDate) return false;
+      var ep = bkkSlotToEpoch_(a.appointmentDate, a.appointmentTime || '23:59');
+      return ep !== null && now.epochMs > ep;
+    });
+    return ov.length ? fmt('[คิวงานเลยกำหนดเวลา] (' + ov.length + ' รายการ)', ov) : '[คิวงานเลยกำหนด]\nไม่มีรายการค้าง';
   }
   if (arg === 'เดือนนี้') {
     var pfx = now.year + '-' + pad2_(now.month) + '-', mi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(pfx) === 0; });

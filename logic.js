@@ -1,6 +1,6 @@
 /**
  * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
- * Notification Engine, Multi-Year & Year-End Statistics (v2.1.0)
+ * Notification Engine, Multi-Year & Year-End Statistics (v2.2.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function (root, factory) {
@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const API_VERSION = '2.1.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.2.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({
     CONFIRMED: 'นัดหมายแล้ว',
     COMPLETED: 'สิ้นสุดการนัดหมาย',
@@ -329,10 +329,27 @@
     return { startCE: sCE, endCE: eCE, years };
   }
 
+  function formatInstantAppointmentMessage(apt, isUpdate, cfg) {
+    if (!apt) return '';
+    const hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+    const lines = [
+      hdr,
+      `รหัส: ${sanitizeNoEmoji(apt.id || '-')}`,
+      `หัวข้อ: ${sanitizeNoEmoji(apt.title || '-')}`,
+      `วันนัด: ${formatThaiDateDisplay(apt.appointmentDate, false)} เวลา ${sanitizeNoEmoji(apt.appointmentTime || '-')} น.`,
+      `สถานที่: ${sanitizeNoEmoji(apt.location || '-')}`,
+      `ผู้นัดพบ: ${maskContact(apt.contactPerson, cfg && cfg.privacyMaskContact)}`,
+      `สถานะ: [${sanitizeNoEmoji(normalizeStatus(apt.status))}]`
+    ];
+    if (apt.notes) lines.push(`หมายเหตุ: ${sanitizeNoEmoji(apt.notes)}`);
+    if (apt.updatedBy) lines.push(`ผู้บันทึก: ${sanitizeNoEmoji(apt.updatedBy)}`);
+    return sanitizeNoEmoji(lines.join('\n'));
+  }
+
   // --- LINE Bot Command Parser (Prefix: "คิว") ---
   function parseAndExecuteLineCommand(rawText, appointments, nowIso, settings) {
     const text = sanitizeNoEmoji(rawText || '').trim();
-    if (!/^คิว(?:\s+|$)/.test(text)) return null;
+    if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(text)) return null;
     const cfg = settings || {};
     if (cfg.enableLineBotQuery === false) return '[ระบบปิดการค้นหาผ่านแชทชั่วคราว] กรุณาตรวจสอบผ่านหน้าเว็บแอป';
 
@@ -345,14 +362,27 @@
 
     if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
       return [
-        '[คำสั่งตรวจสอบตารางงาน]', '- คิว วันนี้ : นัดหมายวันนี้', '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้',
-        '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- คิว ค้างอยู่ : งานเลยกำหนดเวลา',
-        '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569',
-        '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- คิว ปี YYYY : เช่น คิว ปี 2570',
-        '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ', '- คิว โควตา : ตรวจสอบโควตารายเดือน'
+        '[คำสั่งตรวจสอบตารางงาน]',
+        '- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดหมายที่กำลังจะมาถึงทั้งหมด',
+        '- คิว วันนี้ : นัดหมายวันนี้',
+        '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้',
+        '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า',
+        '- คิว ค้างอยู่ : งานเลยกำหนดเวลา',
+        '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน',
+        '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569',
+        '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน',
+        '- คิว ปี YYYY : เช่น คิว ปี 2570',
+        '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ',
+        '- คิว โควตา : ตรวจสอบโควตารายเดือน'
       ].join('\n');
     }
     if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
+    if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
+      const itms = list
+        .filter(a => normalizeStatus(a.status) === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= bkk.dateStr)
+        .sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
+      return itms.length ? fmtList(`[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (${itms.length} รายการ)`, itms) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
+    }
     if (arg === 'วันนี้') {
       const itms = list.filter(a => a.appointmentDate === bkk.dateStr && a.status !== STATUS.CANCELLED);
       return itms.length ? fmtList(`[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}] (${itms.length} รายการ)`, itms) : `[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}]\nไม่มีรายการนัดหมาย`;
@@ -421,6 +451,6 @@
     formatThaiDateDisplay, isActiveStatus, isOverdue, buildAppointmentSlot, validateAppointmentInput,
     generateAppointmentId, createAppointmentRecord, updateAppointmentRecord, isInQuietHours,
     evaluateAppointmentNotification, buildNotificationPlan, calculateYearlyStats, queryByMonth, queryByYear, queryMultiYearOverview,
-    parseAndExecuteLineCommand
+    formatInstantAppointmentMessage, parseAndExecuteLineCommand
   };
 });

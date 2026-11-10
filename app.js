@@ -1,5 +1,5 @@
 /**
- * app.js - UI Controller & State Management (v2.1.0)
+ * app.js - UI Controller & State Management (v2.2.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -330,6 +330,8 @@
     $('formAptId').value = $('formExpectedUpdatedAt').value = $('formNotes').value = $('formRescheduleReason').value = '';
     $('formTitle').value = ''; $('formStatus').value = Logic.STATUS.CONFIRMED; $('formContactPerson').value = $('formLocation').value = '';
     $('formDate').value = Logic.getBangkokParts().dateStr; $('formTime').value = '09:00'; $('formRemindDays').value = $('formRemindHours').value = '1';
+    if ($('formNotifyLine')) $('formNotifyLine').checked = true;
+    if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนนัดหมายใหม่เข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = $('btnDeleteApt').style.display = 'none';
     updateDateThaiPreview(); openModal('appointmentModal');
   }
@@ -344,6 +346,8 @@
     $('formRemindDays').value = String(a.remindDaysBefore != null ? a.remindDaysBefore : 1);
     $('formRemindHours').value = String(a.remindHoursBefore != null ? a.remindHoursBefore : 1);
     $('formNotes').value = a.notes || ''; $('formRescheduleReason').value = '';
+    if ($('formNotifyLine')) $('formNotifyLine').checked = false;
+    if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนการแก้ไขนัดหมายเข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = 'block'; $('btnDeleteApt').style.display = 'inline-flex';
     updateDateThaiPreview(); openModal('appointmentModal');
   }
@@ -363,26 +367,37 @@
     const v = Logic.validateAppointmentInput(payload);
     if (!v.valid) { alert(v.errors.join('\n')); return; }
     const reason = Logic.sanitizeNoEmoji($('formRescheduleReason').value);
+    const notifyLine = $('formNotifyLine') ? Boolean($('formNotifyLine').checked) : !id;
 
     try {
       $('btnSubmitModal').disabled = true;
+      $('btnSubmitModal').textContent = 'กำลังบันทึก...';
       if (state.isLive) {
-        if (!id) await callGasApi('create', { payload });
-        else await callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason });
+        if (!id) await callGasApi('create', { payload, notifyLine });
+        else await callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine });
         await syncWithServer();
       } else {
         const now = Logic.getBangkokParts().isoStr;
-        if (!id) state.appointments.push(Logic.createAppointmentRecord(payload, state.appointments, now));
-        else {
+        let savedApt = null;
+        if (!id) {
+          savedApt = Logic.createAppointmentRecord(payload, state.appointments, now);
+          state.appointments.push(savedApt);
+        } else {
           const idx = state.appointments.findIndex(x => x.id === id); if (idx === -1) throw new Error('ไม่พบรายการ');
           const r = Logic.updateAppointmentRecord(state.appointments[idx], payload, { nowIso: now, expectedUpdatedAt: exp, reason });
-          state.appointments[idx] = r.record; if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
+          state.appointments[idx] = savedApt = r.record; if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
+        }
+        if (notifyLine && savedApt && $('botSimOutput')) {
+          $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(savedApt, Boolean(id), { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
         }
         saveDemoData(); renderAll();
       }
       closeModal('appointmentModal');
     } catch (err) { alert(err.message); }
-    finally { $('btnSubmitModal').disabled = false; }
+    finally {
+      $('btnSubmitModal').disabled = false;
+      $('btnSubmitModal').textContent = 'บันทึกนัดหมาย';
+    }
   }
 
   async function handleQuickStatus(id, newStatus) {
@@ -442,6 +457,24 @@
     on('btnOpenPatchNotesModal', 'click', () => { renderPatchNotes(); openModal('patchNotesModal'); });
     on('btnClosePatchNotesModalTop', 'click', () => closeModal('patchNotesModal'));
     on('btnClosePatchNotesModal', 'click', () => closeModal('patchNotesModal'));
+
+    // User Guide Modal
+    on('btnOpenGuideModal', 'click', () => openModal('guideModal'));
+    on('btnCloseGuideModalTop', 'click', () => closeModal('guideModal'));
+    on('btnCloseGuideModal', 'click', () => closeModal('guideModal'));
+
+    const applyTeamDefaultConnection = async () => {
+      state.gasUrl = DEFAULT_GAS_URL;
+      state.passcode = DEFAULT_PASSCODE;
+      state.isLive = true;
+      if ($('cfgGasUrl')) $('cfgGasUrl').value = state.gasUrl;
+      if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode;
+      localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: true }));
+      closeModal('guideModal');
+      await syncWithServer();
+    };
+    on('btnQuickConnectFromGuide', 'click', applyTeamDefaultConnection);
+    on('btnResetDefaultConn', 'click', applyTeamDefaultConnection);
 
     // Filters
     on('filterSearch', 'input', renderListTab);

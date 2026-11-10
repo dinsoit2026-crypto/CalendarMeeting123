@@ -177,11 +177,28 @@
     assert(!Logic.hasEmoji(reply), 'คำตอบบอทต้องไม่มีอิโมจิ');
   });
 
+  runTest('5. Year-End Statistics', 'LINE Bot คำสั่ง คิวทั้งหมด และแจ้งเตือนนัดหมายใหม่ทันทีทำงานถูกต้อง', () => {
+    const list = [
+      Logic.createAppointmentRecord({ title: 'งานที่ผ่านมาแล้ว', appointmentDate: '2026-11-01', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ก', status: Logic.STATUS.CONFIRMED }, [], '2026-10-01T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ title: 'งานกำลังจะมาถึง 1', appointmentDate: '2026-11-15', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ข', status: Logic.STATUS.CONFIRMED }, [], '2026-11-10T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ title: 'งานกำลังจะมาถึง 2', appointmentDate: '2026-12-05', appointmentTime: '14:00', location: 'นนทบุรี', contactPerson: 'คุณ ค', status: Logic.STATUS.CONFIRMED }, [], '2026-11-10T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ title: 'งานที่ยกเลิก', appointmentDate: '2026-11-20', appointmentTime: '11:00', location: 'กทม.', contactPerson: 'คุณ ง', status: Logic.STATUS.CANCELLED }, [], '2026-11-10T09:00:00+07:00')
+    ];
+    const replyNoSpace = Logic.parseAndExecuteLineCommand('คิวทั้งหมด', list, '2026-11-10T09:00:00+07:00', {});
+    const replyWithSpace = Logic.parseAndExecuteLineCommand('คิว ทั้งหมด', list, '2026-11-10T09:00:00+07:00', {});
+    assert(replyNoSpace && replyNoSpace.includes('(2 รายการ)'), 'คิวทั้งหมด ต้องแสดงเฉพาะนัดหมายที่กำลังจะมาถึง 2 รายการ');
+    assertEqual(replyNoSpace, replyWithSpace, 'คิวทั้งหมด และ คิว ทั้งหมด ต้องได้ผลลัพธ์ตรงกัน');
+
+    const instantMsg = Logic.formatInstantAppointmentMessage(list[1], false, {});
+    assert(instantMsg.includes('[แจ้งเตือนนัดหมายใหม่]') && instantMsg.includes('งานกำลังจะมาถึง 1'), 'ข้อความแจ้งเตือนนัดหมายใหม่ต้องครบถ้วน');
+    assert(!Logic.hasEmoji(instantMsg), 'ข้อความแจ้งเตือนทันทีต้องไม่มีอิโมจิ');
+  });
+
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.1.0 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 3, 'ต้องมีประวัติอย่างน้อย 3 เวอร์ชัน');
-    const v210 = PatchNotes.find(p => p.version === '2.1.0');
-    assert(v210 && v210.changes && v210.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.1.0');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.2.0 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 4, 'ต้องมีประวัติอย่างน้อย 4 เวอร์ชัน');
+    const v220 = PatchNotes.find(p => p.version === '2.2.0');
+    assert(v220 && v220.changes && v220.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.2.0');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 
