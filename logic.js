@@ -131,8 +131,8 @@
     const isActive = input.isActive !== false && String(input.isActive).toUpperCase() !== 'FALSE';
 
     if (isCreate) {
-      if (!username || username.length < 3 || username.length > 20 || !/^[a-z0-9_.-]+$/.test(username)) {
-        errs.push('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-20 ตัวอักษร');
+      if (!username || username.length < 3 || username.length > 30 || !/^[a-z0-9_.-]+$/.test(username)) {
+        errs.push('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
       }
       if (!input.password || String(input.password).length < 4) {
         errs.push('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร');
@@ -148,6 +148,57 @@
       valid: !errs.length,
       errors: errs,
       sanitized: { username, displayName, role, isActive, passwordHash }
+    };
+  }
+
+  function registerUserAccount(users, input, nowIso) {
+    if (!input || typeof input !== 'object') return { ok: false, error: 'ข้อมูลการสมัครสมาชิกไม่ถูกต้อง' };
+    const pw = String(input.password || '');
+    const confirmPw = input.confirmPassword !== undefined ? String(input.confirmPassword || '') : pw;
+    if (pw !== confirmPw) {
+      return { ok: false, error: 'รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน' };
+    }
+
+    const v = validateUserInput({ ...input, role: 'STAFF', isActive: true }, true);
+    if (!v.valid) {
+      return { ok: false, error: v.errors.join(' | ') };
+    }
+
+    const s = v.sanitized;
+    const list = Array.isArray(users) ? users : DEFAULT_USERS;
+    if (list.some(u => u && sanitizeNoEmoji(u.username || '').toLowerCase() === s.username)) {
+      return { ok: false, error: 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น' };
+    }
+    if (list.some(u => u && sanitizeNoEmoji(u.displayName || '').toLowerCase() === s.displayName.toLowerCase())) {
+      return { ok: false, error: 'ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม' };
+    }
+
+    const maxNum = list.reduce((m, u) => {
+      const n = u && u.userId && String(u.userId).startsWith('USR-') ? parseInt(String(u.userId).slice(4), 10) : 0;
+      return !Number.isNaN(n) && n > m ? n : m;
+    }, 0);
+    const userId = `USR-${String(maxNum + 1).padStart(3, '0')}`;
+    const now = getBangkokParts(nowIso).isoStr;
+    const record = {
+      userId,
+      username: s.username,
+      displayName: s.displayName,
+      role: 'STAFF',
+      passwordHash: s.passwordHash,
+      isActive: true,
+      createdAt: now,
+      lastLoginAt: now
+    };
+
+    return {
+      ok: true,
+      record,
+      user: {
+        userId: record.userId,
+        username: record.username,
+        displayName: record.displayName,
+        role: 'STAFF'
+      }
     };
   }
 
@@ -676,7 +727,7 @@
   return {
     API_VERSION, STATUS, VALID_STATUSES, USER_ROLES, DEFAULT_USERS,
     THAI_MONTHS_SHORT, THAI_MONTHS_FULL, LINE_MAX_TEXT_LENGTH: LINE_MAX_LEN,
-    hasEmoji, sanitizeNoEmoji, normalizeStatus, hashPassword, authenticateUser, validateUserInput,
+    hasEmoji, sanitizeNoEmoji, normalizeStatus, hashPassword, authenticateUser, validateUserInput, registerUserAccount,
     normalizeYearToCE, toBuddhistYear, isLeapYearCE, getDaysInMonth,
     parseFlexibleDateInput, parseTimeInput, bangkokSlotToEpochMs, getBangkokParts, daysBetweenDates,
     formatThaiDateDisplay, isActiveStatus, isOverdue, buildAppointmentSlot, findTimeConflicts,

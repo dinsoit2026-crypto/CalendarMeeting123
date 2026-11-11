@@ -256,6 +256,38 @@
 
     const valUpdateOk = Logic.validateUserInput({ username: 'somchai', displayName: 'คุณสมชาย (อัปเดต)', role: 'ADMIN' }, false);
     assert(valUpdateOk.valid && valUpdateOk.sanitized.role === 'ADMIN', 'อัปเดตผู้ใช้เดิมโดยไม่ส่งรหัสผ่านใหม่ต้องผ่าน');
+
+    // ทดสอบการสมัครสมาชิกใหม่ด้วยตนเอง (Self-Registration)
+    const regSuccess = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
+      username: 'anan01',
+      displayName: 'คุณอนันต์ ฝ่ายประสานงาน',
+      password: '5678',
+      confirmPassword: '5678',
+      role: 'ADMIN' // แม้ส่ง ADMIN มา ระบบสมัครต้องบังคับเป็น STAFF เสมอ
+    }, '2026-11-11T10:00:00+07:00');
+    assert(regSuccess.ok && regSuccess.user.role === 'STAFF' && regSuccess.record.isActive === true, 'สมัครสมาชิกใหม่ต้องได้สิทธิ์ STAFF และเปิดใช้งานทันที');
+
+    // ทดสอบเข้าสู่ระบบด้วยบัญชีที่เพิ่งสมัคร
+    const loginNewUser = Logic.authenticateUser([...Logic.DEFAULT_USERS, regSuccess.record], 'anan01', '5678');
+    assert(loginNewUser.ok && loginNewUser.user.displayName === 'คุณอนันต์ ฝ่ายประสานงาน', 'บัญชีที่สมัครใหม่ต้องล็อกอินได้ทันที');
+
+    // ทดสอบสมัครชื่อผู้ใช้ซ้ำ
+    const regDupUser = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
+      username: 'somchai',
+      displayName: 'คุณสมชาย คนใหม่',
+      password: '1234',
+      confirmPassword: '1234'
+    });
+    assert(!regDupUser.ok, 'สมัครด้วย username ซ้ำต้องไม่ผ่าน');
+
+    // ทดสอบรหัสผ่านยืนยันไม่ตรงกัน
+    const regMismatchPw = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
+      username: 'newstaff',
+      displayName: 'พนักงานใหม่',
+      password: '1234',
+      confirmPassword: '9999'
+    });
+    assert(!regMismatchPw.ok, 'รหัสผ่านยืนยันไม่ตรงกันต้องไม่ผ่าน');
   });
 
   // --- Suite 9: User Attribution & Reschedule Immutability ---

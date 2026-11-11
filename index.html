@@ -12,6 +12,82 @@
 <body>
   <div id="toastContainer" class="toast-container" aria-live="polite"></div>
 
+  <!-- FULL-SCREEN AUTH GATE (Login & Self-Registration) -->
+  <section id="authGateScreen" class="auth-gate-screen" aria-label="เข้าสู่ระบบหรือสมัครสมาชิก">
+    <div class="auth-card">
+      <div class="auth-card-top">
+        <div class="auth-brand">
+          <div class="brand-logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="22" height="22"><rect x="3" y="4" width="18" height="18" rx="3" ry="3"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line><path d="M9 16l2 2 4-4"></path></svg>
+          </div>
+          <div>
+            <div class="brand-title-line">
+              <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
+              <span id="authModeBadge" class="mode-badge live">Sheets</span>
+            </div>
+            <span class="brand-subtitle">กรุณาเข้าสู่ระบบหรือสมัครสมาชิกเพื่อเข้าใช้งานตารางนัดหมาย</span>
+          </div>
+        </div>
+        <button type="button" class="btn btn-outline btn-sm" id="btnToggleThemeAuth" title="สลับโหมดมืด / สว่าง">สลับธีมสี</button>
+      </div>
+
+      <div class="auth-tabs" role="tablist">
+        <button type="button" id="tabBtnAuthLogin" class="auth-tab-btn active" role="tab" aria-selected="true">เข้าสู่ระบบ</button>
+        <button type="button" id="tabBtnAuthRegister" class="auth-tab-btn" role="tab" aria-selected="false">สมัครสมาชิกใหม่</button>
+      </div>
+
+      <!-- แท็บ 1: ฟอร์มเข้าสู่ระบบ -->
+      <form id="loginForm" class="auth-form">
+        <div id="loginErrorMsg" class="alert-error" style="display: none;"></div>
+        <div>
+          <label for="loginUsername">ชื่อผู้ใช้ (Username) <span class="req-star">*</span></label>
+          <input type="text" id="loginUsername" required autocomplete="username" placeholder="ระบุชื่อผู้ใช้ของคุณ">
+        </div>
+        <div>
+          <label for="loginPassword">รหัสผ่าน (Password) <span class="req-star">*</span></label>
+          <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="ระบุรหัสผ่าน">
+        </div>
+        <button type="submit" id="btnSubmitLogin" class="btn btn-primary auth-submit-btn">เข้าสู่ระบบ</button>
+        <div class="auth-footer-switch">
+          <span>ยังไม่มีบัญชีผู้ใช้งานใช่หรือไม่?</span>
+          <button type="button" id="btnSwitchToRegister" class="btn-link-inline">สมัครสมาชิกใหม่ที่นี่</button>
+        </div>
+      </form>
+
+      <!-- แท็บ 2: ฟอร์มสมัครสมาชิกใหม่ (เข้าใช้งานเป็น STAFF ได้ทันที) -->
+      <form id="registerForm" class="auth-form" style="display: none;">
+        <div id="registerErrorMsg" class="alert-error" style="display: none;"></div>
+        <div class="auth-info-pill">บัญชีที่สมัครใหม่จะได้รับสิทธิ์ระดับ พนักงาน (STAFF) และเข้าใช้งานระบบได้ทันที</div>
+        <div>
+          <label for="regUsername">ตั้งชื่อผู้ใช้ (Username) <span class="req-star">*</span></label>
+          <input type="text" id="regUsername" required autocomplete="username" placeholder="ภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร เช่น anan01">
+        </div>
+        <div>
+          <label for="regDisplayName">ชื่อ-นามสกุล หรือชื่อเรียกในทีม (Display Name) <span class="req-star">*</span></label>
+          <input type="text" id="regDisplayName" required placeholder="เช่น คุณอนันต์ (ฝ่ายประสานงาน)">
+          <span class="hint-text">ชื่อนี้จะแสดงเป็นผู้สร้างนัดหมาย ผู้กดเสร็จสิ้น และผู้กดยกเลิกนัด</span>
+        </div>
+        <div class="form-row-2">
+          <div>
+            <label for="regPassword">ตั้งรหัสผ่าน <span class="req-star">*</span></label>
+            <input type="password" id="regPassword" required autocomplete="new-password" placeholder="อย่างน้อย 4 ตัวอักษร">
+          </div>
+          <div>
+            <label for="regConfirmPassword">ยืนยันรหัสผ่าน <span class="req-star">*</span></label>
+            <input type="password" id="regConfirmPassword" required autocomplete="new-password" placeholder="กรอกรหัสผ่านอีกครั้ง">
+          </div>
+        </div>
+        <button type="submit" id="btnSubmitRegister" class="btn btn-accent auth-submit-btn">สมัครสมาชิกและเข้าใช้งานทันที</button>
+        <div class="auth-footer-switch">
+          <span>มีบัญชีผู้ใช้งานอยู่แล้วใช่หรือไม่?</span>
+          <button type="button" id="btnSwitchToLogin" class="btn-link-inline">กลับไปหน้าเข้าสู่ระบบ</button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- APP SHELL (แสดงเฉพาะเมื่อเข้าสู่ระบบสำเร็จแล้วเท่านั้น) -->
+  <div id="appShell" class="app-shell" style="display: none;">
   <!-- Header -->
   <header class="app-header">
     <div class="header-inner">
@@ -53,9 +129,9 @@
         <!-- User Session Display -->
         <div class="user-session-bar" id="userSessionBar" title="คลิกเพื่อสลับผู้ใช้หรือจัดการบัญชี">
           <svg viewBox="0 0 24 24" width="15" height="15"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-          <span id="currentUserName" class="user-session-name">ผู้ดูแลระบบ</span>
-          <span id="currentUserRole" class="badge-role admin">ADMIN</span>
-          <button type="button" class="btn-logout" id="btnLogout" title="ออกจากระบบ / สลับบัญชี">สลับผู้ใช้</button>
+          <span id="currentUserName" class="user-session-name">-</span>
+          <span id="currentUserRole" class="badge-role staff">STAFF</span>
+          <button type="button" class="btn-logout" id="btnLogout" title="ออกจากระบบ">ออกจากระบบ</button>
         </div>
 
         <button type="button" class="btn btn-outline btn-theme-toggle" id="btnToggleTheme" title="สลับโหมดมืด / สว่าง">
@@ -430,42 +506,7 @@
       <span>ตั้งค่า</span>
     </button>
   </nav>
-
-  <!-- MODAL: เข้าสู่ระบบ (Login Gate) -->
-  <div id="loginModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
-    <div class="modal-dialog modal-dialog-sm">
-      <div class="modal-header">
-        <div class="modal-header-title">
-          <div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
-          <h2 id="loginModalTitle">เข้าสู่ระบบนัดคิวทำงาน</h2>
-        </div>
-      </div>
-      <form id="loginForm">
-        <div class="modal-body">
-          <div id="loginErrorMsg" class="alert-error" style="display: none;"></div>
-          <div>
-            <label for="loginUsername">ชื่อผู้ใช้ (Username) <span class="req-star">*</span></label>
-            <input type="text" id="loginUsername" required autocomplete="username" placeholder="เช่น admin, somchai, wipada">
-          </div>
-          <div>
-            <label for="loginPassword">รหัสผ่าน (Password) <span class="req-star">*</span></label>
-            <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="ใส่รหัสผ่าน">
-          </div>
-          <div class="login-quick-select">
-            <span class="hint-text">เลือกบัญชีทดสอบด่วน (คลิกเดียว):</span>
-            <div class="quick-user-chips">
-              <button type="button" class="btn-quick-user" data-user="admin" data-pw="admin">ผู้ดูแลระบบ (admin / admin)</button>
-              <button type="button" class="btn-quick-user" data-user="somchai" data-pw="1234">คุณสมชาย (somchai / 1234)</button>
-              <button type="button" class="btn-quick-user" data-user="wipada" data-pw="1234">คุณวิภาดา (wipada / 1234)</button>
-            </div>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button type="submit" id="btnSubmitLogin" class="btn btn-primary" style="width: 100%;">เข้าสู่ระบบ</button>
-        </div>
-      </form>
-    </div>
-  </div>
+  </div><!-- /#appShell -->
 
   <!-- MODAL: สร้าง / แก้ไข / เลื่อนนัด -->
   <div id="appointmentModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">

@@ -215,6 +215,9 @@ function doPost(e) {
     if (a === 'login') {
       return json_({ ok: true, data: handleUserLogin_(body.username, body.password) });
     }
+    if (a === 'register') return withLock_(function () {
+      return json_({ ok: true, data: handleUserRegister_(body.payload || body.userPayload || {}) });
+    });
     if (a === 'listUsers') {
       return json_({ ok: true, data: { users: readPublicUsers_() } });
     }
@@ -363,6 +366,76 @@ function handleUserLogin_(username, password) {
       displayName: sanitizeNoEmoji(targetUser.displayName || targetUser.username),
       role: targetUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF'
     }
+  };
+}
+
+function handleUserRegister_(payload) {
+  var p = payload || {};
+  var un = sanitizeNoEmoji(p.username || '').toLowerCase();
+  var disp = sanitizeNoEmoji(p.displayName || '');
+  var pw = String(p.password || '');
+  var confirmPw = p.confirmPassword !== undefined ? String(p.confirmPassword || '') : pw;
+
+  if (!un || un.length < 3 || un.length > 30 || !/^[a-z0-9_.-]+$/.test(un)) {
+    throw new Error('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
+  }
+  if (!disp) {
+    throw new Error('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียกที่ใช้แสดงในระบบ');
+  }
+  if (!pw || pw.length < 4) {
+    throw new Error('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร');
+  }
+  if (pw !== confirmPw) {
+    throw new Error('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');
+  }
+
+  var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_USERS, USER_COLS);
+  var lr = sh.getLastRow();
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var rows = lr > 1 ? sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues() : [];
+  var idIdx = headers.indexOf('userId'), unIdx = headers.indexOf('username'), dispIdx = headers.indexOf('displayName');
+  var maxIdNum = 0;
+
+  for (var i = 0; i < rows.length; i++) {
+    var rId = String(rows[i][idIdx] || '').trim();
+    var rUn = String(rows[i][unIdx] || '').trim().toLowerCase();
+    var rDisp = String(rows[i][dispIdx] || '').trim().toLowerCase();
+    if (rId.indexOf('USR-') === 0) {
+      var num = parseInt(rId.slice(4), 10);
+      if (!isNaN(num) && num > maxIdNum) maxIdNum = num;
+    }
+    if (rUn === un) {
+      throw new Error('ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น');
+    }
+    if (rDisp && rDisp === disp.toLowerCase()) {
+      throw new Error('ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม');
+    }
+  }
+
+  var nowIso = getBkkNow_().isoStr;
+  var newId = 'USR-' + String(maxIdNum + 1).padStart(3, '0');
+  var newRow = headers.map(function (h) {
+    if (h === 'userId') return newId;
+    if (h === 'username') return un;
+    if (h === 'passwordHash') return hashPassword_(pw);
+    if (h === 'displayName') return disp;
+    if (h === 'role') return 'STAFF';
+    if (h === 'isActive') return 'TRUE';
+    if (h === 'createdAt') return nowIso;
+    if (h === 'lastLoginAt') return nowIso;
+    return '';
+  });
+  sh.appendRow(newRow);
+  formatPlainText_(sh, headers.length);
+
+  return {
+    user: {
+      userId: newId,
+      username: un,
+      displayName: disp,
+      role: 'STAFF'
+    },
+    users: readPublicUsers_()
   };
 }
 

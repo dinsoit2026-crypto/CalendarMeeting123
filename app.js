@@ -89,32 +89,65 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === id));
   }
 
-  // User Authentication & Session
+  // User Authentication, Registration & Full-Screen Auth Gate
   function loadSavedSession() {
     try {
-      const uStr = localStorage.getItem(STORAGE.AUTH_USER);
-      if (uStr) state.currentUser = JSON.parse(uStr);
-    } catch (_) {}
-
-    if (!state.currentUser) {
-      // Default to demo admin initially
-      state.currentUser = { userId: 'USR-001', username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'ADMIN' };
-      try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser)); } catch (_) {}
+      const savedUsers = localStorage.getItem(STORAGE.USERS);
+      state.users = savedUsers ? JSON.parse(savedUsers) : [...Logic.DEFAULT_USERS];
+    } catch (_) {
+      state.users = [...Logic.DEFAULT_USERS];
     }
+
+    state.currentUser = null;
+    try {
+      const uStr = localStorage.getItem(STORAGE.AUTH_USER);
+      if (uStr) {
+        const parsed = JSON.parse(uStr);
+        if (parsed && parsed.username && parsed.displayName) {
+          state.currentUser = parsed;
+        }
+      }
+    } catch (_) {}
     updateUserSessionUI();
   }
 
+  function switchAuthTab(mode) {
+    const isReg = mode === 'register';
+    if ($('tabBtnAuthLogin')) {
+      $('tabBtnAuthLogin').classList.toggle('active', !isReg);
+      $('tabBtnAuthLogin').setAttribute('aria-selected', isReg ? 'false' : 'true');
+    }
+    if ($('tabBtnAuthRegister')) {
+      $('tabBtnAuthRegister').classList.toggle('active', isReg);
+      $('tabBtnAuthRegister').setAttribute('aria-selected', isReg ? 'true' : 'false');
+    }
+    if ($('loginForm')) $('loginForm').style.display = isReg ? 'none' : 'flex';
+    if ($('registerForm')) $('registerForm').style.display = isReg ? 'flex' : 'none';
+    if ($('loginErrorMsg')) $('loginErrorMsg').style.display = 'none';
+    if ($('registerErrorMsg')) $('registerErrorMsg').style.display = 'none';
+  }
+
   function updateUserSessionUI() {
+    const isAuthenticated = Boolean(state.currentUser && state.currentUser.username);
+    if ($('authGateScreen')) $('authGateScreen').style.display = isAuthenticated ? 'none' : 'flex';
+    if ($('appShell')) $('appShell').style.display = isAuthenticated ? 'block' : 'none';
+
+    const authBadge = $('authModeBadge');
+    if (authBadge) {
+      authBadge.className = state.isLive ? 'mode-badge live' : 'mode-badge demo';
+      authBadge.textContent = state.isLive ? 'Sheets' : 'Demo';
+    }
+
     const nameEl = $('currentUserName'), roleEl = $('currentUserRole');
-    if (nameEl) nameEl.textContent = state.currentUser ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
+    if (nameEl) nameEl.textContent = isAuthenticated ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
     if (roleEl) {
-      const r = state.currentUser ? state.currentUser.role : 'STAFF';
+      const r = isAuthenticated && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF';
       roleEl.textContent = r;
       roleEl.className = `badge-role ${r.toLowerCase()}`;
     }
 
     // Role-based visibility
-    const isAdmin = Boolean(state.currentUser && state.currentUser.role === 'ADMIN');
+    const isAdmin = Boolean(isAuthenticated && state.currentUser.role === 'ADMIN');
     const userMgmtSec = $('userManagementSection');
     if (userMgmtSec) {
       userMgmtSec.style.opacity = isAdmin ? '1' : '0.85';
@@ -127,10 +160,12 @@
   function handleLogout() {
     state.currentUser = null;
     try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) {}
-    openModal('loginModal');
+    ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal'].forEach(closeModal);
     if ($('loginUsername')) $('loginUsername').value = '';
     if ($('loginPassword')) $('loginPassword').value = '';
-    if ($('loginErrorMsg')) $('loginErrorMsg').style.display = 'none';
+    switchAuthTab('login');
+    updateUserSessionUI();
+    showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   }
 
   async function handleLoginSubmit(e) {
@@ -138,9 +173,11 @@
     const un = ($('loginUsername').value || '').trim();
     const pw = $('loginPassword').value || '';
     const errEl = $('loginErrorMsg');
+    const submitBtn = $('btnSubmitLogin');
 
     try {
       if (errEl) errEl.style.display = 'none';
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังตรวจสอบ...'; }
       let userObj = null;
 
       if (state.isLive && state.gasUrl) {
@@ -167,13 +204,85 @@
 
       state.currentUser = userObj;
       localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj));
-      closeModal('loginModal');
       updateUserSessionUI();
-      renderAll();
+      if (state.isLive && state.gasUrl) await syncWithServer(true);
+      else { loadDemoData(); renderAll(); }
       showToast(`ยินดีต้อนรับ ${userObj.displayName} เข้าสู่ระบบ`, 'success');
     } catch (err) {
       if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
       else showToast(err.message, 'error');
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'เข้าสู่ระบบ'; }
+    }
+  }
+
+  async function handleRegisterSubmit(e) {
+    e.preventDefault();
+    const username = ($('regUsername').value || '').trim().toLowerCase();
+    const displayName = Logic.sanitizeNoEmoji($('regDisplayName').value || '');
+    const password = $('regPassword').value || '';
+    const confirmPassword = $('regConfirmPassword').value || '';
+    const errEl = $('registerErrorMsg');
+    const submitBtn = $('btnSubmitRegister');
+
+    try {
+      if (errEl) errEl.style.display = 'none';
+      const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
+      const localReg = Logic.registerUserAccount(uList, { username, displayName, password, confirmPassword });
+      if (!localReg.ok) throw new Error(localReg.error);
+
+      if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังสร้างบัญชี...'; }
+      let userObj = localReg.user;
+
+      if (state.isLive && state.gasUrl) {
+        try {
+          const res = await callGasApi('register', { payload: { username, displayName, password, confirmPassword } });
+          if (res && res.user) userObj = res.user;
+          if (res && res.users) state.users = res.users;
+        } catch (apiErr) {
+          if (String(apiErr.message || '').includes('ไม่รู้จัก action')) {
+            try {
+              const saveRes = await callGasApi('saveUser', {
+                userPayload: { isNew: true, username, displayName, password, role: 'STAFF', isActive: true }
+              });
+              if (saveRes && saveRes.user) {
+                userObj = {
+                  userId: saveRes.user.userId,
+                  username: saveRes.user.username,
+                  displayName: saveRes.user.displayName,
+                  role: 'STAFF'
+                };
+              }
+            } catch (_) {
+              state.users = [...uList, localReg.record];
+              try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
+            }
+          } else {
+            throw apiErr;
+          }
+        }
+      } else {
+        state.users = [...uList, localReg.record];
+        try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
+      }
+
+      if ($('regUsername')) $('regUsername').value = '';
+      if ($('regDisplayName')) $('regDisplayName').value = '';
+      if ($('regPassword')) $('regPassword').value = '';
+      if ($('regConfirmPassword')) $('regConfirmPassword').value = '';
+
+      state.currentUser = { ...userObj, role: 'STAFF' };
+      localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser));
+      switchAuthTab('login');
+      updateUserSessionUI();
+      if (state.isLive && state.gasUrl) await syncWithServer(true);
+      else { loadDemoData(); renderAll(); }
+      showToast(`สมัครสมาชิกสำเร็จ ยินดีต้อนรับ ${state.currentUser.displayName} (STAFF)`, 'success');
+    } catch (err) {
+      if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
+      else showToast(err.message, 'error');
+    } finally {
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'สมัครสมาชิกและเข้าใช้งานทันที'; }
     }
   }
 
@@ -181,7 +290,6 @@
   function initApp() {
     try { const s = localStorage.getItem(STORAGE.THEME); if (s) state.theme = s; } catch (_) {}
     applyTheme(state.theme);
-    loadSavedSession();
 
     try {
       const c = JSON.parse(localStorage.getItem(STORAGE.CFG) || 'null');
@@ -195,11 +303,20 @@
       if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode;
     } catch (_) {}
 
+    loadSavedSession();
     initMonthSelector();
     bindEvents();
 
-    if (state.isLive && state.gasUrl) syncWithServer(true);
-    else { loadDemoData(); renderAll(); }
+    if (state.currentUser) {
+      if (state.isLive && state.gasUrl) syncWithServer(true);
+      else { loadDemoData(); renderAll(); }
+    } else if (state.isLive && state.gasUrl) {
+      callGasApi('listUsers', {}).then(d => {
+        if (d && Array.isArray(d.users) && d.users.length) state.users = d.users;
+      }).catch(() => {});
+    } else {
+      loadDemoData();
+    }
     updateClock();
     setInterval(updateClock, 15000);
   }
@@ -914,15 +1031,16 @@
   function bindEvents() {
     document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.addEventListener('click', () => switchTab(b.getAttribute('data-tab'))));
     on('btnToggleTheme', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
+    on('btnToggleThemeAuth', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
 
-    // Auth events
+    // Auth Gate & Registration events
     on('btnLogout', 'click', handleLogout);
     on('loginForm', 'submit', handleLoginSubmit);
-    document.querySelectorAll('.btn-quick-user').forEach(btn => btn.addEventListener('click', () => {
-      $('loginUsername').value = btn.getAttribute('data-user') || '';
-      $('loginPassword').value = btn.getAttribute('data-pw') || '';
-      $('btnSubmitLogin').click();
-    }));
+    on('registerForm', 'submit', handleRegisterSubmit);
+    on('tabBtnAuthLogin', 'click', () => switchAuthTab('login'));
+    on('tabBtnAuthRegister', 'click', () => switchAuthTab('register'));
+    on('btnSwitchToRegister', 'click', () => switchAuthTab('register'));
+    on('btnSwitchToLogin', 'click', () => switchAuthTab('login'));
 
     on('btnOpenAddUserModal', 'click', () => openUserModal(null));
     on('btnCloseUserModalTop', 'click', () => closeModal('userModal'));
