@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบนัดคิวทำงาน v2.4.0</title>
+  <title>ระบบนัดคิวทำงาน v2.5.0</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
@@ -22,7 +22,7 @@
         <div class="brand-text-col">
           <div class="brand-title-line">
             <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
-            <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.4.0</button>
+            <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.5.0</button>
             <span id="connectionModeBadge" class="mode-badge demo">Demo</span>
           </div>
           <span class="brand-subtitle">ระบบบริหารตารางนัดหมายทีมและแจ้งเตือน LINE อัตโนมัติ</span>
@@ -50,11 +50,14 @@
       </nav>
 
       <div class="header-actions">
-        <div class="user-inline" title="คลิกเพื่อเปลี่ยนชื่อผู้บันทึก">
+        <!-- User Session Display -->
+        <div class="user-session-bar" id="userSessionBar" title="คลิกเพื่อสลับผู้ใช้หรือจัดการบัญชี">
           <svg viewBox="0 0 24 24" width="15" height="15"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
-          <label for="activeUserInput" class="sr-only">ผู้บันทึก</label>
-          <input type="text" id="activeUserInput" value="ผู้ดูแลระบบ" placeholder="ชื่อผู้บันทึก">
+          <span id="currentUserName" class="user-session-name">ผู้ดูแลระบบ</span>
+          <span id="currentUserRole" class="badge-role admin">ADMIN</span>
+          <button type="button" class="btn-logout" id="btnLogout" title="ออกจากระบบ / สลับบัญชี">สลับผู้ใช้</button>
         </div>
+
         <button type="button" class="btn btn-outline btn-theme-toggle" id="btnToggleTheme" title="สลับโหมดมืด / สว่าง">
           <span id="iconThemeSun" style="display:none;">☀️ โหมดสว่าง</span>
           <span id="iconThemeMoon">🌙 โหมดมืด</span>
@@ -130,7 +133,7 @@
         <div class="filter-toolbar">
           <div class="search-input-wrap">
             <svg class="search-icon" viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-            <input type="search" id="filterSearch" class="input-search" placeholder="ค้นหาหัวข้องาน, ชื่อผู้นัดพบ, สถานที่, รหัส APT...">
+            <input type="search" id="filterSearch" class="input-search" placeholder="ค้นหาหัวข้องาน, ชื่อผู้นัดพบ, สถานที่, ผู้สร้าง, รหัส APT...">
           </div>
           <select id="filterStatus" class="select-filter">
             <option value="">ทุกสถานะ</option>
@@ -139,6 +142,10 @@
             <option value="สิ้นสุดการนัดหมาย">สิ้นสุดการนัดหมาย</option>
             <option value="ยกเลิกการนัดหมาย">ยกเลิกการนัดหมาย</option>
             <option value="OVERDUE">งานเลยกำหนด</option>
+          </select>
+          <select id="filterUser" class="select-filter">
+            <option value="">สมาชิกทุกคน</option>
+            <option value="MY_APTS">เฉพาะงานของฉัน</option>
           </select>
           <input type="date" id="filterDate" class="input-date">
           <button type="button" id="btnClearFilters" class="btn btn-outline btn-sm">
@@ -213,7 +220,7 @@
       <div class="year-top-bar">
         <div>
           <h2 class="section-heading">ภาพรวมสถิติและผลงานรายปี</h2>
-          <p class="section-subheading">คลิกเลือกการ์ดปีด้านล่างเพื่อดูสรุปอัตราความสำเร็จและตารางงานแยกตาม 12 เดือน</p>
+          <p class="section-subheading">คลิกเลือกการ์ดปีด้านล่างเพื่อดูสรุปอัตราความสำเร็จ ตาราง 12 เดือน และสรุปผลงานตามผู้ใช้งาน</p>
         </div>
         <div class="cal-jump-group">
           <label for="yearOverviewInput">เลือกปี:</label>
@@ -227,6 +234,16 @@
         <div class="panel-card-head"><h3 id="selectedYearHeader">สรุปสถิติตลอดทั้งปี</h3></div>
         <div id="yearEndSummaryCards" class="year-stats-grid"></div>
       </div>
+
+      <!-- สรุปผลงานแยกตามผู้ใช้งาน (User Performance) -->
+      <div class="panel-card">
+        <div class="panel-card-head">
+          <h3>สรุปผลงานแยกตามผู้ใช้งาน (User Attribution & Performance)</h3>
+          <span class="hint-text">สถิติจำนวนงานที่สร้าง, สิ้นสุด และยกเลิกโดยสมาชิกแต่ละคน</span>
+        </div>
+        <div id="userPerformanceGrid" class="user-stats-grid"></div>
+      </div>
+
       <div class="panel-card">
         <div class="panel-card-head">
           <h3>สรุปผลงานแยกรายเดือน (12 เดือน)</h3>
@@ -238,6 +255,27 @@
 
     <!-- TAB 4: ตั้งค่า / บอท -->
     <section id="tabSettings" class="tab-panel">
+      <!-- User Management Panel -->
+      <div class="panel-card" id="userManagementSection">
+        <div class="settings-card-header">
+          <div class="settings-card-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></div>
+          <div style="flex: 1;">
+            <h3>จัดการสมาชิกและสิทธิ์การใช้งาน (User Management)</h3>
+            <p class="hint-text">กำหนดบัญชีผู้ใช้งาน สิทธิ์ ADMIN / STAFF และตรวจสอบประวัติการเข้าสู่ระบบ</p>
+          </div>
+          <button type="button" id="btnOpenAddUserModal" class="btn btn-primary btn-sm">
+            <svg viewBox="0 0 24 24" width="14" height="14" style="stroke-width:2.5;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+            <span>เพิ่มสมาชิกใหม่</span>
+          </button>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <thead><tr><th>รหัส</th><th>ชื่อบัญชี</th><th>ชื่อแสดงผล</th><th>สิทธิ์</th><th>สถานะ</th><th>เข้าสู่ระบบล่าสุด</th><th>จัดการ</th></tr></thead>
+            <tbody id="userTableBody"></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="settings-grid-2">
         <div class="panel-card">
           <div class="settings-card-header">
@@ -393,6 +431,42 @@
     </button>
   </nav>
 
+  <!-- MODAL: เข้าสู่ระบบ (Login Gate) -->
+  <div id="loginModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="loginModalTitle">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <div class="modal-header-title">
+          <div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+          <h2 id="loginModalTitle">เข้าสู่ระบบนัดคิวทำงาน</h2>
+        </div>
+      </div>
+      <form id="loginForm">
+        <div class="modal-body">
+          <div id="loginErrorMsg" class="alert-error" style="display: none;"></div>
+          <div>
+            <label for="loginUsername">ชื่อผู้ใช้ (Username) <span class="req-star">*</span></label>
+            <input type="text" id="loginUsername" required autocomplete="username" placeholder="เช่น admin, somchai, wipada">
+          </div>
+          <div>
+            <label for="loginPassword">รหัสผ่าน (Password) <span class="req-star">*</span></label>
+            <input type="password" id="loginPassword" required autocomplete="current-password" placeholder="ใส่รหัสผ่าน">
+          </div>
+          <div class="login-quick-select">
+            <span class="hint-text">เลือกบัญชีทดสอบด่วน (คลิกเดียว):</span>
+            <div class="quick-user-chips">
+              <button type="button" class="btn-quick-user" data-user="admin" data-pw="admin">ผู้ดูแลระบบ (admin / admin)</button>
+              <button type="button" class="btn-quick-user" data-user="somchai" data-pw="1234">คุณสมชาย (somchai / 1234)</button>
+              <button type="button" class="btn-quick-user" data-user="wipada" data-pw="1234">คุณวิภาดา (wipada / 1234)</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" id="btnSubmitLogin" class="btn btn-primary" style="width: 100%;">เข้าสู่ระบบ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: สร้าง / แก้ไข / เลื่อนนัด -->
   <div id="appointmentModal" class="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
     <div class="modal-dialog">
@@ -408,6 +482,9 @@
         <div class="modal-body">
           <input type="hidden" id="formAptId">
           <input type="hidden" id="formExpectedUpdatedAt">
+
+          <div id="conflictWarningBanner" class="conflict-warning-box" style="display: none;"></div>
+          <div id="formCreatedByPill" class="creator-info-pill" style="display: none;"></div>
 
           <div>
             <label for="formTitle">หัวข้องาน / รายการนัดหมาย <span class="req-star">*</span></label>
@@ -490,35 +567,105 @@
     </div>
   </div>
 
+  <!-- MODAL: ยืนยันยกเลิกนัดหมายพร้อมระบุสาเหตุ -->
+  <div id="cancelModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <div class="modal-header-title">
+          <div class="modal-icon-badge" style="background:var(--danger-bg);color:var(--danger-text);"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg></div>
+          <h2>ยืนยันยกเลิกการนัดหมาย</h2>
+        </div>
+        <button type="button" id="btnCloseCancelModalTop" class="btn-close">&times;</button>
+      </div>
+      <form id="cancelForm">
+        <div class="modal-body">
+          <input type="hidden" id="cancelAptId">
+          <div id="cancelAptSummary" style="font-weight:600;font-size:14px;color:var(--text-main);">-</div>
+          <div>
+            <label for="cancelReasonInput">สาเหตุหรือเหตุผลการยกเลิก</label>
+            <input type="text" id="cancelReasonInput" placeholder="เช่น ลูกค้าติดธุระด่วน, ขอเลื่อนไม่มีกำหนด, งานถูกยกเลิก">
+          </div>
+          <div class="notify-line-box">
+            <label class="checkbox-label" for="cancelNotifyLine">
+              <input type="checkbox" id="cancelNotifyLine" checked>
+              <span>ส่งแจ้งเตือนการยกเลิกเข้ากลุ่ม LINE ทันที</span>
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btnDismissCancelModal" class="btn btn-outline">ไม่ยกเลิก</button>
+          <button type="submit" id="btnConfirmCancelModal" class="btn btn-danger">ยืนยันยกเลิกนัดหมาย</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: เพิ่ม/แก้ไขสมาชิกผู้ใช้งาน -->
+  <div id="userModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-dialog-sm">
+      <div class="modal-header">
+        <div class="modal-header-title">
+          <div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg></div>
+          <h2 id="userModalTitle">เพิ่มสมาชิกใหม่</h2>
+        </div>
+        <button type="button" id="btnCloseUserModalTop" class="btn-close">&times;</button>
+      </div>
+      <form id="userForm">
+        <div class="modal-body">
+          <div>
+            <label for="formUsername">ชื่อบัญชี (Username) <span class="req-star">*</span></label>
+            <input type="text" id="formUsername" required placeholder="ภาษาอังกฤษตัวพิมพ์เล็ก 3-20 ตัว">
+          </div>
+          <div>
+            <label for="formDisplayName">ชื่อแสดงผล (Display Name) <span class="req-star">*</span></label>
+            <input type="text" id="formDisplayName" required placeholder="เช่น คุณสมศักดิ์">
+          </div>
+          <div>
+            <label for="formUserPassword">รหัสผ่าน (Password) <span id="formUserPasswordReqStar" class="req-star">*</span></label>
+            <input type="password" id="formUserPassword" placeholder="ความยาวอย่างน้อย 4 ตัวอักษร">
+            <span class="hint-text" id="formUserPasswordHint">กำหนดรหัสผ่านสำหรับเข้าสู่ระบบ</span>
+          </div>
+          <div>
+            <label for="formUserRole">สิทธิ์การใช้งาน (Role)</label>
+            <select id="formUserRole">
+              <option value="STAFF">STAFF (สมาชิกทีม: สร้าง/แก้ไข/เสร็จสิ้น/ยกเลิกนัด)</option>
+              <option value="ADMIN">ADMIN (ผู้ดูแลระบบ: จัดการสมาชิกและตั้งค่าระบบ)</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" id="btnCancelUserModal" class="btn btn-outline">ยกเลิก</button>
+          <button type="submit" id="btnSubmitUserModal" class="btn btn-primary">บันทึกข้อมูลสมาชิก</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: คู่มือการใช้งาน -->
   <div id="guideModal" class="modal-backdrop" role="dialog" aria-modal="true">
     <div class="modal-dialog modal-dialog-wide">
       <div class="modal-header">
         <div class="modal-header-title">
           <div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></div>
-          <h2>คู่มือการใช้งานระบบนัดคิวทำงาน</h2>
+          <h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.5.0</h2>
         </div>
         <button type="button" id="btnCloseGuideModalTop" class="btn-close">&times;</button>
       </div>
       <div class="modal-body guide-content">
         <div class="guide-section">
-          <h4>1. การเชื่อมต่อฐานข้อมูลครั้งแรก (เปลี่ยนจาก Demo เป็น Sheets)</h4>
-          <p>เมื่อเปิดหน้าเว็บครั้งแรก หากมุมบนซ้ายแสดงสถานะ <strong>Demo</strong> หากต้องการซิงก์ข้อมูลร่วมกับทีมผ่าน Google Sheets ให้ทำตามขั้นตอนนี้:</p>
-          <ol class="guide-list">
-            <li>กดปุ่ม <strong>"เชื่อมต่อฐานข้อมูลทีมอัตโนมัติ"</strong> ด้านล่างนี้ หรือไปที่แท็บ <strong>"ตั้งค่า / บอท"</strong></li>
-            <li>ตรวจสอบช่อง <strong>Web App URL (/exec)</strong> และใส่ <strong>รหัสผ่านทีม (API Passcode)</strong> ให้ครบถ้วน</li>
-            <li>กดปุ่ม <strong>"บันทึกและเชื่อมต่อ"</strong> สังเกตป้ายด้านบนจะเปลี่ยนเป็นสีเขียว <strong>Sheets</strong> ทันที</li>
-          </ol>
-          <div style="margin-top: 10px;"><button type="button" id="btnQuickConnectFromGuide" class="btn btn-primary btn-sm">เชื่อมต่อฐานข้อมูลทีมอัตโนมัติ (คลิกเดียว)</button></div>
+          <h4>1. การเข้าสู่ระบบและการแยกผู้ใช้งานรายบุคคล (User Attribution)</h4>
+          <p>ระบบ v2.5.0 เพิ่มระบบล็อกอินแยกผู้ใช้งาน เพื่อบันทึกว่า <strong>ใครเป็นคนสร้างนัด</strong>, <strong>ใครเป็นคนกดยกเลิก/เสร็จสิ้น</strong> และ <strong>ใครแก้ไขล่าสุด</strong>:</p>
+          <ul class="guide-list">
+            <li><strong>บัญชีเริ่มต้น:</strong> <code>admin</code> (รหัสผ่าน <code>admin</code>), <code>somchai</code> (รหัสผ่าน <code>1234</code>), <code>wipada</code> (รหัสผ่าน <code>1234</code>)</li>
+            <li><strong>การสลับผู้ใช้:</strong> คลิกปุ่ม <em>"สลับผู้ใช้"</em> ที่มุมขวาบนเพื่อออกจากระบบหรือล็อกอินเป็นสมาชิกคนอื่น</li>
+            <li><strong>การกรองงานตามผู้สร้าง:</strong> ในแท็บคิวงาน สามารถเลือกดู <em>"เฉพาะงานของฉัน"</em> หรือเลือกดูตามชื่อสมาชิกได้</li>
+          </ul>
         </div>
 
         <div class="guide-section">
-          <h4>2. การเพิ่ม แก้ไข เลื่อนนัด และการแจ้งเตือนเข้า LINE ทันที</h4>
-          <ul class="guide-list">
-            <li><strong>สร้างนัดหมายใหม่:</strong> กดปุ่ม <strong>"+ นัดหมายใหม่"</strong> มุมขวาบน หรือคลิกวันที่ในหน้าปฏิทินแล้วกดปุ่ม <strong>"+ นัดวันนี้"</strong></li>
-            <li><strong>เปลี่ยนสถานะ / เลื่อนนัด:</strong> บนการ์ดงานแต่ละใบ สามารถกดปุ่ม <strong>"เสร็จสิ้น"</strong>, <strong>"แก้ไข/เลื่อน"</strong> หรือ <strong>"ยกเลิก"</strong> ได้ทันที</li>
-            <li><strong>การแจ้งเตือนเข้า LINE ทันที:</strong> หากติ๊กช่อง <em>"ส่งแจ้งเตือนนัดหมายเข้ากลุ่ม LINE ทันที"</em> บอทจะส่งรายละเอียดเข้ากลุ่มทันทีหลังกดบันทึก</li>
-          </ul>
+          <h4>2. การเชื่อมต่อฐานข้อมูล Google Sheets</h4>
+          <p>เมื่อต้องการซิงก์ข้อมูลจริงร่วมกันในทีม ให้ไปที่แท็บ <strong>"ตั้งค่า / บอท"</strong> กรอก Web App URL และรหัสผ่านทีม แล้วกดปุ่ม <strong>"บันทึกและเชื่อมต่อ"</strong></p>
+          <div style="margin-top: 10px;"><button type="button" id="btnQuickConnectFromGuide" class="btn btn-primary btn-sm">เชื่อมต่อฐานข้อมูลทีมอัตโนมัติ (คลิกเดียว)</button></div>
         </div>
 
         <div class="guide-section">
@@ -530,18 +677,9 @@
             <div class="guide-cmd-item"><code>คิว สัปดาห์นี้</code><span>ดูนัดหมายใน 7 วันข้างหน้า</span></div>
             <div class="guide-cmd-item"><code>คิว เดือนนี้</code><span>สรุปตารางงานประจำเดือนนี้</span></div>
             <div class="guide-cmd-item"><code>คิว ปีนี้</code><span>ดูสรุปสถิติผลงานตลอดทั้งปี</span></div>
-            <div class="guide-cmd-item"><code>คิว ค้นหา ชื่อ</code><span>ค้นหางานตามชื่อคนหรือสถานที่</span></div>
+            <div class="guide-cmd-item"><code>คิว ค้นหา ชื่อ</code><span>ค้นหางานตามชื่อคน, สถานที่ หรือผู้สร้าง</span></div>
             <div class="guide-cmd-item"><code>คิว ช่วยเหลือ</code><span>ดูรายการคำสั่งทั้งหมดของบอท</span></div>
           </div>
-        </div>
-
-        <div class="guide-section">
-          <h4>4. ระบบแจ้งเตือนอัตโนมัติและโควตา LINE</h4>
-          <ul class="guide-list">
-            <li><strong>สรุปงานรอบเช้า (Daily Digest):</strong> บอทจะส่งสรุปนัดหมายล่วงหน้า 1 วัน ในเวลา 08:00 น.</li>
-            <li><strong>เตือนก่อนเวลานัด (Hourly Reminder):</strong> บอทจะส่งแจ้งเตือนซ้ำอีกครั้งเมื่อเหลือก่อนเวลานัด 1 ชั่วโมง</li>
-            <li><strong>การเลื่อนนัด:</strong> หากมีการเลื่อนวันหรือเวลา ระบบจะรีเซ็ตรอบการแจ้งเตือนให้ใหม่อัตโนมัติ</li>
-          </ul>
         </div>
       </div>
       <div class="modal-footer"><button type="button" id="btnCloseGuideModal" class="btn btn-primary">เข้าใจแล้ว ปิดหน้าต่างนี้</button></div>

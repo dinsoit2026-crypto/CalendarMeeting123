@@ -1,11 +1,19 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.4.0)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.0)
  * Timezone: Asia/Bangkok (UTC+07:00)
+ * Features: User Authentication, User Attribution, Reschedule Audit, LINE Bot & Trigger Automation
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.4.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
-var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
+var API_VER = '2.5.0';
+var SH_USERS = 'Users';
+var SH_APTS = 'Appointments';
+var SH_RE_LOGS = 'RescheduleLogs';
+var SH_NOTIF_LOGS = 'NotificationLogs';
+var SH_META = 'SystemMeta';
+
+var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
+var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
 var META_COLS = ['key', 'value', 'updatedAt'];
@@ -26,12 +34,23 @@ function normalizeStatus_(st) {
   return STATUS.CONFIRMED;
 }
 
+function hashPassword_(str) {
+  var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(str || ''), Utilities.Charset.UTF_8);
+  var out = '';
+  for (var i = 0; i < raw.length; i++) {
+    var val = (raw[i] < 0 ? raw[i] + 256 : raw[i]).toString(16);
+    out += (val.length === 1 ? '0' : '') + val;
+  }
+  return out;
+}
+
 // --- Database Setup & Sheet Helpers ---
 function setupDatabase() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  [ [SH_APTS, APT_COLS], [SH_RE_LOGS, RE_LOG_COLS], [SH_NOTIF_LOGS, NOTIF_LOG_COLS], [SH_META, META_COLS] ].forEach(function (p) {
+  [ [SH_USERS, USER_COLS], [SH_APTS, APT_COLS], [SH_RE_LOGS, RE_LOG_COLS], [SH_NOTIF_LOGS, NOTIF_LOG_COLS], [SH_META, META_COLS] ].forEach(function (p) {
     ensureSheet_(ss, p[0], p[1]);
   });
+
   var defs = {
     LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '',
     DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7',
@@ -40,16 +59,46 @@ function setupDatabase() {
   var cur = getMetaMap_(), now = getBkkNow_().isoStr, mSh = ss.getSheetByName(SH_META);
   Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) mSh.appendRow([k, defs[k], now]); });
   formatPlainText_(mSh, META_COLS.length);
-  return 'ตั้งค่าโครงสร้างชีต Plain Text สำเร็จ';
+  return 'ตั้งค่าโครงสร้างชีต Plain Text และบัญชีเริ่มต้นสำเร็จ';
 }
 
 function ensureSheet_(ss, name, cols) {
   var sh = ss.getSheetByName(name) || ss.insertSheet(name);
-  formatPlainText_(sh, cols.length);
-  if (sh.getLastRow() === 0) { sh.appendRow(cols); sh.getRange(1, 1, 1, cols.length).setFontWeight('bold'); sh.setFrozenRows(1); }
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(cols);
+    sh.getRange(1, 1, 1, cols.length).setFontWeight('bold');
+    sh.setFrozenRows(1);
+    formatPlainText_(sh, cols.length);
+  } else {
+    // Append any missing columns to row 1 for backward compatibility
+    var headers = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues()[0];
+    cols.forEach(function (c) {
+      if (headers.indexOf(c) === -1) {
+        var nextCol = sh.getLastColumn() + 1;
+        sh.getRange(1, nextCol).setValue(c).setFontWeight('bold');
+      }
+    });
+    formatPlainText_(sh, Math.max(sh.getLastColumn(), cols.length));
+  }
+  if (name === SH_USERS && sh.getLastRow() <= 1) {
+    var nowIso = getBkkNow_().isoStr;
+    var defaultUsers = [
+      ['USR-001', 'admin', hashPassword_('admin'), 'ผู้ดูแลระบบ', 'ADMIN', 'TRUE', nowIso, nowIso],
+      ['USR-002', 'somchai', hashPassword_('1234'), 'คุณสมชาย', 'STAFF', 'TRUE', nowIso, ''],
+      ['USR-003', 'wipada', hashPassword_('1234'), 'คุณวิภาดา', 'STAFF', 'TRUE', nowIso, ''],
+      ['USR-004', 'naphatsorn', hashPassword_('1234'), 'คุณนภัสสร', 'STAFF', 'TRUE', nowIso, '']
+    ];
+    defaultUsers.forEach(function (r) { sh.appendRow(r); });
+    formatPlainText_(sh, USER_COLS.length);
+  }
   return sh;
 }
-function formatPlainText_(sh, colCount) { sh.getRange(1, 1, Math.max(sh.getMaxRows(), 500), colCount).setNumberFormat('@'); }
+
+function formatPlainText_(sh, colCount) {
+  var c = Math.max(colCount || 1, 1);
+  var r = Math.max(sh.getMaxRows(), 500);
+  sh.getRange(1, 1, r, c).setNumberFormat('@');
+}
 
 // --- Trigger Management ---
 function removeNotificationTriggers() {
@@ -57,14 +106,31 @@ function removeNotificationTriggers() {
     var h = t.getHandlerFunction();
     if (h === 'runNotificationEngine') ScriptApp.deleteTrigger(t);
   });
+  try { PropertiesService.getScriptProperties().deleteProperty('ONEOFF_TRIGGERS_JSON'); } catch (_) {}
   return 'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย';
+}
+
+function cleanExpiredTriggers_() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var map = JSON.parse(props.getProperty('ONEOFF_TRIGGERS_JSON') || '{}');
+    var nowMs = Date.now(), changed = false;
+    var all = ScriptApp.getProjectTriggers();
+    all.forEach(function (t) {
+      var uid = t.getUniqueId();
+      if (map[uid] && map[uid] <= nowMs) {
+        ScriptApp.deleteTrigger(t);
+        delete map[uid];
+        changed = true;
+      }
+    });
+    if (changed) props.setProperty('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
+  } catch (_) {}
 }
 
 function installTriggerAuto() {
   removeNotificationTriggers();
-  // 1. สรุปคิวงานรอบเช้า (Daily Digest) เวลา 08:00 น.
   ScriptApp.newTrigger('runNotificationEngine').timeBased().everyDays(1).atHour(8).create();
-  // 2. ตรวจสอบเตือนก่อนเวลานัด (Hourly Reminder) ทุก 1 ชั่วโมง
   ScriptApp.newTrigger('runNotificationEngine').timeBased().everyHours(1).create();
   return 'ติดตั้ง Trigger แจ้งเตือนอัตโนมัติ (รอบเช้า 08:00 น. และตรวจก่อนเวลานัดทุก 1 ชั่วโมง) เรียบร้อย';
 }
@@ -96,12 +162,25 @@ function scheduleExactReminderForApt_(apt) {
     var rH = +apt.remindHoursBefore || 1;
     var remindMs = ep - (rH * 3600000);
     var nowMs = getBkkNow_().epochMs;
-    // หากเวลาเตือนอยู่ในช่วง 3 นาที ถึง 48 ชั่วโมงข้างหน้า
     if (remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000)) {
+      cleanExpiredTriggers_();
+      var props = PropertiesService.getScriptProperties();
+      var map = JSON.parse(props.getProperty('ONEOFF_TRIGGERS_JSON') || '{}');
       var allTriggers = ScriptApp.getProjectTriggers();
-      if (allTriggers.length < 18) {
-        ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create();
+      if (allTriggers.length >= 16) {
+        // Delete only tracked one-off triggers to preserve main recurring triggers
+        for (var i = 0; i < allTriggers.length; i++) {
+          var tUid = allTriggers[i].getUniqueId();
+          if (map[tUid]) {
+            ScriptApp.deleteTrigger(allTriggers[i]);
+            delete map[tUid];
+            break;
+          }
+        }
       }
+      var newTrig = ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create();
+      map[newTrig.getUniqueId()] = remindMs;
+      props.setProperty('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
     }
   } catch (_) {}
 }
@@ -111,7 +190,17 @@ function doGet(e) {
   try {
     var p = (e && e.parameter) || {};
     if (!verifyPasscode_(p.passcode)) return json_({ ok: false, error: 'API Passcode ไม่ถูกต้อง' });
-    if ((p.action || 'list') === 'list') return json_({ ok: true, data: { appointments: readAllApts_(), meta: getMetaMap_(), serverTime: getBkkNow_().isoStr } });
+    if ((p.action || 'list') === 'list') {
+      return json_({
+        ok: true,
+        data: {
+          appointments: readAllApts_(),
+          users: readPublicUsers_(),
+          meta: getMetaMap_(),
+          serverTime: getBkkNow_().isoStr
+        }
+      });
+    }
     return json_({ ok: false, error: 'ไม่รองรับ GET action' });
   } catch (err) { return json_({ ok: false, error: err.message || String(err) }); }
 }
@@ -123,7 +212,29 @@ function doPost(e) {
     if (!verifyPasscode_(body.passcode)) return json_({ ok: false, error: 'API Passcode ไม่ถูกต้อง' });
 
     var a = body.action || '';
-    if (a === 'list') return json_({ ok: true, data: { appointments: readAllApts_(), rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50), notificationLogs: readLogs_(SH_NOTIF_LOGS, NOTIF_LOG_COLS, 30), meta: getMetaMap_(), serverTime: getBkkNow_().isoStr } });
+    if (a === 'login') {
+      return json_({ ok: true, data: handleUserLogin_(body.username, body.password) });
+    }
+    if (a === 'listUsers') {
+      return json_({ ok: true, data: { users: readPublicUsers_() } });
+    }
+    if (a === 'saveUser') return withLock_(function () {
+      return json_({ ok: true, data: { user: saveUser_(body.userPayload) } });
+    });
+    if (a === 'deleteUser') return withLock_(function () {
+      return json_({ ok: true, data: { result: deleteUser_(body.userId) } });
+    });
+    if (a === 'list') return json_({
+      ok: true,
+      data: {
+        appointments: readAllApts_(),
+        users: readPublicUsers_(),
+        rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50),
+        notificationLogs: readLogs_(SH_NOTIF_LOGS, NOTIF_LOG_COLS, 30),
+        meta: getMetaMap_(),
+        serverTime: getBkkNow_().isoStr
+      }
+    });
     if (a === 'create') return withLock_(function () {
       var apt = createApt_(body.payload || {});
       var lineNotification = body.notifyLine !== false ? sendInstantAptNotification_(apt, false) : null;
@@ -131,7 +242,7 @@ function doPost(e) {
       return json_({ ok: true, data: { appointment: apt, lineNotification: lineNotification, meta: getMetaMap_() } });
     });
     if (a === 'update') return withLock_(function () {
-      var res = updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason);
+      var res = updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason, body.currentUser);
       if (body.notifyLine === true && res && res.appointment) {
         res.lineNotification = sendInstantAptNotification_(res.appointment, true);
         res.meta = getMetaMap_();
@@ -139,8 +250,12 @@ function doPost(e) {
       if (res && res.appointment) scheduleExactReminderForApt_(res.appointment);
       return json_({ ok: true, data: res });
     });
-    if (a === 'delete') return withLock_(function () { return json_({ ok: true, data: { appointment: deleteApt_(body.id, body.updatedBy) } }); });
-    if (a === 'updateMeta') return withLock_(function () { return json_({ ok: true, data: { meta: updateMeta_(body.meta || {}) } }); });
+    if (a === 'delete') return withLock_(function () {
+      return json_({ ok: true, data: { appointment: deleteApt_(body.id, body.updatedBy) } });
+    });
+    if (a === 'updateMeta') return withLock_(function () {
+      return json_({ ok: true, data: { meta: updateMeta_(body.meta || {}) } });
+    });
     if (a === 'setupTriggers') return json_({ ok: true, data: { message: setupNotificationTriggers_(body.mode) } });
     if (a === 'refreshQuota') return json_({ ok: true, data: refreshLineQuotaCache_() });
     if (a === 'testNotification') return json_({ ok: true, data: testNotification_(body.dryRun !== false, body.sampleText) });
@@ -185,53 +300,288 @@ function fmtThaiDate_(d) {
   return p.length !== 3 ? (d || 'ยังไม่กำหนดวัน') : (p[2] + ' ' + (TH_MONTHS_S[p[1] - 1] || '') + ' ' + (p[0] + 543));
 }
 
-// --- Data Operations ---
+// --- User Authentication Operations ---
+function readAllUsersInternal_() {
+  var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_USERS, USER_COLS), lr = sh.getLastRow();
+  if (lr <= 1) return [];
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  return sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues().reduce(function (arr, r, rIdx) {
+    var o = { _rowIndex: rIdx + 2 };
+    headers.forEach(function (h, i) { o[h] = String(r[i] || '').trim(); });
+    if (o.userId && o.username) arr.push(o);
+    return arr;
+  }, []);
+}
+
+function readPublicUsers_() {
+  return readAllUsersInternal_().map(function (u) {
+    return {
+      userId: u.userId,
+      username: u.username,
+      displayName: sanitizeNoEmoji(u.displayName || u.username),
+      role: u.role === 'ADMIN' ? 'ADMIN' : 'STAFF',
+      isActive: String(u.isActive).toUpperCase() !== 'FALSE',
+      createdAt: u.createdAt,
+      lastLoginAt: u.lastLoginAt
+    };
+  });
+}
+
+function handleUserLogin_(username, password) {
+  var un = sanitizeNoEmoji(username || '').toLowerCase();
+  var pw = String(password || '');
+  if (!un || !pw) throw new Error('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');
+
+  var users = readAllUsersInternal_();
+  var targetUser = null, targetRow = -1;
+  for (var i = 0; i < users.length; i++) {
+    if (users[i].username.toLowerCase() === un) {
+      targetUser = users[i];
+      targetRow = users[i]._rowIndex || (i + 2);
+      break;
+    }
+  }
+  if (!targetUser) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้');
+  if (String(targetUser.isActive).toUpperCase() === 'FALSE') throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
+
+  var pHash = hashPassword_(pw);
+  if (targetUser.passwordHash !== pHash) throw new Error('รหัสผ่านไม่ถูกต้อง');
+
+  // Update lastLoginAt
+  var nowIso = getBkkNow_().isoStr;
+  var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_USERS, USER_COLS);
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var colIdx = headers.indexOf('lastLoginAt') + 1;
+  if (colIdx > 0 && targetRow > 1) {
+    sh.getRange(targetRow, colIdx).setValue(nowIso);
+  }
+
+  return {
+    user: {
+      userId: targetUser.userId,
+      username: targetUser.username,
+      displayName: sanitizeNoEmoji(targetUser.displayName || targetUser.username),
+      role: targetUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF'
+    }
+  };
+}
+
+function saveUser_(payload) {
+  var p = payload || {};
+  var uid = sanitizeNoEmoji(p.userId || '').trim();
+  var un = sanitizeNoEmoji(p.username || '').toLowerCase();
+
+  var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_USERS, USER_COLS);
+  var lr = sh.getLastRow();
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var rows = lr > 1 ? sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues() : [];
+  var idIdx = headers.indexOf('userId'), unIdx = headers.indexOf('username');
+  var dispIdx = headers.indexOf('displayName'), roleIdx = headers.indexOf('role'), actIdx = headers.indexOf('isActive');
+  var foundIdx = -1, foundByUsernameIdx = -1, maxIdNum = 0;
+
+  for (var i = 0; i < rows.length; i++) {
+    var rId = String(rows[i][idIdx] || '').trim();
+    var rUn = String(rows[i][unIdx] || '').trim().toLowerCase();
+    if (rId.indexOf('USR-') === 0) {
+      var num = parseInt(rId.slice(4), 10);
+      if (!isNaN(num) && num > maxIdNum) maxIdNum = num;
+    }
+    if (uid && rId === uid) foundIdx = i;
+    if (un && rUn === un) foundByUsernameIdx = i;
+  }
+
+  if (p.isNew && foundByUsernameIdx !== -1) {
+    throw new Error('ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น');
+  }
+  if (foundIdx === -1 && !p.isNew && foundByUsernameIdx !== -1) {
+    foundIdx = foundByUsernameIdx;
+  }
+
+  var nowIso = getBkkNow_().isoStr;
+  if (foundIdx !== -1) {
+    // Update existing user (supports partial updates such as toggling isActive)
+    var foundRow = foundIdx + 2;
+    var curRow = rows[foundIdx];
+    var curUserId = String(curRow[idIdx] || '').trim();
+    var curUn = String(curRow[unIdx] || '').trim().toLowerCase();
+    var nextDisp = p.displayName !== undefined ? sanitizeNoEmoji(p.displayName) : String(curRow[dispIdx] || curUn).trim();
+    if (!nextDisp) throw new Error('กรุณาระบุชื่อที่แสดงผล');
+    var nextRole = p.role !== undefined ? (String(p.role).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF') : (String(curRow[roleIdx] || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF');
+    var nextActive = p.isActive !== undefined ? (p.isActive !== false && String(p.isActive).toUpperCase() !== 'FALSE' ? 'TRUE' : 'FALSE') : (String(curRow[actIdx]).toUpperCase() !== 'FALSE' ? 'TRUE' : 'FALSE');
+    if (curUn === 'admin' && nextActive === 'FALSE') {
+      throw new Error('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลัก (admin) ได้');
+    }
+
+    headers.forEach(function (h, colI) {
+      var col = colI + 1;
+      if (h === 'displayName') sh.getRange(foundRow, col).setValue(nextDisp);
+      if (h === 'role') sh.getRange(foundRow, col).setValue(nextRole);
+      if (h === 'isActive') sh.getRange(foundRow, col).setValue(nextActive);
+      if (h === 'passwordHash' && p.password) {
+        if (String(p.password).length < 4) throw new Error('รหัสผ่านต้องมีอย่างน้อย 4 ตัวอักษร');
+        sh.getRange(foundRow, col).setValue(hashPassword_(p.password));
+      }
+    });
+    return { userId: curUserId, username: curUn, displayName: nextDisp, role: nextRole, isActive: nextActive === 'TRUE' };
+  } else {
+    // Create new user
+    if (!un || un.length < 3) throw new Error('ชื่อผู้ใช้ต้องมีอย่างน้อย 3 ตัวอักษร');
+    var disp = sanitizeNoEmoji(p.displayName || un);
+    if (!disp) throw new Error('กรุณาระบุชื่อที่แสดงผล');
+    if (!p.password || String(p.password).length < 4) throw new Error('กรุณาระบุรหัสผ่านอย่างน้อย 4 ตัวอักษรสำหรับผู้ใช้ใหม่');
+    var role = (p.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF';
+    var isActive = p.isActive !== false && String(p.isActive).toUpperCase() !== 'FALSE' ? 'TRUE' : 'FALSE';
+    var newId = 'USR-' + String(maxIdNum + 1).padStart(3, '0');
+    var newRow = headers.map(function (h) {
+      if (h === 'userId') return newId;
+      if (h === 'username') return un;
+      if (h === 'passwordHash') return hashPassword_(p.password);
+      if (h === 'displayName') return disp;
+      if (h === 'role') return role;
+      if (h === 'isActive') return isActive;
+      if (h === 'createdAt') return nowIso;
+      if (h === 'lastLoginAt') return '';
+      return '';
+    });
+    sh.appendRow(newRow);
+    formatPlainText_(sh, headers.length);
+    return { userId: newId, username: un, displayName: disp, role: role, isActive: isActive === 'TRUE' };
+  }
+}
+
+function deleteUser_(userId) {
+  var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_USERS, USER_COLS);
+  var lr = sh.getLastRow();
+  if (lr <= 1) throw new Error('ไม่พบข้อมูลผู้ใช้');
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var uIdx = headers.indexOf('userId');
+  var actIdx = headers.indexOf('isActive');
+  var vals = sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues();
+
+  for (var i = 0; i < vals.length; i++) {
+    if (String(vals[i][uIdx]).trim() === String(userId).trim()) {
+      sh.getRange(i + 2, actIdx + 1).setValue('FALSE');
+      return { success: true, userId: userId };
+    }
+  }
+  throw new Error('ไม่พบรหัสผู้ใช้: ' + userId);
+}
+
+// --- Data Operations (Appointments & Attribution) ---
 function readAllApts_(includeDeleted) {
   var sh = ensureSheet_(SpreadsheetApp.getActiveSpreadsheet(), SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) return [];
-  return sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues().reduce(function (arr, r) {
-    var o = {}; APT_COLS.forEach(function (c, i) { o[c] = String(r[i] || '').trim(); });
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var delIdx = headers.indexOf('deletedAt');
+
+  return sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues().reduce(function (arr, r) {
+    var o = {};
+    headers.forEach(function (c, i) { o[c] = String(r[i] || '').trim(); });
     o.status = normalizeStatus_(o.status);
-    o.remindDaysBefore = Number(o.remindDaysBefore || 1); o.remindHoursBefore = Number(o.remindHoursBefore || 1);
+    o.remindDaysBefore = Number(o.remindDaysBefore || 1);
+    o.remindHoursBefore = Number(o.remindHoursBefore || 1);
     o.rescheduleCount = Number(o.rescheduleCount || 0);
-    if (o.id && (includeDeleted || !o.deletedAt)) arr.push(o);
+    o.createdBy = sanitizeNoEmoji(o.createdBy || o.updatedBy || 'ผู้ใช้งานระบบ');
+    o.statusChangedBy = sanitizeNoEmoji(o.statusChangedBy || '');
+    o.statusChangedAt = sanitizeNoEmoji(o.statusChangedAt || '');
+    o.statusReason = sanitizeNoEmoji(o.statusReason || '');
+
+    var isDel = delIdx !== -1 && Boolean(String(r[delIdx] || '').trim());
+    if (o.id && (includeDeleted || !isDel)) arr.push(o);
     return arr;
   }, []);
 }
 
 function createApt_(inp) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS);
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
   var now = getBkkNow_(), pfx = 'APT-' + now.dateStr.replace(/-/g, '') + '-';
   var max = readAllApts_(true).reduce(function (m, x) { return x.id && x.id.indexOf(pfx) === 0 ? Math.max(m, +x.id.slice(pfx.length) || 0) : m; }, 0);
+
+  var creator = sanitizeNoEmoji(inp.createdBy || inp.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ';
+  var st = normalizeStatus_(inp.status);
   var rec = {
-    id: pfx + String(max + 1).padStart(3, '0'), title: sanitizeNoEmoji(inp.title), appointmentDate: sanitizeNoEmoji(inp.appointmentDate),
-    appointmentTime: sanitizeNoEmoji(inp.appointmentTime), location: sanitizeNoEmoji(inp.location), contactPerson: sanitizeNoEmoji(inp.contactPerson),
-    status: normalizeStatus_(inp.status), remindDaysBefore: inp.remindDaysBefore != null ? +inp.remindDaysBefore : 1,
-    remindHoursBefore: inp.remindHoursBefore != null ? +inp.remindHoursBefore : 1, notifiedDayForSlot: '', notifiedHourForSlot: '',
-    rescheduleCount: 0, notes: sanitizeNoEmoji(inp.notes), updatedBy: sanitizeNoEmoji(inp.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ',
-    createdAt: now.isoStr, updatedAt: now.isoStr, deletedAt: ''
+    id: pfx + String(max + 1).padStart(3, '0'),
+    title: sanitizeNoEmoji(inp.title),
+    appointmentDate: sanitizeNoEmoji(inp.appointmentDate),
+    appointmentTime: sanitizeNoEmoji(inp.appointmentTime),
+    location: sanitizeNoEmoji(inp.location),
+    contactPerson: sanitizeNoEmoji(inp.contactPerson),
+    status: st,
+    remindDaysBefore: inp.remindDaysBefore != null ? +inp.remindDaysBefore : 1,
+    remindHoursBefore: inp.remindHoursBefore != null ? +inp.remindHoursBefore : 1,
+    notifiedDayForSlot: '',
+    notifiedHourForSlot: '',
+    rescheduleCount: 0,
+    notes: sanitizeNoEmoji(inp.notes),
+    createdBy: creator,
+    statusChangedBy: st !== STATUS.CONFIRMED ? (sanitizeNoEmoji(inp.statusChangedBy) || creator) : '',
+    statusChangedAt: st !== STATUS.CONFIRMED ? now.isoStr : '',
+    statusReason: sanitizeNoEmoji(inp.statusReason || ''),
+    updatedBy: creator,
+    createdAt: now.isoStr,
+    updatedAt: now.isoStr,
+    deletedAt: ''
   };
   validateApt_(rec);
-  sh.appendRow(APT_COLS.map(function (c) { return String(rec[c]); }));
-  sh.getRange(sh.getLastRow(), 1, 1, APT_COLS.length).setNumberFormat('@');
+
+  var rowVals = headers.map(function (c) { return rec[c] !== undefined ? String(rec[c]) : ''; });
+  sh.appendRow(rowVals);
+  sh.getRange(sh.getLastRow(), 1, 1, headers.length).setNumberFormat('@');
   return rec;
 }
 
-function updateApt_(id, patch, expUpdated, reason) {
+function updateApt_(id, patch, expUpdated, reason, currentUser) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) throw new Error('ไม่พบนัดหมาย');
-  var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues(), targetRow = -1, cur = null;
-  var delIdx = APT_COLS.indexOf('deletedAt');
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var vals = sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues(), targetRow = -1, cur = null;
+  var delIdx = headers.indexOf('deletedAt');
+
   for (var r = vals.length - 1; r >= 0; r--) {
-    if (String(vals[r][0]).trim() === String(id).trim() && !String(vals[r][delIdx] || '').trim()) {
-      targetRow = r + 2; cur = {}; APT_COLS.forEach(function (c, i) { cur[c] = String(vals[r][i] || '').trim(); });
+    var isDel = delIdx !== -1 && Boolean(String(vals[r][delIdx] || '').trim());
+    if (String(vals[r][0]).trim() === String(id).trim() && !isDel) {
+      targetRow = r + 2; cur = {}; headers.forEach(function (c, i) { cur[c] = String(vals[r][i] || '').trim(); });
       break;
     }
   }
   if (!cur) throw new Error('ไม่พบรหัส: ' + id);
+
+  // Concurrency Check
+  if (expUpdated && cur.updatedAt && String(expUpdated).trim() !== String(cur.updatedAt).trim()) {
+    var err = new Error('ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว กรุณารีเฟรชก่อนทำรายการ');
+    err.code = 'CONCURRENCY_CONFLICT';
+    throw err;
+  }
+
   var now = getBkkNow_(), up = {};
-  APT_COLS.forEach(function (c) { up[c] = patch[c] !== undefined ? sanitizeNoEmoji(patch[c]) : cur[c]; });
-  up.id = cur.id; up.status = normalizeStatus_(up.status); up.createdAt = cur.createdAt; up.updatedAt = now.isoStr;
+  headers.forEach(function (c) { up[c] = patch[c] !== undefined ? sanitizeNoEmoji(patch[c]) : cur[c]; });
+  up.id = cur.id;
+  up.status = normalizeStatus_(up.status);
+  up.createdAt = cur.createdAt;
+  up.updatedAt = now.isoStr;
+
+  // Preserve Creator
+  up.createdBy = cur.createdBy || cur.updatedBy || 'ผู้ใช้งานระบบ';
+  var actingUser = sanitizeNoEmoji(currentUser || patch.updatedBy || up.createdBy);
+  up.updatedBy = actingUser;
+
+  var statusChanged = normalizeStatus_(cur.status) !== normalizeStatus_(up.status);
+  if (statusChanged) {
+    if (up.status === STATUS.CONFIRMED) {
+      up.statusChangedBy = '';
+      up.statusChangedAt = '';
+      up.statusReason = '';
+    } else {
+      up.statusChangedBy = sanitizeNoEmoji(patch.statusChangedBy || actingUser);
+      up.statusChangedAt = now.isoStr;
+      up.statusReason = up.status === STATUS.CANCELLED ? sanitizeNoEmoji(patch.statusReason || reason || '') : sanitizeNoEmoji(patch.statusReason || '');
+    }
+  } else {
+    up.statusChangedBy = cur.statusChangedBy || '';
+    up.statusChangedAt = cur.statusChangedAt || '';
+    up.statusReason = patch.statusReason !== undefined ? sanitizeNoEmoji(patch.statusReason) : (cur.statusReason || '');
+  }
 
   var dChg = cur.appointmentDate !== up.appointmentDate, tChg = cur.appointmentTime !== up.appointmentTime;
   var rDChg = String(cur.remindDaysBefore) !== String(up.remindDaysBefore), rHChg = String(cur.remindHoursBefore) !== String(up.remindHoursBefore);
@@ -244,23 +594,33 @@ function updateApt_(id, patch, expUpdated, reason) {
   var lSh = ensureSheet_(ss, SH_RE_LOGS, RE_LOG_COLS), logs = [];
   ['appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status'].forEach(function (f, idx) {
     if (String(cur[f] || '') !== String(up[f] || '')) {
-      var le = { logId: 'LOG-' + now.epochMs + '-' + (idx + 1), appointmentId: cur.id, changedAt: now.isoStr, changedBy: up.updatedBy, fieldChanged: f, oldValue: cur[f] || '', newValue: up[f] || '', reason: sanitizeNoEmoji(reason || '') };
+      var le = { logId: 'LOG-' + now.epochMs + '-' + (idx + 1), appointmentId: cur.id, changedAt: now.isoStr, changedBy: up.updatedBy, fieldChanged: f, oldValue: cur[f] || '', newValue: up[f] || '', reason: sanitizeNoEmoji(reason || up.statusReason || '') };
       logs.push(le); lSh.appendRow(RE_LOG_COLS.map(function (c) { return le[c]; }));
     }
   });
-  sh.getRange(targetRow, 1, 1, APT_COLS.length).setNumberFormat('@').setValues([APT_COLS.map(function (c) { return String(up[c]); })]);
+
+  var updatedVals = headers.map(function (c) { return String(up[c] !== undefined ? up[c] : ''); });
+  sh.getRange(targetRow, 1, 1, headers.length).setNumberFormat('@').setValues([updatedVals]);
   return { appointment: up, logs: logs };
 }
 
 function deleteApt_(id, user) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) throw new Error('ไม่พบนัดหมาย');
-  var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues(), delIdx = APT_COLS.indexOf('deletedAt'), removed = null;
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var vals = sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues();
+  var delIdx = headers.indexOf('deletedAt'), removed = null;
+  var now = getBkkNow_();
+
   for (var r = vals.length - 1; r >= 0; r--) {
-    var rowId = String(vals[r][0]).trim(), isDel = Boolean(String(vals[r][delIdx] || '').trim());
+    var rowId = String(vals[r][0]).trim(), isDel = delIdx !== -1 && Boolean(String(vals[r][delIdx] || '').trim());
     if (rowId === String(id).trim() || isDel) {
       if (rowId === String(id).trim() && !removed) {
-        removed = {}; APT_COLS.forEach(function (c, i) { removed[c] = String(vals[r][i] || '').trim(); });
+        removed = {}; headers.forEach(function (c, i) { removed[c] = String(vals[r][i] || '').trim(); });
+        // Audit log for deletion
+        var lSh = ensureSheet_(ss, SH_RE_LOGS, RE_LOG_COLS);
+        var le = { logId: 'LOG-' + now.epochMs + '-DEL', appointmentId: id, changedAt: now.isoStr, changedBy: sanitizeNoEmoji(user || 'ผู้ใช้งานระบบ'), fieldChanged: 'DELETED', oldValue: removed.title || '-', newValue: 'ลบนัดหมาย', reason: 'ลบออกจากระบบ' };
+        lSh.appendRow(RE_LOG_COLS.map(function (c) { return le[c]; }));
       }
       sh.deleteRow(r + 2);
     }
@@ -303,6 +663,7 @@ function readLogs_(name, cols, lim) {
 // --- Notification Engine ---
 function runNotificationEngine() {
   return withLock_(function () {
+    cleanExpiredTriggers_();
     var now = getBkkNow_(); updateMeta_({ LAST_TRIGGER_RUN_AT: now.isoStr });
     var m = getMetaMap_(), qs = +m.QUIET_HOURS_START || 22, qe = +m.QUIET_HOURS_END || 7, dh = +m.DAILY_DIGEST_HOUR || 8;
     var quiet = qs > qe ? (now.hour >= qs || now.hour < qe) : (now.hour >= qs && now.hour < qe);
@@ -347,12 +708,16 @@ function runNotificationEngine() {
 function applySlotUpdates_(ups) {
   var ss = SpreadsheetApp.getActiveSpreadsheet(), sh = ensureSheet_(ss, SH_APTS, APT_COLS), lr = sh.getLastRow();
   if (lr <= 1) return;
-  var vals = sh.getRange(2, 1, lr - 1, APT_COLS.length).getDisplayValues();
-  var dCol = APT_COLS.indexOf('notifiedDayForSlot') + 1, hCol = APT_COLS.indexOf('notifiedHourForSlot') + 1, delIdx = APT_COLS.indexOf('deletedAt');
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
+  var vals = sh.getRange(2, 1, lr - 1, headers.length).getDisplayValues();
+  var dCol = headers.indexOf('notifiedDayForSlot') + 1, hCol = headers.indexOf('notifiedHourForSlot') + 1, delIdx = headers.indexOf('deletedAt');
   ups.forEach(function (u) {
     for (var r = vals.length - 1; r >= 0; r--) {
-      if (String(vals[r][0]).trim() === u.id && !String(vals[r][delIdx] || '').trim()) {
-        sh.getRange(r + 2, dCol).setValue(u.dSlot); sh.getRange(r + 2, hCol).setValue(u.hSlot); break;
+      var isDel = delIdx !== -1 && Boolean(String(vals[r][delIdx] || '').trim());
+      if (String(vals[r][0]).trim() === u.id && !isDel) {
+        if (dCol > 0) sh.getRange(r + 2, dCol).setValue(u.dSlot);
+        if (hCol > 0) sh.getRange(r + 2, hCol).setValue(u.hSlot);
+        break;
       }
     }
   });
@@ -360,7 +725,17 @@ function applySlotUpdates_(ups) {
 
 function fmtAptLine_(a, idx, mask) {
   var c = sanitizeNoEmoji(a.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***';
-  return idx + '. [' + a.id + '] ' + sanitizeNoEmoji(a.title) + '\n   วันนัด: ' + fmtThaiDate_(a.appointmentDate) + ' เวลา ' + (a.appointmentTime || '-') + ' น.\n   สถานที่: ' + sanitizeNoEmoji(a.location || '-') + ' | ผู้นัด: ' + c + ' | [' + sanitizeNoEmoji(a.status) + ']';
+  var creator = sanitizeNoEmoji(a.createdBy || a.updatedBy || '-');
+  var lines = [
+    idx + '. [' + a.id + '] ' + sanitizeNoEmoji(a.title),
+    '   วันนัด: ' + fmtThaiDate_(a.appointmentDate) + ' เวลา ' + (a.appointmentTime || '-') + ' น.',
+    '   สถานที่: ' + sanitizeNoEmoji(a.location || '-') + ' | ผู้นัด: ' + c + ' | [' + sanitizeNoEmoji(a.status) + ']',
+    '   ผู้สร้าง: ' + creator
+  ];
+  if (a.statusChangedBy && normalizeStatus_(a.status) !== STATUS.CONFIRMED) {
+    lines.push('   ผู้ดำเนินการ: ' + sanitizeNoEmoji(a.statusChangedBy));
+  }
+  return lines.join('\n');
 }
 
 // --- LINE API ---
@@ -387,7 +762,7 @@ function sendInstantAptNotification_(apt, isUpdate) {
   if (!target || !apt) return { sent: false, reason: 'NO_TARGET' };
   var m = getMetaMap_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
   var c = sanitizeNoEmoji(apt.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***';
-  
+
   var hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
   var notifType = isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE';
   var st = normalizeStatus_(apt.status);
@@ -402,6 +777,7 @@ function sendInstantAptNotification_(apt, isUpdate) {
     notifType = 'INSTANT_REOPEN';
   }
 
+  var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || '-');
   var lines = [
     hdr,
     'รหัส: ' + sanitizeNoEmoji(apt.id || '-'),
@@ -409,10 +785,19 @@ function sendInstantAptNotification_(apt, isUpdate) {
     'วันนัด: ' + fmtThaiDate_(apt.appointmentDate) + ' เวลา ' + sanitizeNoEmoji(apt.appointmentTime || '-') + ' น.',
     'สถานที่: ' + sanitizeNoEmoji(apt.location || '-'),
     'ผู้นัดพบ: ' + c,
-    'สถานะ: [' + sanitizeNoEmoji(apt.status) + ']'
+    'สถานะ: [' + sanitizeNoEmoji(apt.status) + ']',
+    'ผู้สร้างนัดหมาย: ' + creator
   ];
+  if (st === STATUS.COMPLETED && apt.statusChangedBy) {
+    lines.push('ผู้ยืนยันเสร็จสิ้น: ' + sanitizeNoEmoji(apt.statusChangedBy));
+  } else if (st === STATUS.CANCELLED) {
+    if (apt.statusChangedBy) lines.push('ผู้ยกเลิกนัด: ' + sanitizeNoEmoji(apt.statusChangedBy));
+    if (apt.statusReason) lines.push('สาเหตุการยกเลิก: ' + sanitizeNoEmoji(apt.statusReason));
+  } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) {
+    lines.push('ผู้แก้ไขล่าสุด: ' + sanitizeNoEmoji(apt.updatedBy));
+  }
   if (apt.notes) lines.push('หมายเหตุ: ' + sanitizeNoEmoji(apt.notes));
-  if (apt.updatedBy) lines.push('ผู้บันทึก: ' + sanitizeNoEmoji(apt.updatedBy));
+
   var msg = sanitizeNoEmoji(lines.join('\n'));
   var pushRes = pushLine_(target, msg, Utilities.getUuid(), false, notifType, apt.id);
   if (pushRes.ok) refreshLineQuotaCache_();
@@ -476,7 +861,7 @@ function parseWebhookCmd_(raw) {
   };
 
   if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
-    return '[คำสั่งตรวจสอบตารางงาน]\n- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดที่กำลังจะมาถึงทั้งหมด\n- คิว วันนี้ : นัดวันนี้\n- คิว พรุ่งนี้ : นัดพรุ่งนี้\n- คิว สัปดาห์นี้ : นัดใน 7 วัน\n- คิว ค้างอยู่ : นัดเลยกำหนด\n- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน\n- คิว ปีนี้ / คิว ปี YYYY : สรุปสถิติประจำปี\n- คิว ค้นหา <คำค้น> : ค้นหางาน\n- คิว โควตา : เช็คโควตารายเดือน';
+    return '[คำสั่งตรวจสอบตารางงาน]\n- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดที่กำลังจะมาถึงทั้งหมด\n- คิว วันนี้ : นัดวันนี้\n- คิว พรุ่งนี้ : นัดพรุ่งนี้\n- คิว สัปดาห์นี้ : นัดใน 7 วัน\n- คิว ค้างอยู่ : นัดเลยกำหนด\n- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน\n- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569\n- คิว ปีนี้ / คิว ปี YYYY : สรุปสถิติประจำปี\n- คิว ค้นหา <คำค้น> : ค้นหางาน\n- คิว โควตา : เช็คโควตารายเดือน';
   }
   if (arg === 'โควตา') return '[โควตา LINE เดือนนี้] ใช้ไปแล้ว ' + (m.CACHED_QUOTA_USED || '0') + ' / ' + (m.CACHED_QUOTA_LIMIT || '300') + ' ข้อความ';
   if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
@@ -511,6 +896,17 @@ function parseWebhookCmd_(raw) {
     var pfx = now.year + '-' + pad2_(now.month) + '-', mi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(pfx) === 0; });
     return mi.length ? fmt('[งานเดือน' + TH_MONTHS[now.month - 1] + ' ' + (now.year + 543) + '] (' + mi.length + ' รายการ)', mi) : 'ไม่มีนัดหมายเดือนนี้';
   }
+  var mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
+  if (mm) {
+    var yr = +mm[2], mo = +mm[1];
+    if (yr > 2400) yr -= 543;
+    if (mo >= 1 && mo <= 12) {
+      var mpfx = yr + '-' + pad2_(mo) + '-';
+      var mlist = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(mpfx) === 0; });
+      return mlist.length ? fmt('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + '] (' + mlist.length + ' รายการ)', mlist) : 'ไม่มีนัดหมายในเดือนที่เลือก';
+    }
+    return '[ข้อผิดพลาด] รูปแบบเดือนไม่ถูกต้อง เช่น คิว เดือน 12/2569';
+  }
   if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
     var ty = arg === 'ปีนี้' ? now.year : now.year + 1, yi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(ty + '-') === 0; });
     var comp = yi.filter(function(a){ return a.status === STATUS.COMPLETED; }).length;
@@ -519,11 +915,11 @@ function parseWebhookCmd_(raw) {
     var rate = yi.length > 0 ? Math.round((comp / yi.length) * 100) : 0;
     var hdr = '[สรุปสถิติประจำปี พ.ศ. ' + (ty + 543) + ']\nรวมทั้งหมด: ' + yi.length + ' งาน | นัดหมายแล้ว: ' + act + ' | สิ้นสุด: ' + comp + ' (' + rate + '%) | ยกเลิก: ' + canc;
     if (!yi.length) return hdr + '\nยังไม่มีนัดหมายในปีนี้';
-    return hdr + '\n' + yi.slice(0, 8).map(function (a, i) { return (i + 1) + '. [' + a.appointmentDate + '] ' + a.title + ' (' + a.status + ')'; }).join('\n');
+    return hdr + '\n' + yi.slice(0, 8).map(function (a, i) { return (i + 1) + '. [' + a.appointmentDate + '] ' + a.title + ' (' + a.status + ') - สร้างโดย: ' + (a.createdBy || a.updatedBy || '-'); }).join('\n');
   }
   var sm = arg.match(/^ค้นหา\s+(.+)$/);
   if (sm) {
-    var kw = sm[1].trim().toLowerCase(), found = list.filter(function (a) { return (a.id + ' ' + a.title + ' ' + a.location + ' ' + a.contactPerson).toLowerCase().indexOf(kw) !== -1; });
+    var kw = sm[1].trim().toLowerCase(), found = list.filter(function (a) { return (a.id + ' ' + a.title + ' ' + a.location + ' ' + a.contactPerson + ' ' + (a.createdBy || '') + ' ' + (a.statusChangedBy || '')).toLowerCase().indexOf(kw) !== -1; });
     return found.length ? fmt('[ผลการค้นหา "' + sm[1].trim() + '"] (' + found.length + ' รายการ)', found.slice(0, 15)) : 'ไม่พบงานที่ตรงกัน';
   }
   return '[ไม่พบคำสั่ง] พิมพ์ "คิว ช่วยเหลือ" เพื่อดูคำสั่งทั้งหมด';

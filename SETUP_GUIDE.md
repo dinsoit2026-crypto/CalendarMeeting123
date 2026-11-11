@@ -25,7 +25,7 @@
 4. กลับมาที่หน้า **Editor (`< >`)**:
    * เปิดไฟล์ `appsscript.json` แล้วนำเนื้อหาจากไฟล์ `C:\Calendar\gas\appsscript.json` ไปวางทับ (เพื่อบังคับเขตเวลา `Asia/Bangkok`)
    * เปิดไฟล์ `Code.gs` แล้วนำเนื้อหาทั้งหมดจากไฟล์ `C:\Calendar\gas\Code.gs` ไปวางทับ กดบันทึก (Ctrl+S)
-5. เลือกฟังก์ชัน `setupDatabase` จากแถบด้านบนแล้วกด **Run** (ระบบจะขอสิทธิ์เข้าถึง Google Sheets ให้กดอนุญาต) ระบบจะสร้างแผ่นงานทั้ง 4 แผ่น (`Appointments`, `RescheduleLogs`, `NotificationLogs`, `SystemMeta`) พร้อมตั้งฟอร์แมตคอลัมน์เป็น **Plain Text (`@`)** อัตโนมัติ
+5. เลือกฟังก์ชัน `setupDatabase` จากแถบด้านบนแล้วกด **Run** (ระบบจะขอสิทธิ์เข้าถึง Google Sheets ให้กดอนุญาต) ระบบจะสร้างแผ่นงานทั้ง 5 แผ่น (`Users`, `Appointments`, `RescheduleLogs`, `NotificationLogs`, `SystemMeta`) พร้อมตั้งฟอร์แมตคอลัมน์เป็น **Plain Text (`@`)** และสร้างบัญชีเริ่มต้น (`admin` / `somchai` / `wipada`) ให้อัตโนมัติ
 
 ---
 

@@ -217,13 +217,134 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.3.0 และ 2.4.0 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 6, 'ต้องมีประวัติอย่างน้อย 6 เวอร์ชัน');
-    const v230 = PatchNotes.find(p => p.version === '2.3.0');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 และ 2.5.0 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 7, 'ต้องมีประวัติอย่างน้อย 7 เวอร์ชัน');
     const v240 = PatchNotes.find(p => p.version === '2.4.0');
-    assert(v230 && v230.changes && v230.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.3.0');
+    const v250 = PatchNotes.find(p => p.version === '2.5.0');
     assert(v240 && v240.changes && v240.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.4.0');
+    assert(v250 && v250.changes && v250.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.0');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
+  });
+
+  // --- Suite 8: User Authentication & SHA-256 Hashing ---
+  runTest('8. User Authentication', 'การเข้ารหัส SHA-256 และการยืนยันตัวตนถูกต้อง', () => {
+    const h1234 = Logic.hashPassword('1234');
+    assertEqual(h1234, '03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4', 'SHA-256 ของ 1234 ถูกต้อง');
+    const hAdmin = Logic.hashPassword('admin');
+    assertEqual(hAdmin, '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'SHA-256 ของ admin ถูกต้อง');
+
+    // ตรวจสอบการล็อกอิน
+    const authSuccess = Logic.authenticateUser(Logic.DEFAULT_USERS, 'admin', 'admin');
+    assert(authSuccess.ok && authSuccess.user && authSuccess.user.role === 'ADMIN', 'เข้าสู่ระบบ admin สำเร็จ');
+
+    const authStaff = Logic.authenticateUser(Logic.DEFAULT_USERS, 'somchai', '1234');
+    assert(authStaff.ok && authStaff.user && authStaff.user.role === 'STAFF', 'เข้าสู่ระบบ somchai สำเร็จ');
+
+    const authWrongPw = Logic.authenticateUser(Logic.DEFAULT_USERS, 'admin', 'wrongpass');
+    assert(!authWrongPw.ok, 'รหัสผ่านผิดต้องไม่ผ่าน');
+
+    const authUnknownUser = Logic.authenticateUser(Logic.DEFAULT_USERS, 'nobody', '1234');
+    assert(!authUnknownUser.ok, 'ผู้ใช้ไม่มีในระบบต้องไม่ผ่าน');
+
+    const authDisabledUser = Logic.authenticateUser([
+      { userId: 'USR-999', username: 'disabled', displayName: 'ถูกระงับ', role: 'STAFF', passwordHash: h1234, isActive: false }
+    ], 'disabled', '1234');
+    assert(!authDisabledUser.ok, 'ผู้ใช้ถูกระงับต้องไม่ผ่าน');
+
+    const valNewErr = Logic.validateUserInput({ username: 'ab', displayName: 'สั้นไป', password: '123' }, true);
+    assert(!valNewErr.valid, 'สร้างผู้ใช้ใหม่ที่ชื่อผู้ใช้หรือรหัสผ่านสั้นเกินไปต้องไม่ผ่าน');
+
+    const valUpdateOk = Logic.validateUserInput({ username: 'somchai', displayName: 'คุณสมชาย (อัปเดต)', role: 'ADMIN' }, false);
+    assert(valUpdateOk.valid && valUpdateOk.sanitized.role === 'ADMIN', 'อัปเดตผู้ใช้เดิมโดยไม่ส่งรหัสผ่านใหม่ต้องผ่าน');
+  });
+
+  // --- Suite 9: User Attribution & Reschedule Immutability ---
+  runTest('9. User Attribution', 'บันทึกผู้สร้าง ผู้เสร็จสิ้น ผู้ยกเลิก และคงชื่อผู้สร้างเดิมไว้เสมอ', () => {
+    // 1. นายสมชาย สร้างนัดหมาย
+    const apt = Logic.createAppointmentRecord({
+      title: 'นัดตรวจระบบสำคัญ',
+      appointmentDate: '2026-11-20',
+      appointmentTime: '10:00',
+      location: 'ห้องประชุม A',
+      contactPerson: 'คุณลูกค้า',
+      createdBy: 'คุณสมชาย'
+    }, [], '2026-11-10T09:00:00+07:00');
+
+    assertEqual(apt.createdBy, 'คุณสมชาย', 'ผู้สร้างต้องเป็นคุณสมชาย');
+    assertEqual(apt.statusChangedBy, '', 'ตอนสร้างสถานะเป็น นัดหมายแล้ว ยังไม่มีผู้เปลี่ยนสถานะ');
+
+    // 2. นายวิภาดา เข้ามาเลื่อนเวลา และเปลี่ยนสถานที่
+    const resEdit = Logic.updateAppointmentRecord(apt, {
+      appointmentTime: '11:00',
+      location: 'ห้องประชุม B',
+      updatedBy: 'คุณวิภาดา'
+    }, { nowIso: '2026-11-10T10:00:00+07:00', reason: 'ห้อง A ติดใช้งาน' });
+
+    assertEqual(resEdit.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างเดิมต้องไม่เปลี่ยน');
+    assertEqual(resEdit.record.updatedBy, 'คุณวิภาดา', 'ผู้แก้ไขล่าสุดต้องเป็นคุณวิภาดา');
+
+    // 3. ผู้ดูแลระบบ มากดยืนยัน เสร็จสิ้นการนัดหมาย
+    const resComplete = Logic.updateAppointmentRecord(resEdit.record, {
+      status: Logic.STATUS.COMPLETED,
+      statusChangedBy: 'ผู้ดูแลระบบ',
+      updatedBy: 'ผู้ดูแลระบบ'
+    }, { nowIso: '2026-11-20T12:00:00+07:00' });
+
+    assertEqual(resComplete.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างเดิมต้องยังคงเป็นคุณสมชาย');
+    assertEqual(resComplete.record.statusChangedBy, 'ผู้ดูแลระบบ', 'ผู้ยืนยันเสร็จสิ้นต้องเป็นผู้ดูแลระบบ');
+    assertEqual(resComplete.record.status, Logic.STATUS.COMPLETED, 'สถานะเป็น สิ้นสุดการนัดหมาย');
+
+    // 4. ทดสอบกรณียกเลิกนัดหมายพร้อมระบุสาเหตุ
+    const resCancel = Logic.updateAppointmentRecord(apt, {
+      status: Logic.STATUS.CANCELLED,
+      statusChangedBy: 'คุณนภัสสร',
+      statusReason: 'ลูกค้ายกเลิกกะทันหัน',
+      updatedBy: 'คุณนภัสสร'
+    }, { nowIso: '2026-11-15T09:00:00+07:00' });
+
+    assertEqual(resCancel.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างต้องยังคงเป็นคุณสมชาย');
+    assertEqual(resCancel.record.statusChangedBy, 'คุณนภัสสร', 'ผู้ยกเลิกต้องเป็นคุณนภัสสร');
+    assertEqual(resCancel.record.statusReason, 'ลูกค้ายกเลิกกะทันหัน', 'สาเหตุการยกเลิกต้องถูกต้อง');
+
+    // 5. ทดสอบกรณีคืนสถานะนัดหมายกลับเป็น นัดหมายแล้ว ต้องล้างข้อมูลผู้ยกเลิกและสาเหตุเดิม
+    const resReopen = Logic.updateAppointmentRecord(resCancel.record, {
+      status: Logic.STATUS.CONFIRMED,
+      updatedBy: 'คุณสมชาย'
+    }, { nowIso: '2026-11-16T09:00:00+07:00', reason: 'คืนสถานะนัดหมาย' });
+    assertEqual(resReopen.record.status, Logic.STATUS.CONFIRMED, 'สถานะต้องกลับมาเป็น นัดหมายแล้ว');
+    assertEqual(resReopen.record.statusChangedBy, '', 'ต้องล้างชื่อผู้เปลี่ยนสถานะเดิมเมื่อคืนสถานะนัด');
+    assertEqual(resReopen.record.statusReason, '', 'ต้องล้างสาเหตุการยกเลิกเดิมเมื่อคืนสถานะนัด');
+
+    // 6. ทดสอบคำนวณสถิติแยกตามรายชื่อผู้ใช้ (ไม่นับซ้ำระหว่างผู้สร้างและผู้ปิดงาน)
+    const userStats = Logic.calculateUserStats([resComplete.record, resCancel.record]);
+    const somchaiStat = userStats.find(u => u.user === 'คุณสมชาย');
+    const adminStat = userStats.find(u => u.user === 'ผู้ดูแลระบบ');
+    const naphatStat = userStats.find(u => u.user === 'คุณนภัสสร');
+    assert(somchaiStat && somchaiStat.createdTotal === 2 && somchaiStat.completedTotal === 0, 'คุณสมชายมียอดสร้าง 2 งาน และยอดกดเสร็จสิ้นเอง 0 งาน');
+    assert(adminStat && adminStat.createdTotal === 0 && adminStat.completedTotal === 1, 'ผู้ดูแลระบบมียอดกดเสร็จสิ้น 1 งาน');
+    assert(naphatStat && naphatStat.createdTotal === 0 && naphatStat.cancelledTotal === 1, 'คุณนภัสสรมียอดกดยกเลิก 1 งาน');
+  });
+
+  // --- Suite 10: Time-Slot Conflict Detection ---
+  runTest('10. Time-Slot Conflict', 'ตรวจจับเวลานัดหมายที่ชนกันได้อย่างถูกต้อง', () => {
+    const list = [
+      Logic.createAppointmentRecord({ id: 'APT-001', title: 'งานที่ 1', appointmentDate: '2026-11-25', appointmentTime: '10:00', location: 'ตึก A', contactPerson: 'คุณ ก' }, [], '2026-11-10T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ id: 'APT-002', title: 'งานที่ 2 ยกเลิกแล้ว', appointmentDate: '2026-11-25', appointmentTime: '10:00', location: 'ตึก B', contactPerson: 'คุณ ข', status: Logic.STATUS.CANCELLED }, [], '2026-11-10T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ id: 'APT-003', title: 'งานที่ 3 บ่าย', appointmentDate: '2026-11-25', appointmentTime: '13:00', location: 'ตึก C', contactPerson: 'คุณ ค' }, [], '2026-11-10T09:00:00+07:00')
+    ];
+
+    // ตรวจสอบเวลา 10:00 วันที่ 2026-11-25 (ต้องชนกับงานที่ 1 แต่งานที่ 2 ยกเลิกไปแล้วไม่นับ)
+    const conflicts = Logic.findTimeConflicts(list, '2026-11-25', '10:00');
+    assertEqual(conflicts.length, 1, 'ต้องพบงานชนกัน 1 งาน');
+    assertEqual(conflicts[0].id, 'APT-001', 'ต้องเป็นงาน APT-001');
+
+    // ตรวจสอบเวลา 10:00 โดยยกเว้นตัวเอง (APT-001) ต้องไม่ชน
+    const selfConflicts = Logic.findTimeConflicts(list, '2026-11-25', '10:00', 'APT-001');
+    assertEqual(selfConflicts.length, 0, 'เมื่อแก้ไขงานตัวเองต้องไม่แจ้งชนกับตัวเอง');
+
+    // ตรวจสอบเวลาที่ว่าง (14:00)
+    const noConflicts = Logic.findTimeConflicts(list, '2026-11-25', '14:00');
+    assertEqual(noConflicts.length, 0, 'เวลาที่ว่างต้องไม่พบงานชนกัน');
   });
 
   // --- Suite 7: Full Codebase Zero-Emoji Audit ---
