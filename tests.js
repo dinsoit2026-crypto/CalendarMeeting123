@@ -230,7 +230,7 @@
   if (typeof require !== 'undefined') {
     runTest('7. Codebase Audit', 'ไฟล์ทั้งหมดใน C:\\Calendar ต้องไม่มีอิโมจิหลุดรอด (ยกเว้นไอคอนปุ่มสลับธีมตามคำอนุญาตพิเศษ)', () => {
       const fs = require('fs'), path = require('path');
-      const files = ['index.html', 'style.css', 'logic.js', 'app.js', 'patchnotes.js', 'tests.html', 'tests.js', 'SETUP_GUIDE.md', path.join('gas', 'Code.gs'), path.join('gas', 'appsscript.json')];
+      const files = ['index.html', 'style.css', 'logic.js', 'app.js', 'patchnotes.js', 'tests.html', 'tests.js', 'README.md', 'CHANGELOG.md', 'SETUP_GUIDE.md', path.join('gas', 'Code.gs'), path.join('gas', 'appsscript.json')];
       files.forEach(f => {
         const full = path.join(__dirname, f);
         if (fs.existsSync(full)) {
