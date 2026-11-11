@@ -115,6 +115,22 @@
     assert(resReopened.reopened, 'ต้องติดสถานะ reopened');
   });
 
+  runTest('3. Status & Reschedule', 'การแก้ไข remindDaysBefore หรือ remindHoursBefore ต้องรีเซ็ต Slot แจ้งเตือน', () => {
+    let apt = Logic.createAppointmentRecord({
+      title: 'งานทดสอบรีเซ็ตการเตือน', appointmentDate: '2026-11-20', appointmentTime: '14:00',
+      location: 'ห้องประชุม', contactPerson: 'คุณทดสอบ', remindDaysBefore: 1, remindHoursBefore: 1
+    }, [], '2026-11-10T09:00:00+07:00');
+
+    apt.notifiedDayForSlot = '2026-11-20';
+    apt.notifiedHourForSlot = '2026-11-20T14:00';
+
+    const resDays = Logic.updateAppointmentRecord(apt, { remindDaysBefore: 2 }, { nowIso: '2026-11-10T10:00:00+07:00' });
+    assertEqual(resDays.record.notifiedDayForSlot, '', 'เปลี่ยนวันแจ้งเตือนล่วงหน้า notifiedDayForSlot ต้องถูกล้าง');
+
+    const resHours = Logic.updateAppointmentRecord(apt, { remindHoursBefore: 2 }, { nowIso: '2026-11-10T10:00:00+07:00' });
+    assertEqual(resHours.record.notifiedHourForSlot, '', 'เปลี่ยนชั่วโมงแจ้งเตือนก่อนเวลานัด notifiedHourForSlot ต้องถูกล้าง');
+  });
+
   runTest('3. Status & Reschedule', 'Optimistic Concurrency ตรวจจับการแก้ไขชนกัน', () => {
     const apt = Logic.createAppointmentRecord({ title: 'ทดสอบชนกัน', appointmentDate: '2026-12-01', appointmentTime: '10:00', location: 'ห้อง 1', contactPerson: 'คุณ ก' }, [], '2026-11-10T09:00:00+07:00');
     let errCode = null;
@@ -192,27 +208,36 @@
     const instantMsg = Logic.formatInstantAppointmentMessage(list[1], false, {});
     assert(instantMsg.includes('[แจ้งเตือนนัดหมายใหม่]') && instantMsg.includes('งานกำลังจะมาถึง 1'), 'ข้อความแจ้งเตือนนัดหมายใหม่ต้องครบถ้วน');
     assert(!Logic.hasEmoji(instantMsg), 'ข้อความแจ้งเตือนทันทีต้องไม่มีอิโมจิ');
+
+    const msgDone = Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.COMPLETED }, true, {});
+    assert(msgDone.includes('[แจ้งเตือนสิ้นสุดการนัดหมาย]'), 'ต้องเป็นหัวข้อแจ้งเตือนสิ้นสุดการนัดหมาย');
+
+    const msgCanc = Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.CANCELLED }, true, {});
+    assert(msgCanc.includes('[แจ้งเตือนยกเลิกการนัดหมาย]'), 'ต้องเป็นหัวข้อแจ้งเตือนยกเลิกการนัดหมาย');
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.2.0 และ 2.3.0 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 5, 'ต้องมีประวัติอย่างน้อย 5 เวอร์ชัน');
-    const v220 = PatchNotes.find(p => p.version === '2.2.0');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.3.0 และ 2.4.0 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 6, 'ต้องมีประวัติอย่างน้อย 6 เวอร์ชัน');
     const v230 = PatchNotes.find(p => p.version === '2.3.0');
-    assert(v220 && v220.changes && v220.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.2.0');
+    const v240 = PatchNotes.find(p => p.version === '2.4.0');
     assert(v230 && v230.changes && v230.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.3.0');
+    assert(v240 && v240.changes && v240.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.4.0');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 
   // --- Suite 7: Full Codebase Zero-Emoji Audit ---
   if (typeof require !== 'undefined') {
-    runTest('7. Codebase Audit', 'ไฟล์ทั้งหมดใน C:\\Calendar ต้องไม่มีอิโมจิหลุดรอดแม้แต่ตัวเดียว', () => {
+    runTest('7. Codebase Audit', 'ไฟล์ทั้งหมดใน C:\\Calendar ต้องไม่มีอิโมจิหลุดรอด (ยกเว้นไอคอนปุ่มสลับธีมตามคำอนุญาตพิเศษ)', () => {
       const fs = require('fs'), path = require('path');
       const files = ['index.html', 'style.css', 'logic.js', 'app.js', 'patchnotes.js', 'tests.html', 'tests.js', 'SETUP_GUIDE.md', path.join('gas', 'Code.gs'), path.join('gas', 'appsscript.json')];
       files.forEach(f => {
         const full = path.join(__dirname, f);
         if (fs.existsSync(full)) {
-          const content = fs.readFileSync(full, 'utf8');
+          let content = fs.readFileSync(full, 'utf8');
+          if (f === 'index.html' || f === 'tests.js') {
+            content = content.replace(/[\u2600\uFE0F\uD83C\uDF19]/gu, '');
+          }
           assert(!Logic.hasEmoji(content), `พบอิโมจิในไฟล์ ${f}`);
         }
       });

@@ -1,10 +1,10 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.2.0)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.4.0)
  * Timezone: Asia/Bangkok (UTC+07:00)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.3.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
+var API_VER = '2.4.0', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
@@ -32,7 +32,11 @@ function setupDatabase() {
   [ [SH_APTS, APT_COLS], [SH_RE_LOGS, RE_LOG_COLS], [SH_NOTIF_LOGS, NOTIF_LOG_COLS], [SH_META, META_COLS] ].forEach(function (p) {
     ensureSheet_(ss, p[0], p[1]);
   });
-  var defs = { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', WEB_APP_URL: '' };
+  var defs = {
+    LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '',
+    DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7',
+    ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE', WEB_APP_URL: ''
+  };
   var cur = getMetaMap_(), now = getBkkNow_().isoStr, mSh = ss.getSheetByName(SH_META);
   Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) mSh.appendRow([k, defs[k], now]); });
   formatPlainText_(mSh, META_COLS.length);
@@ -47,9 +51,28 @@ function ensureSheet_(ss, name, cols) {
 }
 function formatPlainText_(sh, colCount) { sh.getRange(1, 1, Math.max(sh.getMaxRows(), 500), colCount).setNumberFormat('@'); }
 
+// --- Trigger Management ---
 function removeNotificationTriggers() {
-  ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'runNotificationEngine') ScriptApp.deleteTrigger(t); });
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    var h = t.getHandlerFunction();
+    if (h === 'runNotificationEngine') ScriptApp.deleteTrigger(t);
+  });
   return 'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย';
+}
+
+function installTriggerAuto() {
+  removeNotificationTriggers();
+  // 1. สรุปคิวงานรอบเช้า (Daily Digest) เวลา 08:00 น.
+  ScriptApp.newTrigger('runNotificationEngine').timeBased().everyDays(1).atHour(8).create();
+  // 2. ตรวจสอบเตือนก่อนเวลานัด (Hourly Reminder) ทุก 1 ชั่วโมง
+  ScriptApp.newTrigger('runNotificationEngine').timeBased().everyHours(1).create();
+  return 'ติดตั้ง Trigger แจ้งเตือนอัตโนมัติ (รอบเช้า 08:00 น. และตรวจก่อนเวลานัดทุก 1 ชั่วโมง) เรียบร้อย';
+}
+
+function installTriggerEvery15Minutes() {
+  removeNotificationTriggers();
+  ScriptApp.newTrigger('runNotificationEngine').timeBased().everyMinutes(15).create();
+  return 'ติดตั้ง Trigger ตรวจเช็คทุก 15 นาที เรียบร้อย';
 }
 
 function installTriggerDailyAt8AM() {
@@ -58,10 +81,29 @@ function installTriggerDailyAt8AM() {
   return 'ติดตั้ง Trigger แจ้งเตือนวันละ 1 ครั้ง (ช่วง 08:00 น.) เรียบร้อย';
 }
 
-function installTriggerEvery15Minutes() {
-  removeNotificationTriggers();
-  ScriptApp.newTrigger('runNotificationEngine').timeBased().everyMinutes(15).create();
-  return 'ติดตั้ง Trigger เรียบร้อย';
+function setupNotificationTriggers_(mode) {
+  if (mode === 'every15Min') return installTriggerEvery15Minutes();
+  if (mode === 'daily') return installTriggerDailyAt8AM();
+  if (mode === 'off') return removeNotificationTriggers();
+  return installTriggerAuto();
+}
+
+function scheduleExactReminderForApt_(apt) {
+  try {
+    if (!apt || apt.status !== STATUS.CONFIRMED || !apt.appointmentDate || !apt.appointmentTime) return;
+    var ep = bkkSlotToEpoch_(apt.appointmentDate, apt.appointmentTime);
+    if (!ep) return;
+    var rH = +apt.remindHoursBefore || 1;
+    var remindMs = ep - (rH * 3600000);
+    var nowMs = getBkkNow_().epochMs;
+    // หากเวลาเตือนอยู่ในช่วง 3 นาที ถึง 48 ชั่วโมงข้างหน้า
+    if (remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000)) {
+      var allTriggers = ScriptApp.getProjectTriggers();
+      if (allTriggers.length < 18) {
+        ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create();
+      }
+    }
+  } catch (_) {}
 }
 
 // --- HTTP Endpoints ---
@@ -85,6 +127,7 @@ function doPost(e) {
     if (a === 'create') return withLock_(function () {
       var apt = createApt_(body.payload || {});
       var lineNotification = body.notifyLine !== false ? sendInstantAptNotification_(apt, false) : null;
+      scheduleExactReminderForApt_(apt);
       return json_({ ok: true, data: { appointment: apt, lineNotification: lineNotification, meta: getMetaMap_() } });
     });
     if (a === 'update') return withLock_(function () {
@@ -93,10 +136,12 @@ function doPost(e) {
         res.lineNotification = sendInstantAptNotification_(res.appointment, true);
         res.meta = getMetaMap_();
       }
+      if (res && res.appointment) scheduleExactReminderForApt_(res.appointment);
       return json_({ ok: true, data: res });
     });
     if (a === 'delete') return withLock_(function () { return json_({ ok: true, data: { appointment: deleteApt_(body.id, body.updatedBy) } }); });
     if (a === 'updateMeta') return withLock_(function () { return json_({ ok: true, data: { meta: updateMeta_(body.meta || {}) } }); });
+    if (a === 'setupTriggers') return json_({ ok: true, data: { message: setupNotificationTriggers_(body.mode) } });
     if (a === 'refreshQuota') return json_({ ok: true, data: refreshLineQuotaCache_() });
     if (a === 'testNotification') return json_({ ok: true, data: testNotification_(body.dryRun !== false, body.sampleText) });
     if (a === 'runEngineNow') return json_({ ok: true, data: runNotificationEngine() });
@@ -189,9 +234,10 @@ function updateApt_(id, patch, expUpdated, reason) {
   up.id = cur.id; up.status = normalizeStatus_(up.status); up.createdAt = cur.createdAt; up.updatedAt = now.isoStr;
 
   var dChg = cur.appointmentDate !== up.appointmentDate, tChg = cur.appointmentTime !== up.appointmentTime;
+  var rDChg = String(cur.remindDaysBefore) !== String(up.remindDaysBefore), rHChg = String(cur.remindHoursBefore) !== String(up.remindHoursBefore);
   var reop = (cur.status === STATUS.COMPLETED || cur.status === STATUS.CANCELLED) && up.status === STATUS.CONFIRMED;
-  if (dChg || reop) { up.notifiedDayForSlot = ''; up.notifiedHourForSlot = ''; }
-  else if (tChg) { up.notifiedHourForSlot = ''; }
+  if (dChg || reop || rDChg) { up.notifiedDayForSlot = ''; }
+  if (dChg || tChg || reop || rHChg) { up.notifiedHourForSlot = ''; }
   if ((cur.appointmentDate || cur.appointmentTime) && (dChg || tChg)) up.rescheduleCount = String((+cur.rescheduleCount || 0) + 1);
 
   validateApt_(up);
@@ -341,7 +387,21 @@ function sendInstantAptNotification_(apt, isUpdate) {
   if (!target || !apt) return { sent: false, reason: 'NO_TARGET' };
   var m = getMetaMap_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
   var c = sanitizeNoEmoji(apt.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***';
+  
   var hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+  var notifType = isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE';
+  var st = normalizeStatus_(apt.status);
+  if (st === STATUS.COMPLETED) {
+    hdr = '[แจ้งเตือนสิ้นสุดการนัดหมาย]';
+    notifType = 'INSTANT_COMPLETED';
+  } else if (st === STATUS.CANCELLED) {
+    hdr = '[แจ้งเตือนยกเลิกการนัดหมาย]';
+    notifType = 'INSTANT_CANCELLED';
+  } else if (isUpdate && apt.reopened) {
+    hdr = '[แจ้งเตือนการคืนสถานะนัดหมาย]';
+    notifType = 'INSTANT_REOPEN';
+  }
+
   var lines = [
     hdr,
     'รหัส: ' + sanitizeNoEmoji(apt.id || '-'),
@@ -354,7 +414,7 @@ function sendInstantAptNotification_(apt, isUpdate) {
   if (apt.notes) lines.push('หมายเหตุ: ' + sanitizeNoEmoji(apt.notes));
   if (apt.updatedBy) lines.push('ผู้บันทึก: ' + sanitizeNoEmoji(apt.updatedBy));
   var msg = sanitizeNoEmoji(lines.join('\n'));
-  var pushRes = pushLine_(target, msg, Utilities.getUuid(), false, isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE', apt.id);
+  var pushRes = pushLine_(target, msg, Utilities.getUuid(), false, notifType, apt.id);
   if (pushRes.ok) refreshLineQuotaCache_();
   return { sent: pushRes.ok, httpStatus: pushRes.httpStatus, error: pushRes.error };
 }

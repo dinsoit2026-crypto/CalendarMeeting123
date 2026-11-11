@@ -1,6 +1,6 @@
 /**
  * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
- * Notification Engine, Multi-Year & Year-End Statistics (v2.2.0)
+ * Notification Engine, Multi-Year & Year-End Statistics (v2.4.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function (root, factory) {
@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const API_VERSION = '2.2.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.4.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({
     CONFIRMED: 'นัดหมายแล้ว',
     COMPLETED: 'สิ้นสุดการนัดหมาย',
@@ -180,12 +180,14 @@
 
     const dateChanged = String(existing.appointmentDate || '') !== String(s.appointmentDate || '');
     const timeChanged = String(existing.appointmentTime || '') !== String(s.appointmentTime || '');
+    const remindDaysChanged = Number(existing.remindDaysBefore || 0) !== Number(s.remindDaysBefore || 0);
+    const remindHoursChanged = Number(existing.remindHoursBefore || 0) !== Number(s.remindHoursBefore || 0);
     const reopened = !isActiveStatus(existing.status) && isActiveStatus(s.status);
     const countInc = ((existing.appointmentDate || existing.appointmentTime) && (dateChanged || timeChanged)) ? 1 : 0;
 
     let daySlot = existing.notifiedDayForSlot || '', hourSlot = existing.notifiedHourForSlot || '';
-    if (dateChanged || reopened) daySlot = hourSlot = '';
-    else if (timeChanged) hourSlot = '';
+    if (dateChanged || reopened || remindDaysChanged) daySlot = '';
+    if (dateChanged || timeChanged || reopened || remindHoursChanged) hourSlot = '';
 
     return {
       record: {
@@ -331,7 +333,12 @@
 
   function formatInstantAppointmentMessage(apt, isUpdate, cfg) {
     if (!apt) return '';
-    const hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+    const st = normalizeStatus(apt.status);
+    let hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+    if (st === STATUS.COMPLETED) hdr = '[แจ้งเตือนสิ้นสุดการนัดหมาย]';
+    else if (st === STATUS.CANCELLED) hdr = '[แจ้งเตือนยกเลิกการนัดหมาย]';
+    else if (isUpdate && apt.reopened) hdr = '[แจ้งเตือนการคืนสถานะนัดหมาย]';
+
     const lines = [
       hdr,
       `รหัส: ${sanitizeNoEmoji(apt.id || '-')}`,

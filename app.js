@@ -31,7 +31,7 @@
   const state = {
     isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, activeUser: 'ผู้ดูแลระบบ',
     theme: 'light', quickRange: 'ALL', appointments: [], rescheduleLogs: [],
-    meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE' },
+    meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' },
     calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '', overviewYear: Logic.getBangkokParts().year
   };
 
@@ -49,8 +49,8 @@
   function applyTheme(t) {
     state.theme = t === 'dark' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', state.theme);
-    if ($('iconThemeSun')) $('iconThemeSun').style.display = state.theme === 'dark' ? 'block' : 'none';
-    if ($('iconThemeMoon')) $('iconThemeMoon').style.display = state.theme === 'dark' ? 'none' : 'block';
+    if ($('iconThemeSun')) $('iconThemeSun').style.display = state.theme === 'dark' ? 'inline' : 'none';
+    if ($('iconThemeMoon')) $('iconThemeMoon').style.display = state.theme === 'dark' ? 'none' : 'inline';
     try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) {}
   }
   function switchTab(id) {
@@ -301,6 +301,7 @@
     $('cfgDigestHour').value = state.meta.DAILY_DIGEST_HOUR || '8';
     $('cfgEnableBotQuery').checked = String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE';
     $('cfgPrivacyMask').checked = String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
+    if ($('cfgNotifyStatusChange')) $('cfgNotifyStatusChange').checked = String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE';
     const tb = $('rescheduleLogsTableBody');
     if (!state.rescheduleLogs.length) { tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">ยังไม่มีประวัติการเลื่อนนัดหรือแก้ไขข้อมูล</td></tr>'; return; }
     tb.innerHTML = state.rescheduleLogs.slice(0, 40).map(l => `
@@ -386,17 +387,21 @@
   async function handleQuickStatus(id, newStatus) {
     const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a) return;
     const user = Logic.sanitizeNoEmoji($('activeUserInput').value) || 'ผู้ดูแลระบบ';
+    const notifyLine = String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE';
     try {
       if (state.isLive) {
-        await callGasApi('update', { id, payload: { status: newStatus, updatedBy: user }, reason: `เปลี่ยนสถานะเป็น ${newStatus}` });
+        await callGasApi('update', { id, payload: { status: newStatus, updatedBy: user }, notifyLine: notifyLine, reason: `เปลี่ยนสถานะเป็น ${newStatus}` });
         await syncWithServer(true);
       } else {
         const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
         const r = Logic.updateAppointmentRecord(state.appointments[idx], { status: newStatus, updatedBy: user }, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: a.updatedAt, reason: `เปลี่ยนสถานะเป็น ${newStatus}` });
         state.appointments[idx] = r.record; if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
+        if (notifyLine && $('botSimOutput')) {
+          $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
+        }
         saveDemoData(); renderAll();
       }
-      showToast(`อัปเดตสถานะ [${id}] เป็น "${newStatus}" แล้ว`, 'success');
+      showToast(`อัปเดตสถานะ [${id}] เป็น "${newStatus}" แล้ว${notifyLine ? ' (แจ้งเตือน LINE แล้ว)' : ''}`, 'success');
     } catch (err) { showToast(err.message, 'error'); }
   }
 
@@ -507,12 +512,29 @@
       loadDemoData(); renderAll(); showToast('สลับเป็นโหมดจำลองข้อมูลในเครื่อง (Demo) แล้ว', 'warn');
     });
     on('btnSavePolicy', 'click', async () => {
-      const m = { DAILY_DIGEST_HOUR: String(+$('cfgDigestHour').value || 8), ENABLE_LINE_BOT_QUERY: $('cfgEnableBotQuery').checked ? 'TRUE' : 'FALSE', PRIVACY_MASK_CONTACT: $('cfgPrivacyMask').checked ? 'TRUE' : 'FALSE' };
+      const m = {
+        DAILY_DIGEST_HOUR: String(+$('cfgDigestHour').value || 8),
+        ENABLE_LINE_BOT_QUERY: $('cfgEnableBotQuery').checked ? 'TRUE' : 'FALSE',
+        PRIVACY_MASK_CONTACT: $('cfgPrivacyMask').checked ? 'TRUE' : 'FALSE',
+        NOTIFY_ON_STATUS_CHANGE: $('cfgNotifyStatusChange') && $('cfgNotifyStatusChange').checked ? 'TRUE' : 'FALSE'
+      };
       state.meta = { ...state.meta, ...m };
       if (state.isLive) { try { await callGasApi('updateMeta', { meta: m }); showToast('บันทึกนโยบายเรียบร้อยแล้ว', 'success'); } catch (err) { showToast(err.message, 'error'); } }
       else showToast('บันทึกนโยบายเรียบร้อยแล้ว (Demo)', 'success');
       renderAll();
     });
+
+    const handleTriggerSetup = async (mode, desc) => {
+      if (!state.isLive) { showToast(`[Demo] จำลองการติดตั้ง ${desc} สำเร็จ`, 'info'); return; }
+      try {
+        const r = await callGasApi('setupTriggers', { mode });
+        showToast(r.message || `ตั้งค่า ${desc} เรียบร้อย`, 'success');
+      } catch (err) { showToast(err.message, 'error'); }
+    };
+    on('btnInstallAutoTrigger', 'click', () => handleTriggerSetup('auto', 'Trigger อัจฉริยะ'));
+    on('btnInstallDailyTrigger', 'click', () => handleTriggerSetup('daily', 'Trigger สรุปเช้าวันละครั้ง'));
+    on('btnInstall15MinTrigger', 'click', () => handleTriggerSetup('every15Min', 'Trigger ตรวจเช็คทุก 15 นาที'));
+    on('btnRemoveTriggers', 'click', () => handleTriggerSetup('off', 'ปิด Trigger ทั้งหมด'));
     on('btnTestValidateLine', 'click', async () => {
       if (!state.isLive) { $('botSimOutput').textContent = '[Demo] ข้อความผ่านการตรวจสอบรูปแบบ Zero-Emoji พร้อมเชื่อม LINE'; showToast('ตรวจสอบรูปแบบสำเร็จ (Demo)', 'success'); return; }
       try { const r = await callGasApi('testNotification', { dryRun: true }); $('botSimOutput').textContent = `[Validate] ${r.ok ? 'สำเร็จ HTTP ' + r.httpStatus : 'ไม่สำเร็จ: ' + r.error}`; showToast(r.ok ? 'Validate ผ่านเรียบร้อย' : 'Validate ไม่ผ่าน', r.ok ? 'success' : 'error'); }
