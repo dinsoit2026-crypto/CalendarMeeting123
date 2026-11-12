@@ -1,6 +1,23 @@
 /**
  * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
  * Notification Engine, Multi-Year & Year-End Statistics, User Auth & Attribution (v2.5.2)
+ *
+ * สถาปัตยกรรมและคู่มือการพัฒนาต่อ (Core Logic Handover Guide):
+ * 1. หลักการออกแบบ (Design Principles):
+ *    - Pure Functions: ฟังก์ชันคำนวณส่วนใหญ่เป็น Pure Functions ไร้ Side Effects
+ *    - Universal Module Definition (UMD): สามารถรันได้ทั้งบน Node.js (Unit Tests) และ Browser (window.CalendarLogic)
+ *    - สัญญา API Contract: ส่งออก 43 ฟังก์ชันและค่าคงที่ ห้ามลบหรือเปลี่ยนชื่อเพื่อคงความเข้ากันได้
+ *
+ * 2. หมวดหมู่ฟังก์ชันหลัก:
+ *    - 1. Zero-Emoji Sanitizer & Normalize Status
+ *    - 2. Pure JavaScript SHA-256 Hash & User Authentication
+ *    - 3. Bangkok Timezone Math & Thai Date Formatting (รองรับปี พ.ศ. และ ค.ศ.)
+ *    - 4. Validation, Record Factory & Mutation Engine (สร้าง/แก้นัดหมาย, ตรวจ Concurrency)
+ *    - 5. Conflict Detection (ตรวจเวลานัดหมายชนกัน)
+ *    - 6. Notification Engine (Slot Calculation, Hourly Reminder, Daily Digest)
+ *    - 7. Analytics & Statistics (สรุปรายเดือน, สรุปรายปี, สรุปผลงานรายบุคคล)
+ *    - 8. LINE Bot Query Command Parser & Executer
+ *
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function (root, factory) {

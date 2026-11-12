@@ -1,12 +1,25 @@
 /**
  * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.2)
- * Timezone: Asia/Bangkok (UTC+07:00)
- * Features: User Authentication, User Attribution, Reschedule Audit, LINE Bot & Trigger Automation
- * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
+ *
+ * สถาปัตยกรรมและคู่มือการส่งต่องาน (Backend Developer Handover Guide):
+ * 1. บทบาทหน้าที่ (Core Responsibilities):
+ *    - ให้บริการ REST/JSON API แก่เว็บแอป (doGet / doPost)
+ *    - ฐานข้อมูล Google Sheets (แผ่นงาน: Users, Appointments, RescheduleLogs, NotificationLogs, SystemMeta)
+ *    - เชื่อมต่อ LINE Messaging API (Flex Message, Webhook Postback 1-Click Action, และ Broadcast/Push)
+ *    - ระบบตั้งเวลาอัจฉริยะ (Smart Auto-Trigger) ปลุกบอทมาส่งแจ้งเตือนในนาทีที่นัดหมายจริง
+ *
+ * 2. มาตรการด้านประสิทธิภาพและความปลอดภัย (Performance & Safety):
+ *    - Request-Level Cache: ใช้ _ss, _shMap, _metaCache เพื่อลดการเรียก SpreadsheetApp ซ้ำซ้อน
+ *    - Single-Read Execution: ฟังก์ชันสร้างนัดหมาย (createApt_) อ่านชีตเพียงรอบเดียว
+ *    - Concurrency Lock: ครอบการเขียนข้อมูลด้วย withLock_ (LockService) ป้องกัน Race Condition
+ *    - Format Guard: จัดฟอร์แมตเซลล์เป็น Plain Text (@) ตอน setup/insert ป้องกันวันเวลาเพี้ยน
+ *    - Zero-Emoji Policy: ไม่อนุญาตให้มีอิโมจิในฐานข้อมูลและข้อความที่ส่งออก 100%
  */
 
 var API_VER = '2.5.2';
+// รายชื่อแผ่นงาน (Sheets) ใน Google Spreadsheet
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
+// โครงสร้างคอลัมน์ของแต่ละแผ่นงาน (Database Schema)
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
@@ -201,7 +214,13 @@ function buildSyncBundle_(optUsers) {
   };
 }
 
-// HTTP Endpoints
+// ==========================================================================
+// HTTP ENDPOINTS (API GATEWAY & WEBHOOK ROUTER)
+// ==========================================================================
+/**
+ * จัดการคำขอ HTTP GET (สำหรับทดสอบเชื่อมต่อหรือดึงข้อมูลผ่าน Browser)
+ * ตรวจสอบความถูกต้องของ Passcode เสมอ
+ */
 function doGet(e) {
   try {
     var p = (e && e.parameter) || {};
@@ -213,6 +232,12 @@ function doGet(e) {
   } catch (err) { return json_({ ok: false, error: err.message || String(err) }); }
 }
 
+/**
+ * ศูนย์กลางการรับคำขอ HTTP POST (API Gateway)
+ * 1. ตรวจจับหากมาจาก LINE Webhook (มีฟิลด์ events) จะส่งต่อไปที่ handleLineWebhook_
+ * 2. ตรวจสอบ Passcode สำหรับคำขอจากเว็บแอป
+ * 3. ใช้ withLock_ ครอบการสร้าง แก้ไข ลบข้อมูล เพื่อป้องกันการเขียนชนกัน (Concurrency Safe)
+ */
 function doPost(e) {
   try {
     var raw = (e && e.postData && e.postData.contents) || '{}', body = JSON.parse(raw), p = (e && e.parameter) || {};
@@ -675,7 +700,14 @@ function fmtAptLine_(a, idx, mask) {
   return lines.join('\n');
 }
 
-// LINE API & Webhook
+// ==========================================================================
+// LINE MESSAGING API, FLEX MESSAGE & INTERACTIVE WEBHOOK ENGINE
+// ==========================================================================
+/**
+ * ส่งข้อความ Push เข้ากลุ่มหรือบัญชี LINE ผ่าน LINE Messaging API
+ * รองรับทั้งข้อความชนิด Text และ Flex Message Object
+ * มีระบบ X-Line-Retry-Key ป้องกันการส่งซ้ำเมื่อเน็ตเวิร์กหน่วง
+ */
 function pushLine_(target, msg, retryKey, isDry, type, aptIds) {
   var token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '', now = getBkkNow_().isoStr;
   if (!token) return { ok: false, error: 'ไม่มี Token' };
@@ -690,6 +722,10 @@ function pushLine_(target, msg, retryKey, isDry, type, aptIds) {
   return { ok: ok, httpStatus: code, error: ok ? null : res.getContentText() };
 }
 
+/**
+ * ตอบกลับข้อความใน LINE ผ่าน Reply Token
+ * ข้อดี: การส่งผ่าน Reply Token ฟรี 100% ไม่ถูกหักโควตา 300 ข้อความต่อเดือน
+ */
 function sendLineReply_(replyToken, msg, props) {
   var token = (props || PropertiesService.getScriptProperties()).getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '';
   if (!token || !replyToken) return;
@@ -700,6 +736,10 @@ function sendLineReply_(replyToken, msg, props) {
   });
 }
 
+/**
+ * ดึงชื่อ Display Name ของสมาชิก LINE ผ่าน Profile API
+ * ถ้ายิงมาจากกลุ่มจะเรียก Group Member API ถ้ายิงจากแชทเดี่ยวจะเรียก Profile API
+ */
 function getLineUserName_(gid, uid, token) {
   if (!token || !uid) return 'สมาชิก LINE';
   try {

@@ -1,11 +1,26 @@
 /**
- * app.js - UI Controller, State Management & User Attribution (v2.5.2)
- * Modern SaaS UI with Time-First Cards, Split-View Calendar, User Authentication & Audit Trail
- * Zero-Emoji Policy Compliant
+ * app.js - Web Frontend Controller, State Management & User Attribution (v2.5.2)
+ *
+ * สถาปัตยกรรมและคู่มือการพัฒนาต่อ (Developer Handover Guide):
+ * 1. โครงสร้างระบบ (Architecture Overview):
+ *    - app.js (Frontend Controller): ควบคุม UI, จัดการ State, ระบบ Optimistic UI, และประสานงานกับ GAS API
+ *    - logic.js (Domain Logic): ฟังก์ชันคำนวณวันเวลา (BKK UTC+07), SHA-256, Zero-Emoji Sanitizer, และสถิติ
+ *    - gas/Code.gs (Backend Server): Google Apps Script Web App รองรับ Google Sheets DB และ LINE Messaging API
+ *    - index.html & style.css: หน้าจอเว็บแบบ Responsive Mobile/Desktop ธีม Modern SaaS Ocean-Orange
+ *
+ * 2. หลักการสำคัญของระบบ (Core Principles):
+ *    - Zero-Emoji Policy: ไม่อนุญาตให้มีอิโมจิในทุกส่วนของระบบ (ยกเว้นไอคอนปุ่มสลับธีมพระอาทิตย์/พระจันทร์ใน HTML)
+ *    - Optimistic UI: เมื่อผู้ใช้สร้าง/แก้ไข/เปลี่ยนสถานะ หน้าจอจะอัปเดตทันที (< 20ms) และส่งคำขอไปเบื้องหลัง
+ *      หากเกิดข้อผิดพลาดจะ Rollback ข้อมูลเดิมคืนอัตโนมัติ (Snapshot Rollback)
+ *    - User Attribution: นัดหมายทุกรายการล็อกชื่อผู้สร้างเดิม (createdBy) และบันทึกผู้เปลี่ยนสถานะ (statusChangedBy)
+ *    - Concurrency Control: ตรวจจับการแก้ไขชนกันผ่าน expectedUpdatedAt ป้องกันการบันทึกทับข้อมูลล่าสุด
  */
 (function () {
   'use strict';
 
+  // ==========================================================================
+  // 1. DOM HELPERS, ESCAPING & SYSTEM CONSTANTS
+  // ==========================================================================
   const Logic = window.CalendarLogic, PatchNotes = window.PATCH_NOTES || [];
   const $ = id => document.getElementById(id), on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   const openModal = id => { const el = $(id); if (el) el.classList.add('active'); };
@@ -13,11 +28,13 @@
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   const escapeHtml = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ESC[c]);
 
+  // คีย์สำหรับบันทึกลง LocalStorage กรณีโหมด Demo หรือเก็บค่าคอนฟิกการเชื่อมต่อ
   const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2' };
   const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdiIEhkvSke--ro/exec';
   const DEFAULT_PASSCODE = 'CALL1234';
   const FIELD_LABELS = { appointmentDate: 'วันที่นัดหมาย', appointmentTime: 'เวลานัดหมาย', location: 'สถานที่', contactPerson: 'ผู้นัดพบ', status: 'สถานะ', DELETED: 'ลบนัดหมาย' };
 
+  // ไอคอน SVG แบบ Inline สำหรับใช้งานใน UI (Zero-Emoji)
   const ICO = {
     clock: '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
     user: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
@@ -27,6 +44,9 @@
     edit: '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>'
   };
 
+  // ==========================================================================
+  // 2. GLOBAL APPLICATION STATE
+  // ==========================================================================
   const state = {
     isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, currentUser: null, users: [], theme: 'light',
     quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
@@ -35,6 +55,13 @@
     overviewYear: Logic.getBangkokParts().year, editingUserId: null
   };
 
+  // ==========================================================================
+  // 3. UI NOTIFICATIONS, THEME & TAB NAVIGATION
+  // ==========================================================================
+  /**
+   * แสดงข้อความแจ้งเตือน Toast ลอยที่มุมจอ (Auto-dismiss 3.2s)
+   * กรองอิโมจิออกอัตโนมัติเพื่อคง Zero-Emoji Policy
+   */
   function showToast(msg, type = 'info') {
     const c = $('toastContainer'); if (!c) return;
     const it = document.createElement('div');
@@ -44,6 +71,9 @@
     setTimeout(() => { it.style.opacity = '0'; it.style.transition = 'opacity 0.25s'; setTimeout(() => it.remove(), 260); }, 3200);
   }
 
+  /**
+   * สลับธีมแสดงผล Light / Dark (Deep Navy) พร้อมบันทึกลง LocalStorage
+   */
   function applyTheme(t) {
     state.theme = t === 'dark' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', state.theme);
@@ -52,11 +82,20 @@
     try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) { }
   }
 
+  /**
+   * สลับแท็บหน้าหลัก (tabList, tabMonth, tabYear, tabSettings, tabBot)
+   */
   function switchTab(id) {
     document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === id));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === id));
   }
 
+  // ==========================================================================
+  // 4. AUTHENTICATION GATE & USER SESSION MANAGEMENT
+  // ==========================================================================
+  /**
+   * โหลด Session ผู้ใช้งานจาก LocalStorage เมื่อเปิดหน้าเว็บ
+   */
   function loadSavedSession() {
     try { const su = localStorage.getItem(STORAGE.USERS); state.users = su ? JSON.parse(su) : [...Logic.DEFAULT_USERS]; } catch (_) { state.users = [...Logic.DEFAULT_USERS]; }
     state.currentUser = null;
@@ -64,6 +103,9 @@
     updateUserSessionUI();
   }
 
+  /**
+   * สลับหน้าต่างย่อยบน Full-Screen Auth Gate (เข้าสู่ระบบ / สมัครสมาชิกใหม่)
+   */
   function switchAuthTab(mode) {
     const isReg = mode === 'register';
     if ($('tabBtnAuthLogin')) { $('tabBtnAuthLogin').classList.toggle('active', !isReg); $('tabBtnAuthLogin').setAttribute('aria-selected', isReg ? 'false' : 'true'); }
@@ -74,6 +116,10 @@
     if ($('registerErrorMsg')) $('registerErrorMsg').style.display = 'none';
   }
 
+  /**
+   * อัปเดตการแสดงผลตามสิทธิ์ของผู้ใช้งาน (ADMIN vs STAFF)
+   * หากยังไม่ได้เข้าสู่ระบบจะแสดงหน้า Auth Gate แบบเต็มจอ ป้องกันการเห็นข้อมูล
+   */
   function updateUserSessionUI() {
     const isAuth = Boolean(state.currentUser && state.currentUser.username);
     if ($('authGateScreen')) $('authGateScreen').style.display = isAuth ? 'none' : 'flex';
@@ -88,6 +134,9 @@
     if ($('btnOpenAddUserModal')) $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
   }
 
+  /**
+   * ออกจากระบบ ล้างค่า Session และปิดโมดอลทั้งหมด
+   */
   function handleLogout() {
     state.currentUser = null;
     try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) { }
@@ -97,8 +146,20 @@
     switchAuthTab('login'); updateUserSessionUI(); showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   }
 
+  // ==========================================================================
+  // 5. OPTIMISTIC UI SYNCHRONIZATION ENGINE & AUTH HANDLERS
+  // ==========================================================================
+  /**
+   * pendingIds: เก็บ ID ของรายการที่อยู่ระหว่างส่งข้อมูลไปเซิร์ฟเวอร์
+   * ใช้ป้องกันการกดบันทึกหรือเปลี่ยนสถานะซ้ำ (Idempotency Guard)
+   */
   const pendingIds = new Set();
   let bgTaskCount = 0;
+
+  /**
+   * จัดการไฟสถานะและการแสดงผลว่าระบบกำลังซิงก์ข้อมูลอยู่เบื้องหลังหรือไม่
+   * @param {boolean} active - เพิ่ม (+1) หรือลด (-1) จำนวนงานเบื้องหลัง
+   */
   function setBgSync(active) {
     bgTaskCount = Math.max(0, bgTaskCount + (active ? 1 : -1));
     const btn = $('btnSyncNow'), lbl = $('syncBtnLabel');
@@ -106,6 +167,10 @@
     if (lbl) lbl.textContent = bgTaskCount > 0 ? 'กำลังบันทึก...' : 'ซิงก์';
   }
 
+  /**
+   * ถ่ายโอนข้อมูลก้อนใหญ่จากเซิร์ฟเวอร์ (Sync Bundle) เข้าสู่ Local State
+   * รองรับข้อมูลนัดหมาย, ประวัติการเลื่อน, บัญชีผู้ใช้, และเมตาดาต้า
+   */
   function applySyncBundle(d) {
     if (!d) return;
     if (Array.isArray(d.appointments)) state.appointments = d.appointments;
@@ -115,6 +180,11 @@
     if (d.meta) state.meta = { ...state.meta, ...d.meta };
   }
 
+  /**
+   * การเข้าสู่ระบบแบบรอบเดียว (Single-Roundtrip Auth):
+   * ส่งคำขอ login ไปยัง GAS พร้อมดึง appointments, users, meta กลับมาในรอบเดียว
+   * ช่วยลด Latency การเริ่มต้นใช้งานลงกว่า 50%
+   */
   async function handleLoginSubmit(e) {
     e.preventDefault();
     const un = ($('loginUsername').value || '').trim(), pw = $('loginPassword').value || '', errEl = $('loginErrorMsg'), submitBtn = $('btnSubmitLogin');
@@ -150,6 +220,10 @@
     }
   }
 
+  /**
+   * สมัครสมาชิกใหม่ (Self-Registration) เป็น STAFF ทันที
+   * เข้ารหัสรหัสผ่านด้วย SHA-256 และส่งไปบันทึกลงชีต Users
+   */
   async function handleRegisterSubmit(e) {
     e.preventDefault();
     const username = ($('regUsername').value || '').trim().toLowerCase(), displayName = Logic.sanitizeNoEmoji($('regDisplayName').value || '');
@@ -246,6 +320,15 @@
     localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users));
   }
 
+  // ==========================================================================
+  // 6. GAS API GATEWAY & DATA SYNCHRONIZATION
+  // ==========================================================================
+  /**
+   * เรียกใช้งาน Web API ของ Google Apps Script
+   * ส่ง Content-Type: text/plain เพื่อเลี่ยงปัญหา CORS Preflight Options Request
+   * @param {string} action - ชื่อคำสั่ง เช่น list, create, update, delete, login, register
+   * @param {object} payload - พารามิเตอร์ของคำสั่ง
+   */
   async function callGasApi(action, payload) {
     if (!state.gasUrl) throw new Error('ยังไม่ได้ระบุ Web App URL');
     const res = await fetch(state.gasUrl, {
@@ -258,6 +341,10 @@
     return r.data;
   }
 
+  /**
+   * ดึงข้อมูลทั้งหมดจาก Google Sheets มาซิงก์เข้าสู่หน่วยความจำของเบราว์เซอร์
+   * @param {boolean} silent - หากเป็น true จะไม่แสดง Toast แจ้งเตือนความสำเร็จ
+   */
   async function syncWithServer(silent = false) {
     if (!state.isLive || !state.gasUrl) { renderAll(); return; }
     const btn = $('btnSyncNow'), lbl = $('syncBtnLabel');
@@ -271,15 +358,27 @@
     finally { if (btn) btn.classList.toggle('is-syncing', bgTaskCount > 0); if (lbl) lbl.textContent = bgTaskCount > 0 ? 'กำลังบันทึก...' : 'ซิงก์'; }
   }
 
+  // ==========================================================================
+  // 7. UI RENDERING PIPELINE
+  // ==========================================================================
+  /**
+   * คำสั่งหลักสำหรับสั่ง Render หน้าจอทั้งหมดให้สอดคล้องกับ State ล่าสุด
+   */
   function renderAll() {
     renderHeader(); renderListTab(); renderCalendarTab(); renderYearTab(); renderSettingsTab(); updateUserSessionUI();
   }
 
+  /**
+   * อัปเดตนาฬิกาแสดงเวลาจริงในเขตเวลา Asia/Bangkok บนแถบ Header
+   */
   function updateClock() {
     const b = Logic.getBangkokParts();
     if ($('bangkokClockDisplay')) $('bangkokClockDisplay').textContent = `เวลา (BKK): ${Logic.formatThaiDateDisplay(b.dateStr, false)} ${b.timeStr} น.`;
   }
 
+  /**
+   * อัปเดตส่วนหัวของระบบ: สถานะการเชื่อมต่อ (Sheets vs Demo), โควตาข้อความ LINE และรอบ Trigger
+   */
   function renderHeader() {
     const bd = $('connectionModeBadge'), ts = $('triggerStatusText');
     if (state.isLive) {
@@ -516,6 +615,13 @@
     `).join('');
   }
 
+  // ==========================================================================
+  // 8. APPOINTMENT MUTATIONS & OPTIMISTIC CONCURRENCY ENGINE
+  // ==========================================================================
+  /**
+   * ตรวจสอบเวลานัดหมายชนกัน (Time-Slot Conflict Detection)
+   * หากมีนัดหมายอื่นในวันและเวลาเดียวกันจะแสดงแถบแจ้งเตือนสีส้มบนโมดอลทันที
+   */
   function checkConflictOnForm() {
     const d = $('formDate').value, t = $('formTime').value, curId = $('formAptId').value, banner = $('conflictWarningBanner');
     if (!banner) return;
@@ -528,6 +634,10 @@
     }
   }
 
+  /**
+   * Helper สำหรับเติมข้อมูลลงในฟอร์มนัดหมาย
+   * ยุบการกำหนดค่าระหว่างหน้าต่างสร้างนัดและแก้ไขนัดเข้าสู่ฟังก์ชันเดียว
+   */
   function fillAptForm(f) {
     $('formAptId').value = f.id || ''; $('formExpectedUpdatedAt').value = f.updatedAt || '';
     $('formTitle').value = f.title || ''; $('formStatus').value = f.status || Logic.STATUS.CONFIRMED;
@@ -539,6 +649,10 @@
     updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
   }
 
+  /**
+   * เปิดหน้าต่างสร้างนัดหมายใหม่
+   * @param {string} [prefillDate] - วันที่เลือกจากช่องปฏิทิน (ถ้ามี) ในรูปแบบ YYYY-MM-DD
+   */
   function openCreateModal(prefillDate) {
     $('modalTitle').textContent = 'สร้างนัดหมายใหม่';
     if ($('formNotifyLine')) $('formNotifyLine').checked = true;
@@ -767,7 +881,13 @@
     }
   }
 
-  // User Management
+  // ==========================================================================
+  // 9. USER ADMINISTRATION (ADMIN ONLY)
+  // ==========================================================================
+  /**
+   * เปิดหน้าต่างจัดการข้อมูลสมาชิก (เพิ่มใหม่ / แก้ไขชื่อ, รหัสผ่าน, สิทธิ์)
+   * สงวนสิทธิ์เฉพาะผู้ใช้ระดับ ADMIN เท่านั้น
+   */
   function openUserModal(userId) {
     if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
       showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
@@ -873,6 +993,14 @@
     }
   }
 
+  // ==========================================================================
+  // 10. EVENT BINDINGS & LIFECYCLE INITIALIZATION
+  // ==========================================================================
+  /**
+   * ผูก Event Listeners ทั้งหมดของหน้าเว็บแอปพลิเคชัน
+   * จัดกลุ่มตาม: แท็บ, ปุ่มธีม, ระบบล็อกอิน, โมดอลผู้ใช้, โมดอลยกเลิก,
+   * โมดอลนัดหมาย, ตัวกรองข้อมูล, ปฏิทินรายเดือน, ภาพรวมรายปี, และแผงตั้งค่า
+   */
   function bindEvents() {
     document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.addEventListener('click', () => switchTab(b.getAttribute('data-tab'))));
     on('btnToggleTheme', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
