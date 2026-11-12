@@ -10,92 +10,56 @@
   'use strict';
 
   const API_VERSION = '2.5.0', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
-  const STATUS = Object.freeze({
-    CONFIRMED: 'นัดหมายแล้ว',
-    COMPLETED: 'สิ้นสุดการนัดหมาย',
-    CANCELLED: 'ยกเลิกการนัดหมาย'
-  });
+  const STATUS = Object.freeze({ CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' });
   const THAI_MONTHS_SHORT = Object.freeze(['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.']);
   const THAI_MONTHS_FULL = Object.freeze(['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม']);
 
-  // --- Zero-Emoji Sanitizer ---
+  // Zero-Emoji Sanitizer
   const EMOJI_EXT_RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
   const EMOJI_MOD_RE = /[\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/gu;
   const hasEmoji = s => !s || typeof s !== 'string' ? false : (EMOJI_EXT_RE.lastIndex = EMOJI_MOD_RE.lastIndex = 0, EMOJI_EXT_RE.test(s) || EMOJI_MOD_RE.test(s));
   const sanitizeNoEmoji = s => s == null ? '' : String(s).replace(EMOJI_EXT_RE, '').replace(EMOJI_MOD_RE, '').replace(/[ \t]{2,}/g, ' ').trim();
 
-  // Normalize legacy status names
   const normalizeStatus = st => {
     const s = sanitizeNoEmoji(st || STATUS.CONFIRMED);
-    if (s === 'กำลังนัดหมายวันเวลา' || s === 'พบหมายแล้ว' || s === STATUS.CONFIRMED) return STATUS.CONFIRMED;
-    if (s === STATUS.COMPLETED || s === STATUS.CANCELLED) return s;
-    return STATUS.CONFIRMED;
+    return (s === 'กำลังนัดหมายวันเวลา' || s === 'พบหมายแล้ว' || s === STATUS.CONFIRMED) ? STATUS.CONFIRMED : (s === STATUS.COMPLETED || s === STATUS.CANCELLED ? s : STATUS.CONFIRMED);
   };
 
-  // --- Cryptographic Hash (SHA-256) for Passwords ---
+  // Pure JavaScript SHA-256
   function hashPassword(str) {
     const raw = unescape(encodeURIComponent(String(str || '')));
-    const mathPow = Math.pow;
-    const maxWord = mathPow(2, 32);
-    const lengthProperty = 'length';
-    let i, j;
-    let result = '';
-    const words = [];
-    const asciiBitLength = raw[lengthProperty] * 8;
-    let hash = [];
-    const k = [];
-    let primeCounter = 0;
-    const isComposite = {};
+    const maxWord = Math.pow(2, 32), words = [], asciiBitLength = raw.length * 8;
+    let hash = [], k = [], primeCounter = 0, isComposite = {};
     for (let candidate = 2; primeCounter < 64; candidate++) {
       if (!isComposite[candidate]) {
-        for (i = 0; i < 313; i += candidate) isComposite[i] = candidate;
-        hash[primeCounter] = (mathPow(candidate, 0.5) * maxWord) | 0;
-        k[primeCounter++] = (mathPow(candidate, 1 / 3) * maxWord) | 0;
+        for (let i = 0; i < 313; i += candidate) isComposite[i] = candidate;
+        hash[primeCounter] = (Math.pow(candidate, 0.5) * maxWord) | 0;
+        k[primeCounter++] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
       }
     }
     let ascii = raw + '\x80';
-    while (ascii[lengthProperty] % 64 - 56) ascii += '\x00';
-    for (i = 0; i < ascii[lengthProperty]; i++) {
-      j = ascii.charCodeAt(i);
-      words[i >> 2] |= j << ((3 - i) % 4) * 8;
-    }
-    words[words[lengthProperty]] = ((asciiBitLength / maxWord) | 0);
-    words[words[lengthProperty]] = (asciiBitLength);
-    for (j = 0; j < words[lengthProperty];) {
-      const w = words.slice(j, j += 16);
-      const oldHash = hash.slice(0);
-      for (i = 0; i < 64; i++) {
-        const w15 = w[i - 15], w2 = w[i - 2];
-        const a = hash[0], e = hash[4];
-        const temp1 = hash[7]
-          + ((e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7))
-          + ((e & hash[5]) ^ ((~e) & hash[6]))
-          + k[i]
-          + (w[i] = (i < 16) ? w[i] : (
-            w[i - 16]
-            + ((w15 >>> 7 | w15 << 25) ^ (w15 >>> 18 | w15 << 14) ^ (w15 >>> 3))
-            + w[i - 7]
-            + ((w2 >>> 17 | w2 << 15) ^ (w2 >>> 19 | w2 << 13) ^ (w2 >>> 10))
-          ) | 0);
-        const temp2 = ((a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10))
-          + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+    while (ascii.length % 64 - 56) ascii += '\x00';
+    for (let i = 0; i < ascii.length; i++) words[i >> 2] |= ascii.charCodeAt(i) << ((3 - i) % 4) * 8;
+    words[words.length] = ((asciiBitLength / maxWord) | 0);
+    words[words.length] = (asciiBitLength);
+    for (let j = 0; j < words.length;) {
+      const w = words.slice(j, j += 16), oldHash = hash.slice(0);
+      for (let i = 0; i < 64; i++) {
+        const w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];
+        const temp1 = hash[7] + ((e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + ((w15 >>> 7 | w15 << 25) ^ (w15 >>> 18 | w15 << 14) ^ (w15 >>> 3)) + w[i - 7] + ((w2 >>> 17 | w2 << 15) ^ (w2 >>> 19 | w2 << 13) ^ (w2 >>> 10))) | 0);
+        const temp2 = ((a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
         hash = [(temp1 + temp2) | 0].concat(hash);
         hash[4] = (hash[4] + temp1) | 0;
       }
-      for (i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+      for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
     }
-    for (i = 0; i < 8; i++) {
-      for (j = 3; j + 1; j--) {
-        const b = (hash[i] >> (j * 8)) & 255;
-        result += ((b < 16) ? '0' : '') + b.toString(16);
-      }
-    }
+    let result = '';
+    for (let i = 0; i < 8; i++) for (let j = 3; j + 1; j--) { const b = (hash[i] >> (j * 8)) & 255; result += ((b < 16) ? '0' : '') + b.toString(16); }
     return result;
   }
 
-  // Default seed users
   const DEFAULT_USERS = Object.freeze([
     { userId: 'USR-001', username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'ADMIN', passwordHash: hashPassword('admin'), isActive: true, createdAt: '2026-11-01T08:00:00+07:00' },
     { userId: 'USR-002', username: 'somchai', displayName: 'คุณสมชาย', role: 'STAFF', passwordHash: hashPassword('1234'), isActive: true, createdAt: '2026-11-01T08:00:00+07:00' },
@@ -103,106 +67,47 @@
   ]);
 
   function authenticateUser(users, username, password) {
-    const un = sanitizeNoEmoji(username || '').toLowerCase();
-    const pw = String(password || '');
+    const un = sanitizeNoEmoji(username || '').toLowerCase(), pw = String(password || '');
     if (!un || !pw) return { ok: false, error: 'กรุณากรอกชื่อผู้ใช้และรหัสผ่าน' };
-    const list = Array.isArray(users) && users.length ? users : DEFAULT_USERS;
-    const found = list.find(u => u && sanitizeNoEmoji(u.username).toLowerCase() === un);
+    const found = (Array.isArray(users) && users.length ? users : DEFAULT_USERS).find(u => u && sanitizeNoEmoji(u.username).toLowerCase() === un);
     if (!found) return { ok: false, error: 'ไม่พบบัญชีผู้ใช้งานนี้ในระบบ' };
     if (found.isActive === false || String(found.isActive).toUpperCase() === 'FALSE') return { ok: false, error: 'บัญชีนี้ถูกระงับการใช้งาน' };
-    const h = hashPassword(pw);
-    if (found.passwordHash !== h) return { ok: false, error: 'รหัสผ่านไม่ถูกต้อง' };
-    return {
-      ok: true,
-      user: {
-        userId: found.userId,
-        username: found.username,
-        displayName: sanitizeNoEmoji(found.displayName || found.username),
-        role: found.role === 'ADMIN' ? 'ADMIN' : 'STAFF'
-      }
-    };
+    if (found.passwordHash !== hashPassword(pw)) return { ok: false, error: 'รหัสผ่านไม่ถูกต้อง' };
+    return { ok: true, user: { userId: found.userId, username: found.username, displayName: sanitizeNoEmoji(found.displayName || found.username), role: found.role === 'ADMIN' ? 'ADMIN' : 'STAFF' } };
   }
 
   function validateUserInput(input, isCreate = true) {
-    const errs = [];
-    const username = sanitizeNoEmoji(input.username || '').toLowerCase();
-    const displayName = sanitizeNoEmoji(input.displayName || '');
+    const errs = [], un = sanitizeNoEmoji(input.username || '').toLowerCase(), disp = sanitizeNoEmoji(input.displayName || '');
     const role = (input.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF';
     const isActive = input.isActive !== false && String(input.isActive).toUpperCase() !== 'FALSE';
-
     if (isCreate) {
-      if (!username || username.length < 3 || username.length > 30 || !/^[a-z0-9_.-]+$/.test(username)) {
-        errs.push('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
-      }
-      if (!input.password || String(input.password).length < 4) {
-        errs.push('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร');
-      }
+      if (!un || un.length < 3 || un.length > 30 || !/^[a-z0-9_.-]+$/.test(un)) errs.push('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
+      if (!input.password || String(input.password).length < 4) errs.push('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร');
     }
-    if (!displayName) errs.push('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียก');
-
-    let passwordHash = '';
-    if (input.password) passwordHash = hashPassword(input.password);
-    else if (input.passwordHash) passwordHash = input.passwordHash;
-
-    return {
-      valid: !errs.length,
-      errors: errs,
-      sanitized: { username, displayName, role, isActive, passwordHash }
-    };
+    if (!disp) errs.push('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียก');
+    const passwordHash = input.password ? hashPassword(input.password) : (input.passwordHash || '');
+    return { valid: !errs.length, errors: errs, sanitized: { username: un, displayName: disp, role, isActive, passwordHash } };
   }
 
   function registerUserAccount(users, input, nowIso) {
     if (!input || typeof input !== 'object') return { ok: false, error: 'ข้อมูลการสมัครสมาชิกไม่ถูกต้อง' };
-    const pw = String(input.password || '');
-    const confirmPw = input.confirmPassword !== undefined ? String(input.confirmPassword || '') : pw;
-    if (pw !== confirmPw) {
-      return { ok: false, error: 'รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน' };
-    }
-
+    const pw = String(input.password || ''), confirmPw = input.confirmPassword !== undefined ? String(input.confirmPassword || '') : pw;
+    if (pw !== confirmPw) return { ok: false, error: 'รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน' };
     const v = validateUserInput({ ...input, role: 'STAFF', isActive: true }, true);
-    if (!v.valid) {
-      return { ok: false, error: v.errors.join(' | ') };
-    }
-
-    const s = v.sanitized;
-    const list = Array.isArray(users) ? users : DEFAULT_USERS;
-    if (list.some(u => u && sanitizeNoEmoji(u.username || '').toLowerCase() === s.username)) {
-      return { ok: false, error: 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น' };
-    }
-    if (list.some(u => u && sanitizeNoEmoji(u.displayName || '').toLowerCase() === s.displayName.toLowerCase())) {
-      return { ok: false, error: 'ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม' };
-    }
-
+    if (!v.valid) return { ok: false, error: v.errors.join(' | ') };
+    const s = v.sanitized, list = Array.isArray(users) ? users : DEFAULT_USERS;
+    if (list.some(u => u && sanitizeNoEmoji(u.username || '').toLowerCase() === s.username)) return { ok: false, error: 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น' };
+    if (list.some(u => u && sanitizeNoEmoji(u.displayName || '').toLowerCase() === s.displayName.toLowerCase())) return { ok: false, error: 'ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม' };
     const maxNum = list.reduce((m, u) => {
       const n = u && u.userId && String(u.userId).startsWith('USR-') ? parseInt(String(u.userId).slice(4), 10) : 0;
       return !Number.isNaN(n) && n > m ? n : m;
     }, 0);
-    const userId = `USR-${String(maxNum + 1).padStart(3, '0')}`;
-    const now = getBangkokParts(nowIso).isoStr;
-    const record = {
-      userId,
-      username: s.username,
-      displayName: s.displayName,
-      role: 'STAFF',
-      passwordHash: s.passwordHash,
-      isActive: true,
-      createdAt: now,
-      lastLoginAt: now
-    };
-
-    return {
-      ok: true,
-      record,
-      user: {
-        userId: record.userId,
-        username: record.username,
-        displayName: record.displayName,
-        role: 'STAFF'
-      }
-    };
+    const userId = `USR-${String(maxNum + 1).padStart(3, '0')}`, now = getBangkokParts(nowIso).isoStr;
+    const record = { userId, username: s.username, displayName: s.displayName, role: 'STAFF', passwordHash: s.passwordHash, isActive: true, createdAt: now, lastLoginAt: now };
+    return { ok: true, record, user: { userId, username: record.username, displayName: record.displayName, role: 'STAFF' } };
   }
 
-  // --- Time & Date Helpers (Asia/Bangkok UTC+07:00) ---
+  // Time & Date Helpers (Asia/Bangkok UTC+07:00)
   const pad2 = n => String(Math.floor(Math.abs(Number(n) || 0))).padStart(2, '0');
   const normalizeYearToCE = y => { const n = Number(String(y || '').trim()); return !Number.isInteger(n) || n < 1900 || n > 3000 ? null : (n > 2400 ? n - 543 : n); };
   const toBuddhistYear = ce => { const y = normalizeYearToCE(ce); return y ? y + 543 : null; };
@@ -266,7 +171,7 @@
     return `${dy} ${THAI_MONTHS_SHORT[m - 1]} ${y + 543}` + (includeCE ? ` (${d})` : '');
   };
 
-  // --- Status & Overdue ---
+  // Status & Conflicts
   const isActiveStatus = st => normalizeStatus(st) === STATUS.CONFIRMED;
   const buildAppointmentSlot = a => a && a.appointmentDate && a.appointmentTime ? `${a.appointmentDate}T${a.appointmentTime}` : '';
   const isOverdue = (a, nowIso) => {
@@ -275,25 +180,17 @@
     return ep !== null && getBangkokParts(nowIso).epochMs > ep;
   };
 
-  // --- Time-Slot Conflict Detection ---
   function findTimeConflicts(appointments, dateStr, timeStr, excludeId) {
     const d = parseFlexibleDateInput(dateStr), t = parseTimeInput(timeStr);
     if (!d || !t) return [];
-    return (appointments || []).filter(a => {
-      if (!a || a.deletedAt || (excludeId && a.id === excludeId)) return false;
-      if (normalizeStatus(a.status) === STATUS.CANCELLED) return false;
-      return a.appointmentDate === d && a.appointmentTime === t;
-    });
+    return (appointments || []).filter(a => a && !a.deletedAt && (!excludeId || a.id !== excludeId) && normalizeStatus(a.status) !== STATUS.CANCELLED && a.appointmentDate === d && a.appointmentTime === t);
   }
 
-  // --- Validation, Creation & Reschedule Updates with User Attribution ---
+  // Appointment Validation & Record Management
   function validateAppointmentInput(input) {
     if (!input || typeof input !== 'object') return { valid: false, errors: ['ข้อมูลไม่ถูกต้อง'] };
-    const errs = [];
-    const title = sanitizeNoEmoji(input.title || '');
-    const status = normalizeStatus(input.status);
-    const location = sanitizeNoEmoji(input.location || '');
-    const contactPerson = sanitizeNoEmoji(input.contactPerson || '');
+    const errs = [], title = sanitizeNoEmoji(input.title || ''), status = normalizeStatus(input.status);
+    const location = sanitizeNoEmoji(input.location || ''), contactPerson = sanitizeNoEmoji(input.contactPerson || '');
     const pDate = input.appointmentDate ? parseFlexibleDateInput(input.appointmentDate) : '';
     const pTime = input.appointmentTime ? parseTimeInput(input.appointmentTime) : '';
 
@@ -312,17 +209,13 @@
 
     const createdBy = sanitizeNoEmoji(input.createdBy || input.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ';
     const updatedBy = sanitizeNoEmoji(input.updatedBy || createdBy) || createdBy;
-    const statusChangedBy = sanitizeNoEmoji(input.statusChangedBy || '');
-    const statusChangedAt = sanitizeNoEmoji(input.statusChangedAt || '');
-    const statusReason = sanitizeNoEmoji(input.statusReason || '');
-
     return {
-      valid: !errs.length,
-      errors: errs,
+      valid: !errs.length, errors: errs,
       sanitized: {
         title, appointmentDate: pDate || '', appointmentTime: pTime || '', location, contactPerson, status,
         remindDaysBefore: rDays, remindHoursBefore: rHours, notes: sanitizeNoEmoji(input.notes || ''),
-        createdBy, updatedBy, statusChangedBy, statusChangedAt, statusReason
+        createdBy, updatedBy, statusChangedBy: sanitizeNoEmoji(input.statusChangedBy || ''),
+        statusChangedAt: sanitizeNoEmoji(input.statusChangedAt || ''), statusReason: sanitizeNoEmoji(input.statusReason || '')
       }
     };
   }
@@ -336,22 +229,15 @@
   function createAppointmentRecord(input, existing, nowIso) {
     const v = validateAppointmentInput(input);
     if (!v.valid) throw new Error(v.errors.join(' | '));
-    const now = getBangkokParts(nowIso).isoStr, s = v.sanitized;
-    const isStatusChanged = s.status !== STATUS.CONFIRMED;
-
+    const now = getBangkokParts(nowIso).isoStr, s = v.sanitized, isStatusChanged = s.status !== STATUS.CONFIRMED;
     return {
       id: input.id ? sanitizeNoEmoji(input.id) : generateAppointmentId(existing, now),
-      ...s,
-      createdBy: s.createdBy,
+      ...s, createdBy: s.createdBy,
       statusChangedBy: isStatusChanged ? (s.statusChangedBy || s.createdBy) : '',
       statusChangedAt: isStatusChanged ? now : '',
       statusReason: isStatusChanged ? s.statusReason : '',
-      notifiedDayForSlot: '',
-      notifiedHourForSlot: '',
-      rescheduleCount: 0,
-      createdAt: now,
-      updatedAt: now,
-      deletedAt: ''
+      notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0,
+      createdAt: now, updatedAt: now, deletedAt: ''
     };
   }
 
@@ -377,55 +263,37 @@
 
     const dateChanged = String(existing.appointmentDate || '') !== String(s.appointmentDate || '');
     const timeChanged = String(existing.appointmentTime || '') !== String(s.appointmentTime || '');
-    const remindDaysChanged = Number(existing.remindDaysBefore || 0) !== Number(s.remindDaysBefore || 0);
-    const remindHoursChanged = Number(existing.remindHoursBefore || 0) !== Number(s.remindHoursBefore || 0);
     const statusChanged = normalizeStatus(existing.status) !== normalizeStatus(s.status);
     const reopened = !isActiveStatus(existing.status) && isActiveStatus(s.status);
     const countInc = ((existing.appointmentDate || existing.appointmentTime) && (dateChanged || timeChanged)) ? 1 : 0;
 
-    let daySlot = existing.notifiedDayForSlot || '', hourSlot = existing.notifiedHourForSlot || '';
-    if (dateChanged || reopened || remindDaysChanged) daySlot = '';
-    if (dateChanged || timeChanged || reopened || remindHoursChanged) hourSlot = '';
+    let daySlot = (dateChanged || reopened || Number(existing.remindDaysBefore || 0) !== Number(s.remindDaysBefore || 0)) ? '' : (existing.notifiedDayForSlot || '');
+    let hourSlot = (dateChanged || timeChanged || reopened || Number(existing.remindHoursBefore || 0) !== Number(s.remindHoursBefore || 0)) ? '' : (existing.notifiedHourForSlot || '');
 
-    // User Attribution: Preserve original creator, track who changed status
     const createdBy = existing.createdBy || s.createdBy || existing.updatedBy || 'ผู้ใช้งานระบบ';
-    let statusChangedBy = existing.statusChangedBy || '';
-    let statusChangedAt = existing.statusChangedAt || '';
-    let statusReason = existing.statusReason || '';
+    let statusChangedBy = existing.statusChangedBy || '', statusChangedAt = existing.statusChangedAt || '', statusReason = existing.statusReason || '';
 
     if (statusChanged) {
-      if (s.status === STATUS.CONFIRMED) {
-        statusChangedBy = '';
-        statusChangedAt = '';
-        statusReason = '';
-      } else {
+      if (s.status === STATUS.CONFIRMED) { statusChangedBy = statusChangedAt = statusReason = ''; }
+      else {
         statusChangedBy = sanitizeNoEmoji(patch.statusChangedBy || s.updatedBy || 'ผู้ใช้งานระบบ');
         statusChangedAt = bkk.isoStr;
-        statusReason = s.status === STATUS.CANCELLED ? sanitizeNoEmoji(patch.statusReason || reason || '') : sanitizeNoEmoji(patch.statusReason || '');
+        statusReason = sanitizeNoEmoji(patch.statusReason || reason || '');
       }
-    } else if (patch.statusReason !== undefined) {
-      statusReason = sanitizeNoEmoji(patch.statusReason);
-    }
+    } else if (patch.statusReason !== undefined) statusReason = sanitizeNoEmoji(patch.statusReason);
 
     return {
       record: {
-        ...existing,
-        ...s,
-        createdBy,
-        statusChangedBy,
-        statusChangedAt,
-        statusReason,
-        notifiedDayForSlot: daySlot,
-        notifiedHourForSlot: hourSlot,
+        ...existing, ...s, createdBy, statusChangedBy, statusChangedAt, statusReason,
+        notifiedDayForSlot: daySlot, notifiedHourForSlot: hourSlot,
         rescheduleCount: (+existing.rescheduleCount || 0) + countInc,
-        updatedAt: bkk.isoStr,
-        updatedBy: s.updatedBy
+        updatedAt: bkk.isoStr, updatedBy: s.updatedBy
       },
       logs, dateChanged, timeChanged, reopened, statusChanged
     };
   }
 
-  // --- Notification Engine ---
+  // Notification Engine
   const isInQuietHours = (h, s = 22, e = 7) => {
     const hi = +h, si = +s, ei = +e;
     return si === ei ? false : (si > ei ? (hi >= si || hi < ei) : (hi >= si && hi < ei));
@@ -446,11 +314,9 @@
     if (rHours > 0 && apt.notifiedHourForSlot !== curSlot && diffH > 0 && diffH <= rHours && (!quiet || cfg.allowHourlyInQuietHours)) {
       return { shouldNotifyDay: false, shouldNotifyHour: true, supersedesDay: true, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, diffHours: diffH, reason: 'HOURLY_DUE' };
     }
-
     const diffD = daysBetweenDates(nowBkk.dateStr, apt.appointmentDate);
     if (rDays > 0 && apt.notifiedDayForSlot !== apt.appointmentDate && diffD !== null && diffD >= 0 && diffD <= rDays) {
-      const dHour = cfg.dailyDigestHour != null ? +cfg.dailyDigestHour : 8;
-      if (!quiet && (cfg.requireDigestWindow === false || nowBkk.hour >= dHour)) {
+      if (!quiet && (cfg.requireDigestWindow === false || nowBkk.hour >= (cfg.dailyDigestHour != null ? +cfg.dailyDigestHour : 8))) {
         return { shouldNotifyDay: true, shouldNotifyHour: false, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, diffCalDays: diffD, reason: 'DAY_DUE' };
       }
     }
@@ -467,9 +333,7 @@
       `   สถานะ: [${sanitizeNoEmoji(normalizeStatus(a.status))}]`,
       `   ผู้สร้าง: ${sanitizeNoEmoji(a.createdBy || a.updatedBy || '-')}`
     ];
-    if (a.statusChangedBy && normalizeStatus(a.status) !== STATUS.CONFIRMED) {
-      lines.push(`   ผู้ดำเนินการ: ${sanitizeNoEmoji(a.statusChangedBy)}`);
-    }
+    if (a.statusChangedBy && normalizeStatus(a.status) !== STATUS.CONFIRMED) lines.push(`   ผู้ดำเนินการ: ${sanitizeNoEmoji(a.statusChangedBy)}`);
     return lines.join('\n');
   };
 
@@ -505,18 +369,9 @@
     return { shouldPush: true, hourlyItems: hourly, digestItems: digest, slotUpdates, messageText: txt };
   }
 
-  // --- Year-End & User Statistics ---
+  // Yearly & User Statistics
   function calculateYearlyStats(list, nowIso) {
-    const stats = {
-      total: 0,
-      active: 0,
-      completed: 0,
-      cancelled: 0,
-      overdue: 0,
-      rescheduleTotal: 0,
-      completionRate: 0,
-      cancellationRate: 0
-    };
+    const stats = { total: 0, active: 0, completed: 0, cancelled: 0, overdue: 0, rescheduleTotal: 0, completionRate: 0, cancellationRate: 0 };
     (list || []).forEach(a => {
       if (!a || a.deletedAt) return;
       stats.total += 1;
@@ -527,7 +382,6 @@
       else if (st === STATUS.CANCELLED) stats.cancelled += 1;
       if (isOverdue(a, nowIso)) stats.overdue += 1;
     });
-
     if (stats.total > 0) {
       stats.completionRate = Math.round((stats.completed / stats.total) * 100);
       stats.cancellationRate = Math.round((stats.cancelled / stats.total) * 100);
@@ -539,28 +393,17 @@
     const userMap = {};
     const ensureUser = name => {
       const n = sanitizeNoEmoji(name || 'ไม่ระบุชื่อ') || 'ไม่ระบุชื่อ';
-      if (!userMap[n]) {
-        userMap[n] = { user: n, createdTotal: 0, completedTotal: 0, cancelledTotal: 0, activeTotal: 0 };
-      }
-      return userMap[n];
+      return userMap[n] || (userMap[n] = { user: n, createdTotal: 0, completedTotal: 0, cancelledTotal: 0, activeTotal: 0 });
     };
-
     (list || []).forEach(a => {
       if (!a || a.deletedAt) return;
       const cBy = sanitizeNoEmoji(a.createdBy || a.updatedBy || 'ไม่ระบุชื่อ') || 'ไม่ระบุชื่อ';
       const creatorStat = ensureUser(cBy);
       creatorStat.createdTotal += 1;
-
       const st = normalizeStatus(a.status);
-      if (st === STATUS.CONFIRMED) {
-        creatorStat.activeTotal += 1;
-      } else if (st === STATUS.COMPLETED) {
-        const closer = ensureUser(a.statusChangedBy || cBy);
-        closer.completedTotal += 1;
-      } else if (st === STATUS.CANCELLED) {
-        const canceller = ensureUser(a.statusChangedBy || cBy);
-        canceller.cancelledTotal += 1;
-      }
+      if (st === STATUS.CONFIRMED) creatorStat.activeTotal += 1;
+      else if (st === STATUS.COMPLETED) ensureUser(a.statusChangedBy || cBy).completedTotal += 1;
+      else if (st === STATUS.CANCELLED) ensureUser(a.statusChangedBy || cBy).cancelledTotal += 1;
     });
     return Object.values(userMap).sort((a, b) => (b.createdTotal + b.completedTotal + b.cancelledTotal) - (a.createdTotal + a.completedTotal + a.cancelledTotal) || b.createdTotal - a.createdTotal);
   }
@@ -614,9 +457,8 @@
       `สถานะ: [${sanitizeNoEmoji(st)}]`,
       `ผู้สร้างนัดหมาย: ${creator}`
     ];
-    if (st === STATUS.COMPLETED && apt.statusChangedBy) {
-      lines.push(`ผู้ยืนยันเสร็จสิ้น: ${sanitizeNoEmoji(apt.statusChangedBy)}`);
-    } else if (st === STATUS.CANCELLED) {
+    if (st === STATUS.COMPLETED && apt.statusChangedBy) lines.push(`ผู้ยืนยันเสร็จสิ้น: ${sanitizeNoEmoji(apt.statusChangedBy)}`);
+    else if (st === STATUS.CANCELLED) {
       if (apt.statusChangedBy) lines.push(`ผู้ยกเลิกนัด: ${sanitizeNoEmoji(apt.statusChangedBy)}`);
       if (apt.statusReason) lines.push(`สาเหตุการยกเลิก: ${sanitizeNoEmoji(apt.statusReason)}`);
     } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) {
@@ -626,7 +468,7 @@
     return sanitizeNoEmoji(lines.join('\n'));
   }
 
-  // --- LINE Bot Command Parser (Prefix: "คิว") ---
+  // LINE Bot Command Parser
   function parseAndExecuteLineCommand(rawText, appointments, nowIso, settings) {
     const text = sanitizeNoEmoji(rawText || '').trim();
     if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(text)) return null;
@@ -658,9 +500,7 @@
     }
     if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
     if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
-      const itms = list
-        .filter(a => normalizeStatus(a.status) === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= bkk.dateStr)
-        .sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
+      const itms = list.filter(a => normalizeStatus(a.status) === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= bkk.dateStr).sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
       return itms.length ? fmtList(`[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (${itms.length} รายการ)`, itms) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
     }
     if (arg === 'วันนี้') {
@@ -692,8 +532,7 @@
       return r.items.length ? fmtList(`[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear} (${r.ceYear})] รวม ${r.stats.total} รายการ (สิ้นสุด ${r.stats.completed} | ยกเลิก ${r.stats.cancelled})`, r.items) : `[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear}]\nไม่มีรายการนัดหมาย`;
     }
     if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
-      const targetY = arg === 'ปีนี้' ? bkk.year : bkk.year + 1;
-      return formatYearCommandReply(queryByYear(list, targetY, { nowIso }), cfg);
+      return formatYearCommandReply(queryByYear(list, arg === 'ปีนี้' ? bkk.year : bkk.year + 1, { nowIso }), cfg);
     }
     const ym = arg.match(/^ปี\s*(\d{4})$/);
     if (ym) {

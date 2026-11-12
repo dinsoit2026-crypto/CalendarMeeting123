@@ -1,5 +1,5 @@
 /**
- * app.js - UI Controller, State Management & User Attribution (v2.5.0)
+ * app.js - UI Controller, State Management & User Attribution (v2.5.0 Optimized)
  * Modern SaaS UI with Time-First Cards, Split-View Calendar, User Authentication & Audit Trail
  * Zero-Emoji Policy Compliant
  */
@@ -13,20 +13,11 @@
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   const escapeHtml = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ESC[c]);
 
-  const STORAGE = {
-    APTS: 'CAL_DEMO_APTS_V2',
-    LOGS: 'CAL_DEMO_LOGS_V2',
-    CFG: 'CAL_CONN_CFG_V2',
-    THEME: 'CAL_THEME_V2',
-    AUTH_USER: 'CAL_AUTH_USER_V2',
-    USERS: 'CAL_DEMO_USERS_V2'
-  };
-
+  const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2' };
   const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdiIEhkvSke--ro/exec';
   const DEFAULT_PASSCODE = 'CALL1234';
   const FIELD_LABELS = { appointmentDate: 'วันที่นัดหมาย', appointmentTime: 'เวลานัดหมาย', location: 'สถานที่', contactPerson: 'ผู้นัดพบ', status: 'สถานะ', DELETED: 'ลบนัดหมาย' };
 
-  // Reusable SVG snippet dictionary
   const ICO = {
     clock: '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
     user: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
@@ -37,35 +28,13 @@
   };
 
   const state = {
-    isLive: true,
-    gasUrl: DEFAULT_GAS_URL,
-    passcode: DEFAULT_PASSCODE,
-    currentUser: null,
-    users: [],
-    theme: 'light',
-    quickRange: 'ALL',
-    filterUser: '',
-    appointments: [],
-    rescheduleLogs: [],
-    meta: {
-      LAST_TRIGGER_RUN_AT: '',
-      CACHED_QUOTA_LIMIT: '300',
-      CACHED_QUOTA_USED: '0',
-      DAILY_DIGEST_HOUR: '8',
-      QUIET_HOURS_START: '22',
-      QUIET_HOURS_END: '7',
-      ENABLE_LINE_BOT_QUERY: 'TRUE',
-      PRIVACY_MASK_CONTACT: 'FALSE',
-      NOTIFY_ON_STATUS_CHANGE: 'TRUE'
-    },
-    calYear: Logic.getBangkokParts().year,
-    calMonth: Logic.getBangkokParts().month,
-    calSelectedDate: '',
-    overviewYear: Logic.getBangkokParts().year,
-    editingUserId: null
+    isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, currentUser: null, users: [], theme: 'light',
+    quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
+    meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' },
+    calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '',
+    overviewYear: Logic.getBangkokParts().year, editingUserId: null
   };
 
-  // Toast System
   function showToast(msg, type = 'info') {
     const c = $('toastContainer'); if (!c) return;
     const it = document.createElement('div');
@@ -75,7 +44,6 @@
     setTimeout(() => { it.style.opacity = '0'; it.style.transition = 'opacity 0.25s'; setTimeout(() => it.remove(), 260); }, 3200);
   }
 
-  // Theme & Navigation
   function applyTheme(t) {
     state.theme = t === 'dark' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', state.theme);
@@ -89,38 +57,20 @@
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === id));
   }
 
-  // User Authentication, Registration & Full-Screen Auth Gate
   function loadSavedSession() {
-    try {
-      const savedUsers = localStorage.getItem(STORAGE.USERS);
-      state.users = savedUsers ? JSON.parse(savedUsers) : [...Logic.DEFAULT_USERS];
-    } catch (_) {
-      state.users = [...Logic.DEFAULT_USERS];
-    }
-
+    try { const su = localStorage.getItem(STORAGE.USERS); state.users = su ? JSON.parse(su) : [...Logic.DEFAULT_USERS]; } catch (_) { state.users = [...Logic.DEFAULT_USERS]; }
     state.currentUser = null;
     try {
       const uStr = localStorage.getItem(STORAGE.AUTH_USER);
-      if (uStr) {
-        const parsed = JSON.parse(uStr);
-        if (parsed && parsed.username && parsed.displayName) {
-          state.currentUser = parsed;
-        }
-      }
+      if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; }
     } catch (_) {}
     updateUserSessionUI();
   }
 
   function switchAuthTab(mode) {
     const isReg = mode === 'register';
-    if ($('tabBtnAuthLogin')) {
-      $('tabBtnAuthLogin').classList.toggle('active', !isReg);
-      $('tabBtnAuthLogin').setAttribute('aria-selected', isReg ? 'false' : 'true');
-    }
-    if ($('tabBtnAuthRegister')) {
-      $('tabBtnAuthRegister').classList.toggle('active', isReg);
-      $('tabBtnAuthRegister').setAttribute('aria-selected', isReg ? 'true' : 'false');
-    }
+    if ($('tabBtnAuthLogin')) { $('tabBtnAuthLogin').classList.toggle('active', !isReg); $('tabBtnAuthLogin').setAttribute('aria-selected', isReg ? 'false' : 'true'); }
+    if ($('tabBtnAuthRegister')) { $('tabBtnAuthRegister').classList.toggle('active', isReg); $('tabBtnAuthRegister').setAttribute('aria-selected', isReg ? 'true' : 'false'); }
     if ($('loginForm')) $('loginForm').style.display = isReg ? 'none' : 'flex';
     if ($('registerForm')) $('registerForm').style.display = isReg ? 'flex' : 'none';
     if ($('loginErrorMsg')) $('loginErrorMsg').style.display = 'none';
@@ -128,33 +78,23 @@
   }
 
   function updateUserSessionUI() {
-    const isAuthenticated = Boolean(state.currentUser && state.currentUser.username);
-    if ($('authGateScreen')) $('authGateScreen').style.display = isAuthenticated ? 'none' : 'flex';
-    if ($('appShell')) $('appShell').style.display = isAuthenticated ? 'block' : 'none';
+    const isAuth = Boolean(state.currentUser && state.currentUser.username);
+    if ($('authGateScreen')) $('authGateScreen').style.display = isAuth ? 'none' : 'flex';
+    if ($('appShell')) $('appShell').style.display = isAuth ? 'block' : 'none';
 
     const authBadge = $('authModeBadge');
-    if (authBadge) {
-      authBadge.className = state.isLive ? 'mode-badge live' : 'mode-badge demo';
-      authBadge.textContent = state.isLive ? 'Sheets' : 'Demo';
-    }
+    if (authBadge) { authBadge.className = state.isLive ? 'mode-badge live' : 'mode-badge demo'; authBadge.textContent = state.isLive ? 'Sheets' : 'Demo'; }
 
     const nameEl = $('currentUserName'), roleEl = $('currentUserRole');
-    if (nameEl) nameEl.textContent = isAuthenticated ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
+    if (nameEl) nameEl.textContent = isAuth ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
     if (roleEl) {
-      const r = isAuthenticated && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF';
-      roleEl.textContent = r;
-      roleEl.className = `badge-role ${r.toLowerCase()}`;
+      const r = isAuth && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF';
+      roleEl.textContent = r; roleEl.className = `badge-role ${r.toLowerCase()}`;
     }
 
-    // Role-based visibility
-    const isAdmin = Boolean(isAuthenticated && state.currentUser.role === 'ADMIN');
-    const userMgmtSec = $('userManagementSection');
-    if (userMgmtSec) {
-      userMgmtSec.style.opacity = isAdmin ? '1' : '0.85';
-    }
-    if ($('btnOpenAddUserModal')) {
-      $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
-    }
+    const isAdmin = Boolean(isAuth && state.currentUser.role === 'ADMIN');
+    if ($('userManagementSection')) $('userManagementSection').style.opacity = isAdmin ? '1' : '0.85';
+    if ($('btnOpenAddUserModal')) $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
   }
 
   function handleLogout() {
@@ -170,38 +110,28 @@
 
   async function handleLoginSubmit(e) {
     e.preventDefault();
-    const un = ($('loginUsername').value || '').trim();
-    const pw = $('loginPassword').value || '';
-    const errEl = $('loginErrorMsg');
-    const submitBtn = $('btnSubmitLogin');
-
+    const un = ($('loginUsername').value || '').trim(), pw = $('loginPassword').value || '', errEl = $('loginErrorMsg'), submitBtn = $('btnSubmitLogin');
     try {
       if (errEl) errEl.style.display = 'none';
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังตรวจสอบ...'; }
       let userObj = null;
-
       if (state.isLive && state.gasUrl) {
         try {
           const res = await callGasApi('login', { username: un, password: pw });
           userObj = res.user;
         } catch (apiErr) {
           if (String(apiErr.message || '').includes('ไม่รู้จัก action')) {
-            const fallbackUsers = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-            const localRes = Logic.authenticateUser(fallbackUsers, un, pw);
+            const localRes = Logic.authenticateUser(state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
             if (!localRes.ok) throw new Error(localRes.error);
             userObj = localRes.user;
-            showToast('เซิร์ฟเวอร์ GAS ยังเป็นเวอร์ชันเดิม (กรุณาอัปเดต Code.gs) ระบบใช้บัญชีในเครื่องชั่วคราว', 'warn');
-          } else {
-            throw apiErr;
-          }
+            showToast('เซิร์ฟเวอร์ GAS เป็นเวอร์ชันเดิม ระบบใช้บัญชีในเครื่องชั่วคราว', 'warn');
+          } else throw apiErr;
         }
       } else {
-        const fallbackUsers = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-        const res = Logic.authenticateUser(fallbackUsers, un, pw);
+        const res = Logic.authenticateUser(state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
         if (!res.ok) throw new Error(res.error);
         userObj = res.user;
       }
-
       state.currentUser = userObj;
       localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj));
       updateUserSessionUI();
@@ -218,13 +148,8 @@
 
   async function handleRegisterSubmit(e) {
     e.preventDefault();
-    const username = ($('regUsername').value || '').trim().toLowerCase();
-    const displayName = Logic.sanitizeNoEmoji($('regDisplayName').value || '');
-    const password = $('regPassword').value || '';
-    const confirmPassword = $('regConfirmPassword').value || '';
-    const errEl = $('registerErrorMsg');
-    const submitBtn = $('btnSubmitRegister');
-
+    const username = ($('regUsername').value || '').trim().toLowerCase(), displayName = Logic.sanitizeNoEmoji($('regDisplayName').value || '');
+    const password = $('regPassword').value || '', confirmPassword = $('regConfirmPassword').value || '', errEl = $('registerErrorMsg'), submitBtn = $('btnSubmitRegister');
     try {
       if (errEl) errEl.style.display = 'none';
       const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
@@ -233,33 +158,14 @@
 
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังสร้างบัญชี...'; }
       let userObj = localReg.user;
-
       if (state.isLive && state.gasUrl) {
         try {
           const res = await callGasApi('register', { payload: { username, displayName, password, confirmPassword } });
           if (res && res.user) userObj = res.user;
           if (res && res.users) state.users = res.users;
         } catch (apiErr) {
-          if (String(apiErr.message || '').includes('ไม่รู้จัก action')) {
-            try {
-              const saveRes = await callGasApi('saveUser', {
-                userPayload: { isNew: true, username, displayName, password, role: 'STAFF', isActive: true }
-              });
-              if (saveRes && saveRes.user) {
-                userObj = {
-                  userId: saveRes.user.userId,
-                  username: saveRes.user.username,
-                  displayName: saveRes.user.displayName,
-                  role: 'STAFF'
-                };
-              }
-            } catch (_) {
-              state.users = [...uList, localReg.record];
-              try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
-            }
-          } else {
-            throw apiErr;
-          }
+          state.users = [...uList, localReg.record];
+          try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
         }
       } else {
         state.users = [...uList, localReg.record];
@@ -286,7 +192,6 @@
     }
   }
 
-  // App Initialization
   function initApp() {
     try { const s = localStorage.getItem(STORAGE.THEME); if (s) state.theme = s; } catch (_) {}
     applyTheme(state.theme);
@@ -347,7 +252,6 @@
     localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users));
   }
 
-  // API Call & Sync
   async function callGasApi(action, payload) {
     if (!state.gasUrl) throw new Error('ยังไม่ได้ระบุ Web App URL');
     const res = await fetch(state.gasUrl, {
@@ -377,14 +281,8 @@
     finally { if (btn) btn.classList.remove('is-syncing'); if (lbl) lbl.textContent = 'ซิงก์'; }
   }
 
-  // Rendering
   function renderAll() {
-    renderHeader();
-    renderListTab();
-    renderCalendarTab();
-    renderYearTab();
-    renderSettingsTab();
-    updateUserSessionUI();
+    renderHeader(); renderListTab(); renderCalendarTab(); renderYearTab(); renderSettingsTab(); updateUserSessionUI();
   }
 
   function updateClock() {
@@ -410,16 +308,14 @@
 
   const getStatusClass = s => {
     const st = Logic.normalizeStatus(s);
-    return st === Logic.STATUS.COMPLETED ? 'status-completed' : st === Logic.STATUS.CANCELLED ? 'status-cancelled' : 'status-confirmed';
+    return st === Logic.STATUS.COMPLETED ? 'status-completed' : (st === Logic.STATUS.CANCELLED ? 'status-cancelled' : 'status-confirmed');
   };
 
   function getRelDate(a, nowBkk, od) {
     if (od) return { text: 'เลยกำหนด', cls: 'rel-overdue' };
     if (!a.appointmentDate) return { text: 'ไม่ระบุวัน', cls: '' };
     const d = Logic.daysBetweenDates(nowBkk.dateStr, a.appointmentDate);
-    if (d === 0) return { text: 'วันนี้', cls: 'rel-today' };
-    if (d === 1) return { text: 'พรุ่งนี้', cls: 'rel-today' };
-    return { text: d > 0 ? `อีก ${d} วัน` : 'ผ่านมาแล้ว', cls: '' };
+    return d === 0 ? { text: 'วันนี้', cls: 'rel-today' } : (d === 1 ? { text: 'พรุ่งนี้', cls: 'rel-today' } : { text: d > 0 ? `อีก ${d} วัน` : 'ผ่านมาแล้ว', cls: '' });
   }
 
   function renderCardHtml(a) {
@@ -436,17 +332,12 @@
     if (+a.rescheduleCount > 0) badges.push(`<span class="badge-info">เลื่อนนัด ${+a.rescheduleCount} ครั้ง</span>`);
     const isConf = st === Logic.STATUS.CONFIRMED;
 
-    // User Attribution tags
     const creatorName = escapeHtml(a.createdBy || a.updatedBy || '-');
-    const attributionHtml = [
-      `<span class="attribution-tag">${ICO.user}<span>ผู้สร้าง: <strong>${creatorName}</strong></span></span>`
-    ];
-
+    const attributionHtml = [`<span class="attribution-tag">${ICO.user}<span>ผู้สร้าง: <strong>${creatorName}</strong></span></span>`];
     if (st === Logic.STATUS.COMPLETED && a.statusChangedBy) {
       attributionHtml.push(`<span class="attribution-tag completed">${ICO.check}<span>เสร็จสิ้นโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong></span></span>`);
     } else if (st === Logic.STATUS.CANCELLED && a.statusChangedBy) {
-      const reasonTxt = a.statusReason ? ` (${escapeHtml(a.statusReason)})` : '';
-      attributionHtml.push(`<span class="attribution-tag cancelled"><span>ยกเลิกโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong>${reasonTxt}</span></span>`);
+      attributionHtml.push(`<span class="attribution-tag cancelled"><span>ยกเลิกโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong>${a.statusReason ? ` (${escapeHtml(a.statusReason)})` : ''}</span></span>`);
     } else if (a.updatedBy && a.updatedBy !== (a.createdBy || a.updatedBy)) {
       attributionHtml.push(`<span class="attribution-tag">${ICO.edit}<span>แก้ไขล่าสุดโดย: <strong>${escapeHtml(a.updatedBy)}</strong></span></span>`);
     }
@@ -474,8 +365,7 @@
           <button type="button" class="btn btn-soft btn-sm btn-edit-apt" data-id="${escapeHtml(a.id)}">${ICO.edit}<span>แก้ไข/เลื่อน</span></button>
           ${isConf ? `<button type="button" class="btn btn-danger-ghost btn-sm btn-open-cancel-modal" data-id="${escapeHtml(a.id)}">ยกเลิก</button>` : `<button type="button" class="btn btn-outline btn-sm btn-quick-reopen" data-id="${escapeHtml(a.id)}">คืนสถานะนัด</button>`}
         </div>
-      </article>
-    `;
+      </article>`;
   }
 
   function renderListTab() {
@@ -489,26 +379,19 @@
     $('statTotal').textContent = all.length; $('statConfirmed').textContent = sConf; $('statCompleted').textContent = sComp; $('statCancelled').textContent = sCanc; $('statOverdue').textContent = sOd;
     if ($('navBadgeActiveCount')) $('navBadgeActiveCount').textContent = sConf;
 
-    // Populate filterUser dropdown
     const userSel = $('filterUser');
     if (userSel) {
-      const curVal = userSel.value;
-      const creators = new Set();
+      const curVal = userSel.value, creators = new Set();
       all.forEach(a => { const c = a.createdBy || a.updatedBy; if (c) creators.add(c); });
       (state.users || []).forEach(u => { if (u && u.displayName) creators.add(u.displayName); });
-
       let optHtml = '<option value="">สมาชิกทุกคน</option><option value="MY_APTS">เฉพาะงานของฉัน</option>';
-      creators.forEach(name => {
-        optHtml += `<option value="${escapeHtml(name)}">งานที่สร้างโดย: ${escapeHtml(name)}</option>`;
-      });
-      userSel.innerHTML = optHtml;
-      userSel.value = curVal;
+      creators.forEach(name => { optHtml += `<option value="${escapeHtml(name)}">งานที่สร้างโดย: ${escapeHtml(name)}</option>`; });
+      userSel.innerHTML = optHtml; userSel.value = curVal;
     }
 
     const kw = ($('filterSearch').value || '').trim().toLowerCase(), st = $('filterStatus').value, dt = $('filterDate').value, uFilter = userSel ? userSel.value : '';
     document.querySelectorAll('.stat-pill').forEach(p => p.classList.toggle('active-stat', (p.getAttribute('data-filter-status') || '') === st));
     const tmrStr = Logic.getBangkokParts(nowBkk.epochMs + 86400000).dateStr, curMonthPfx = `${nowBkk.year}-${String(nowBkk.month).padStart(2, '0')}-`;
-
     const myName = state.currentUser ? state.currentUser.displayName : '';
 
     const filtered = all.filter(a => {
@@ -517,14 +400,8 @@
       if (st === 'OVERDUE' && !Logic.isOverdue(a, nowBkk.isoStr)) return false;
       if (st && st !== 'ACTIVE_ONLY' && st !== 'OVERDUE' && aSt !== st) return false;
       if (dt && a.appointmentDate !== dt) return false;
-
-      // User filter
-      if (uFilter === 'MY_APTS') {
-        if ((a.createdBy || a.updatedBy) !== myName) return false;
-      } else if (uFilter) {
-        if ((a.createdBy || a.updatedBy) !== uFilter) return false;
-      }
-
+      if (uFilter === 'MY_APTS' && (a.createdBy || a.updatedBy) !== myName) return false;
+      if (uFilter && uFilter !== 'MY_APTS' && (a.createdBy || a.updatedBy) !== uFilter) return false;
       if (!dt && state.quickRange !== 'ALL') {
         if (state.quickRange === 'UPCOMING' && !(aSt === Logic.STATUS.CONFIRMED && a.appointmentDate >= nowBkk.dateStr)) return false;
         if (state.quickRange === 'TODAY' && a.appointmentDate !== nowBkk.dateStr) return false;
@@ -539,7 +416,6 @@
     $('appointmentsListContainer').innerHTML = filtered.length ? filtered.map(renderCardHtml).join('') : '<div class="empty-state">ไม่พบรายการนัดหมายตามเงื่อนไขที่เลือก</div>';
   }
 
-  // Calendar
   function initMonthSelector() {
     const sel = $('calSelectMonth'); if (!sel) return;
     sel.innerHTML = Logic.THAI_MONTHS_FULL.map((m, i) => `<option value="${i + 1}">${m}</option>`).join('');
@@ -568,7 +444,6 @@
     $('monthlyAppointmentsList').innerHTML = showItems.length ? showItems.map(renderCardHtml).join('') : '<div class="empty-state">ไม่มีรายการนัดหมายในวันที่เลือก กดปุ่ม "+ นัดวันนี้" ด้านบนเพื่อสร้างนัดใหม่</div>';
   }
 
-  // Yearly Tab & User Performance
   function renderYearTab() {
     const curY = Logic.getBangkokParts().year, multi = Logic.queryMultiYearOverview(state.appointments, Math.min(curY, state.overviewYear), Math.max(curY + 3, state.overviewYear + 1), { nowIso: Logic.getBangkokParts().isoStr });
     $('multiYearCardsContainer').innerHTML = multi.years.map(yr => `
@@ -587,25 +462,18 @@
       <div class="stat-box" style="border-left:4px solid var(--st-canc-border);"><span class="stat-box-title">ยกเลิกการนัดหมาย</span><span class="stat-box-val">${s.cancelled}</span><span class="stat-box-sub">อัตราการยกเลิก ${s.cancellationRate}%</span></div>
       <div class="stat-box"><span class="stat-box-title">การเลื่อนนัดสะสม</span><span class="stat-box-val">${s.rescheduleTotal}</span><span class="stat-box-sub">ครั้งที่มีการเลื่อนวัน/เวลา</span></div>`;
 
-    // Render User Attribution & Performance
     const uPerfGrid = $('userPerformanceGrid');
     if (uPerfGrid) {
       const uStats = Logic.calculateUserStats(selYr.items);
-      uPerfGrid.innerHTML = !uStats.length
-        ? '<div class="empty-state">ยังไม่มีข้อมูลสถิติผู้ใช้งานในปีนี้</div>'
-        : uStats.map(u => `
-          <div class="user-stat-card">
-            <div class="user-stat-header">
-              <span>${escapeHtml(u.user)}</span>
-              <span class="badge-info">สร้างนัด ${u.createdTotal} งาน</span>
-            </div>
-            <div class="user-stat-counts">
-              <span style="color:var(--st-comp-text);">กดเสร็จสิ้น: <strong>${u.completedTotal}</strong></span>
-              <span style="color:var(--st-canc-text);">กดยกเลิก: <strong>${u.cancelledTotal}</strong></span>
-              <span style="color:var(--st-conf-text);">รอดำเนินการ: <strong>${u.activeTotal}</strong></span>
-            </div>
+      uPerfGrid.innerHTML = !uStats.length ? '<div class="empty-state">ยังไม่มีข้อมูลสถิติผู้ใช้งานในปีนี้</div>' : uStats.map(u => `
+        <div class="user-stat-card">
+          <div class="user-stat-header"><span>${escapeHtml(u.user)}</span><span class="badge-info">สร้างนัด ${u.createdTotal} งาน</span></div>
+          <div class="user-stat-counts">
+            <span style="color:var(--st-comp-text);">กดเสร็จสิ้น: <strong>${u.completedTotal}</strong></span>
+            <span style="color:var(--st-canc-text);">กดยกเลิก: <strong>${u.cancelledTotal}</strong></span>
+            <span style="color:var(--st-conf-text);">รอดำเนินการ: <strong>${u.activeTotal}</strong></span>
           </div>
-        `).join('');
+        </div>`).join('');
     }
 
     $('yearMonthsGrid').innerHTML = selYr.months.map(m => {
@@ -619,14 +487,12 @@
     }).join('');
   }
 
-  // Settings & User Management
   function renderSettingsTab() {
     $('cfgDigestHour').value = state.meta.DAILY_DIGEST_HOUR || '8';
     $('cfgEnableBotQuery').checked = String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE';
     $('cfgPrivacyMask').checked = String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
     if ($('cfgNotifyStatusChange')) $('cfgNotifyStatusChange').checked = String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE';
 
-    // User Table
     const uTableBody = $('userTableBody');
     if (uTableBody) {
       const isAdmin = Boolean(state.currentUser && state.currentUser.role === 'ADMIN');
@@ -650,7 +516,6 @@
       }).join('');
     }
 
-    // Reschedule Logs
     const tb = $('rescheduleLogsTableBody');
     if (!state.rescheduleLogs.length) { tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">ยังไม่มีประวัติการเลื่อนนัดหรือแก้ไขข้อมูล</td></tr>'; return; }
     tb.innerHTML = state.rescheduleLogs.slice(0, 40).map(l => `
@@ -665,10 +530,8 @@
     `).join('');
   }
 
-  // Conflict Checking on Form
   function checkConflictOnForm() {
-    const d = $('formDate').value, t = $('formTime').value, curId = $('formAptId').value;
-    const banner = $('conflictWarningBanner');
+    const d = $('formDate').value, t = $('formTime').value, curId = $('formAptId').value, banner = $('conflictWarningBanner');
     if (!banner) return;
     const conflicts = Logic.findTimeConflicts(state.appointments, d, t, curId);
     if (conflicts.length > 0) {
@@ -679,7 +542,6 @@
     }
   }
 
-  // Modal Handlers
   function openCreateModal(prefillDate) {
     $('modalTitle').textContent = 'สร้างนัดหมายใหม่';
     $('formAptId').value = $('formExpectedUpdatedAt').value = $('formNotes').value = $('formRescheduleReason').value = $('formTitle').value = $('formContactPerson').value = $('formLocation').value = '';
@@ -693,9 +555,7 @@
       $('formCreatedByPill').textContent = `ผู้สร้างนัดหมาย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
       $('formCreatedByPill').style.display = 'inline-block';
     }
-    updateDateThaiPreview();
-    checkConflictOnForm();
-    openModal('appointmentModal');
+    updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
   }
 
   function openEditModal(id) {
@@ -715,39 +575,28 @@
       $('formCreatedByPill').textContent = `ผู้สร้างนัดหมายเดิม: ${a.createdBy || a.updatedBy || '-'} | แก้ไขโดย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
       $('formCreatedByPill').style.display = 'inline-block';
     }
-    updateDateThaiPreview();
-    checkConflictOnForm();
-    openModal('appointmentModal');
+    updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
   }
 
   function updateDateThaiPreview() {
     const v = $('formDate').value; $('formDateThaiPreview').textContent = v ? Logic.formatThaiDateDisplay(v, true) : 'ยังไม่ระบุวันที่';
   }
 
+  // Optimized Form Submit (Single roundtrip directly updating in-memory state)
   async function handleFormSubmit(e) {
     e.preventDefault();
     const id = $('formAptId').value.trim(), exp = $('formExpectedUpdatedAt').value.trim();
     const curUserName = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
     const payload = {
-      title: Logic.sanitizeNoEmoji($('formTitle').value),
-      status: $('formStatus').value,
-      contactPerson: Logic.sanitizeNoEmoji($('formContactPerson').value),
-      appointmentDate: $('formDate').value,
-      appointmentTime: $('formTime').value,
-      location: Logic.sanitizeNoEmoji($('formLocation').value),
-      remindDaysBefore: +$('formRemindDays').value,
-      remindHoursBefore: +$('formRemindHours').value,
-      notes: Logic.sanitizeNoEmoji($('formNotes').value),
-      updatedBy: curUserName
+      title: Logic.sanitizeNoEmoji($('formTitle').value), status: $('formStatus').value,
+      contactPerson: Logic.sanitizeNoEmoji($('formContactPerson').value), appointmentDate: $('formDate').value,
+      appointmentTime: $('formTime').value, location: Logic.sanitizeNoEmoji($('formLocation').value),
+      remindDaysBefore: +$('formRemindDays').value, remindHoursBefore: +$('formRemindHours').value,
+      notes: Logic.sanitizeNoEmoji($('formNotes').value), updatedBy: curUserName
     };
-
     const reason = Logic.sanitizeNoEmoji($('formRescheduleReason').value), notifyLine = $('formNotifyLine') ? Boolean($('formNotifyLine').checked) : !id;
-    if (!id) {
-      payload.createdBy = curUserName;
-    } else {
-      payload.statusChangedBy = curUserName;
-      if (reason) payload.statusReason = reason;
-    }
+    if (!id) payload.createdBy = curUserName;
+    else { payload.statusChangedBy = curUserName; if (reason) payload.statusReason = reason; }
 
     const v = Logic.validateAppointmentInput(payload);
     if (!v.valid) { showToast(v.errors.join(' | '), 'error'); return; }
@@ -755,9 +604,22 @@
     try {
       $('btnSubmitModal').disabled = true; $('btnSubmitModal').textContent = 'กำลังบันทึก...';
       if (state.isLive) {
-        if (!id) await callGasApi('create', { payload, notifyLine });
-        else await callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine });
-        await syncWithServer(true);
+        const res = id
+          ? await callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine })
+          : await callGasApi('create', { payload, notifyLine });
+        if (res) {
+          if (res.appointment) {
+            if (id) {
+              const idx = state.appointments.findIndex(x => x.id === id);
+              if (idx !== -1) state.appointments[idx] = res.appointment;
+            } else {
+              state.appointments.push(res.appointment);
+            }
+          }
+          if (res.logs && res.logs.length) state.rescheduleLogs = [...res.logs, ...state.rescheduleLogs];
+          if (res.meta) state.meta = { ...state.meta, ...res.meta };
+        }
+        renderAll();
       } else {
         const now = Logic.getBangkokParts().isoStr;
         let savedApt = null;
@@ -781,37 +643,49 @@
     finally { $('btnSubmitModal').disabled = false; $('btnSubmitModal').textContent = 'บันทึกนัดหมาย'; }
   }
 
-  // Quick Action Handlers: Complete & Cancel
-  async function handleQuickComplete(id) {
+  // Unified Status Mutation Handler (Zero redundant roundtrips)
+  async function mutateAptStatus(id, newStatus, reason, extra) {
     const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a) return;
     const curUser = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
-    const notifyLine = String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE';
+    const notifyLine = (extra && extra.notifyLine !== undefined) ? extra.notifyLine : (String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE');
+    const patch = {
+      status: newStatus, updatedBy: curUser,
+      statusChangedBy: newStatus === Logic.STATUS.CONFIRMED ? '' : curUser,
+      statusReason: newStatus === Logic.STATUS.CONFIRMED ? '' : (extra && extra.statusReason ? Logic.sanitizeNoEmoji(extra.statusReason) : (reason || ''))
+    };
+
     try {
       if (state.isLive) {
-        await callGasApi('update', {
-          id,
-          payload: { status: Logic.STATUS.COMPLETED, statusChangedBy: curUser, updatedBy: curUser },
-          expectedUpdatedAt: a.updatedAt,
-          notifyLine,
-          reason: 'เสร็จสิ้นการนัดหมาย'
-        });
-        await syncWithServer(true);
+        const res = await callGasApi('update', { id, payload: patch, expectedUpdatedAt: a.updatedAt, notifyLine, reason: reason || newStatus });
+        if (res && res.appointment) {
+          const idx = state.appointments.findIndex(x => x.id === id);
+          if (idx !== -1) state.appointments[idx] = res.appointment;
+          if (res.logs && res.logs.length) state.rescheduleLogs = [...res.logs, ...state.rescheduleLogs];
+          if (res.meta) state.meta = { ...state.meta, ...res.meta };
+        }
+        renderAll();
       } else {
         const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
-        const r = Logic.updateAppointmentRecord(state.appointments[idx], {
-          status: Logic.STATUS.COMPLETED,
-          statusChangedBy: curUser,
-          updatedBy: curUser
-        }, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: a.updatedAt, reason: 'เสร็จสิ้นการนัดหมาย' });
-        state.appointments[idx] = r.record;
-        if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
-        if (notifyLine && $('botSimOutput')) {
-          $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
+        if (idx !== -1) {
+          const r = Logic.updateAppointmentRecord(state.appointments[idx], patch, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: a.updatedAt, reason: reason || newStatus });
+          state.appointments[idx] = r.record;
+          if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
+          if (notifyLine && $('botSimOutput')) {
+            $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
+          }
+          saveDemoData(); renderAll();
         }
-        saveDemoData(); renderAll();
       }
-      showToast(`บันทึก [${id}] สิ้นสุดการนัดหมายแล้ว (โดย ${curUser})`, 'success');
-    } catch (err) { showToast(err.message, 'error'); }
+      return true;
+    } catch (err) {
+      showToast(err.message, 'error');
+      return false;
+    }
+  }
+
+  async function handleQuickComplete(id) {
+    const ok = await mutateAptStatus(id, Logic.STATUS.COMPLETED, 'เสร็จสิ้นการนัดหมาย');
+    if (ok) showToast(`บันทึก [${id}] สิ้นสุดการนัดหมายแล้ว`, 'success');
   }
 
   function openCancelModal(id) {
@@ -825,78 +699,27 @@
 
   async function handleCancelSubmit(e) {
     e.preventDefault();
-    const id = $('cancelAptId').value.trim();
-    const reason = Logic.sanitizeNoEmoji($('cancelReasonInput').value);
+    const id = $('cancelAptId').value.trim(), reason = Logic.sanitizeNoEmoji($('cancelReasonInput').value);
     const notifyLine = $('cancelNotifyLine') ? $('cancelNotifyLine').checked : true;
-    const curUser = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
-    const a = state.appointments.find(x => x.id === id && !x.deletedAt);
-
-    try {
-      if (state.isLive) {
-        await callGasApi('update', {
-          id,
-          payload: { status: Logic.STATUS.CANCELLED, statusChangedBy: curUser, statusReason: reason, updatedBy: curUser },
-          expectedUpdatedAt: a ? a.updatedAt : undefined,
-          notifyLine,
-          reason: reason || 'ยกเลิกการนัดหมาย'
-        });
-        await syncWithServer(true);
-      } else {
-        const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
-        if (idx !== -1) {
-          const r = Logic.updateAppointmentRecord(state.appointments[idx], {
-            status: Logic.STATUS.CANCELLED,
-            statusChangedBy: curUser,
-            statusReason: reason,
-            updatedBy: curUser
-          }, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: a ? a.updatedAt : undefined, reason: reason || 'ยกเลิกการนัดหมาย' });
-          state.appointments[idx] = r.record;
-          if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
-          if (notifyLine && $('botSimOutput')) {
-            $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
-          }
-          saveDemoData(); renderAll();
-        }
-      }
-      closeModal('cancelModal');
-      showToast(`ยกเลิกนัดหมาย [${id}] เรียบร้อยแล้ว (โดย ${curUser})`, 'warn');
-    } catch (err) { showToast(err.message, 'error'); }
+    const ok = await mutateAptStatus(id, Logic.STATUS.CANCELLED, reason || 'ยกเลิกการนัดหมาย', { statusReason: reason, notifyLine });
+    if (ok) { closeModal('cancelModal'); showToast(`ยกเลิกนัดหมาย [${id}] เรียบร้อยแล้ว`, 'warn'); }
   }
 
   async function handleQuickReopen(id) {
-    const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a) return;
-    const curUser = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
-    try {
-      if (state.isLive) {
-        await callGasApi('update', {
-          id,
-          payload: { status: Logic.STATUS.CONFIRMED, statusChangedBy: curUser, updatedBy: curUser },
-          expectedUpdatedAt: a.updatedAt,
-          notifyLine: true,
-          reason: 'คืนสถานะนัดหมาย'
-        });
-        await syncWithServer(true);
-      } else {
-        const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
-        const r = Logic.updateAppointmentRecord(state.appointments[idx], {
-          status: Logic.STATUS.CONFIRMED,
-          statusChangedBy: curUser,
-          updatedBy: curUser
-        }, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: a.updatedAt, reason: 'คืนสถานะนัดหมาย' });
-        state.appointments[idx] = r.record;
-        if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
-        saveDemoData(); renderAll();
-      }
-      showToast(`คืนสถานะ [${id}] เป็น "นัดหมายแล้ว" เรียบร้อย`, 'success');
-    } catch (err) { showToast(err.message, 'error'); }
+    const ok = await mutateAptStatus(id, Logic.STATUS.CONFIRMED, 'คืนสถานะนัดหมาย', { notifyLine: true });
+    if (ok) showToast(`คืนสถานะ [${id}] เป็น "นัดหมายแล้ว" เรียบร้อย`, 'success');
   }
 
   async function handleDelete() {
     const id = $('formAptId').value.trim(); if (!id || !confirm(`ยืนยันการลบนัดหมาย [${id}] หรือไม่?`)) return;
     const user = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
     try {
-      if (state.isLive) { await callGasApi('delete', { id, updatedBy: user }); await syncWithServer(true); }
-      else {
+      if (state.isLive) {
+        await callGasApi('delete', { id, updatedBy: user });
+        const idx = state.appointments.findIndex(x => x.id === id);
+        if (idx !== -1) state.appointments.splice(idx, 1);
+        renderAll();
+      } else {
         const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
         if (idx !== -1) {
           const removed = state.appointments[idx];
@@ -912,21 +735,18 @@
     } catch (err) { showToast(err.message, 'error'); }
   }
 
-  // User Management Modals
+  // User Management
   function openUserModal(userId) {
     if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error');
-      return;
+      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
     }
     state.editingUserId = userId || null;
     $('userModalTitle').textContent = userId ? 'แก้ไขข้อมูลสมาชิก' : 'เพิ่มสมาชิกใหม่';
     const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
     const u = userId ? uList.find(x => x.userId === userId) : null;
-    $('formUsername').value = u ? u.username : '';
-    $('formUsername').disabled = Boolean(u);
+    $('formUsername').value = u ? u.username : ''; $('formUsername').disabled = Boolean(u);
     $('formDisplayName').value = u ? (u.displayName || u.username) : '';
-    $('formUserPassword').value = '';
-    $('formUserRole').value = u ? (u.role || 'STAFF') : 'STAFF';
+    $('formUserPassword').value = ''; $('formUserRole').value = u ? (u.role || 'STAFF') : 'STAFF';
     $('formUserPasswordReqStar').style.display = u ? 'none' : 'inline';
     $('formUserPasswordHint').textContent = u ? 'เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน' : 'กำหนดรหัสผ่านสำหรับเข้าสู่ระบบ';
     openModal('userModal');
@@ -935,90 +755,66 @@
   async function handleUserFormSubmit(e) {
     e.preventDefault();
     if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error');
-      return;
+      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
     }
-    const un = ($('formUsername').value || '').trim().toLowerCase();
-    const disp = Logic.sanitizeNoEmoji($('formDisplayName').value);
-    const pw = $('formUserPassword').value || '';
-    const role = $('formUserRole').value;
+    const un = ($('formUsername').value || '').trim().toLowerCase(), disp = Logic.sanitizeNoEmoji($('formDisplayName').value);
+    const pw = $('formUserPassword').value || '', role = $('formUserRole').value;
     const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
     const existingU = state.editingUserId ? uList.find(x => x.userId === state.editingUserId) : null;
-
-    const payload = {
-      userId: state.editingUserId || undefined,
-      isNew: !state.editingUserId,
-      username: un,
-      displayName: disp,
-      role,
-      isActive: existingU ? existingU.isActive !== false : true
-    };
+    const payload = { userId: state.editingUserId || undefined, isNew: !state.editingUserId, username: un, displayName: disp, role, isActive: existingU ? existingU.isActive !== false : true };
     if (pw) payload.password = pw;
 
     try {
       const v = Logic.validateUserInput(payload, !state.editingUserId);
       if (!v.valid) throw new Error(v.errors.join(' | '));
-      if (!state.editingUserId && uList.some(x => x.username.toLowerCase() === un)) {
-        throw new Error('ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น');
-      }
+      if (!state.editingUserId && uList.some(x => x.username.toLowerCase() === un)) throw new Error('ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น');
 
       if (state.isLive) {
-        await callGasApi('saveUser', { userPayload: payload });
-        await syncWithServer(true);
+        const res = await callGasApi('saveUser', { userPayload: payload });
+        if (res && res.user) {
+          const idx = state.users.findIndex(x => x.userId === res.user.userId || x.username === res.user.username);
+          if (idx !== -1) state.users[idx] = { ...state.users[idx], ...res.user };
+          else state.users.push(res.user);
+        }
+        renderAll();
       } else {
         const s = v.sanitized;
         if (state.editingUserId) {
           const idx = state.users.findIndex(x => x.userId === state.editingUserId);
-          if (idx !== -1) {
-            state.users[idx].displayName = s.displayName;
-            state.users[idx].role = s.role;
-            if (s.passwordHash) state.users[idx].passwordHash = s.passwordHash;
-          }
+          if (idx !== -1) { state.users[idx].displayName = s.displayName; state.users[idx].role = s.role; if (s.passwordHash) state.users[idx].passwordHash = s.passwordHash; }
         } else {
           const maxNum = (state.users || []).reduce((m, x) => {
             const n = x.userId && x.userId.startsWith('USR-') ? parseInt(x.userId.slice(4), 10) : 0;
             return !isNaN(n) && n > m ? n : m;
           }, 0);
-          state.users.push({
-            userId: `USR-${String(maxNum + 1).padStart(3, '0')}`,
-            username: s.username,
-            displayName: s.displayName,
-            role: s.role,
-            passwordHash: s.passwordHash,
-            isActive: true,
-            createdAt: Logic.getBangkokParts().isoStr
-          });
+          state.users.push({ userId: `USR-${String(maxNum + 1).padStart(3, '0')}`, username: s.username, displayName: s.displayName, role: s.role, passwordHash: s.passwordHash, isActive: true, createdAt: Logic.getBangkokParts().isoStr });
         }
-        saveDemoData();
-        renderAll();
+        saveDemoData(); renderAll();
       }
       if (state.editingUserId && state.currentUser && state.currentUser.userId === state.editingUserId) {
-        state.currentUser.displayName = disp;
-        state.currentUser.role = role;
+        state.currentUser.displayName = disp; state.currentUser.role = role;
         try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser)); } catch (_) {}
         updateUserSessionUI();
       }
-      closeModal('userModal');
-      showToast('บันทึกข้อมูลสมาชิกเรียบร้อยแล้ว', 'success');
+      closeModal('userModal'); showToast('บันทึกข้อมูลสมาชิกเรียบร้อยแล้ว', 'success');
     } catch (err) { showToast(err.message, 'error'); }
   }
 
   async function handleToggleUserStatus(userId, curActive) {
     if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error');
-      return;
+      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
     }
-    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-    const u = uList.find(x => x.userId === userId);
+    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, u = uList.find(x => x.userId === userId);
     if (u && (u.username === 'admin' || (state.currentUser && u.username === state.currentUser.username))) {
-      showToast('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลักหรือบัญชีที่กำลังใช้งานอยู่ได้', 'error');
-      return;
+      showToast('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลักหรือบัญชีที่กำลังใช้งานอยู่ได้', 'error'); return;
     }
     const targetStatus = !curActive;
     try {
       if (state.isLive) {
         await callGasApi('saveUser', { userPayload: { userId, username: u ? u.username : undefined, isActive: targetStatus } });
-        await syncWithServer(true);
+        const idx = state.users.findIndex(x => x.userId === userId);
+        if (idx !== -1) state.users[idx].isActive = targetStatus;
+        renderAll();
       } else {
         const idx = state.users.findIndex(x => x.userId === userId);
         if (idx !== -1) { state.users[idx].isActive = targetStatus; saveDemoData(); renderAll(); }
@@ -1027,13 +823,11 @@
     } catch (err) { showToast(err.message, 'error'); }
   }
 
-  // Events Binding
   function bindEvents() {
     document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.addEventListener('click', () => switchTab(b.getAttribute('data-tab'))));
     on('btnToggleTheme', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
     on('btnToggleThemeAuth', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
 
-    // Auth Gate & Registration events
     on('btnLogout', 'click', handleLogout);
     on('loginForm', 'submit', handleLoginSubmit);
     on('registerForm', 'submit', handleRegisterSubmit);
@@ -1047,12 +841,10 @@
     on('btnCancelUserModal', 'click', () => closeModal('userModal'));
     on('userForm', 'submit', handleUserFormSubmit);
 
-    // Cancel modal events
     on('btnCloseCancelModalTop', 'click', () => closeModal('cancelModal'));
     on('btnDismissCancelModal', 'click', () => closeModal('cancelModal'));
     on('cancelForm', 'submit', handleCancelSubmit);
 
-    // Appointments modal
     on('btnOpenCreateModal', 'click', () => openCreateModal());
     on('btnMobileFabCreate', 'click', () => openCreateModal());
     on('btnAddAptOnSelectedDate', 'click', () => openCreateModal(state.calSelectedDate || `${state.calYear}-${String(state.calMonth).padStart(2, '0')}-01`));
@@ -1160,10 +952,8 @@
 
     const handleTriggerSetup = async (mode, desc) => {
       if (!state.isLive) { showToast(`[Demo] จำลองการติดตั้ง ${desc} สำเร็จ`, 'info'); return; }
-      try {
-        const r = await callGasApi('setupTriggers', { mode });
-        showToast(r.message || `ตั้งค่า ${desc} เรียบร้อย`, 'success');
-      } catch (err) { showToast(err.message, 'error'); }
+      try { const r = await callGasApi('setupTriggers', { mode }); showToast(r.message || `ตั้งค่า ${desc} เรียบร้อย`, 'success'); }
+      catch (err) { showToast(err.message, 'error'); }
     };
     on('btnInstallAutoTrigger', 'click', () => handleTriggerSetup('auto', 'Trigger อัจฉริยะ'));
     on('btnInstallDailyTrigger', 'click', () => handleTriggerSetup('daily', 'Trigger สรุปเช้าวันละครั้ง'));

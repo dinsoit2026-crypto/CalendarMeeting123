@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.1.0)
+ * tests.js - Automated Test Suite for Calendar System (v2.5.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -96,18 +96,15 @@
     apt.notifiedDayForSlot = '2026-11-15';
     apt.notifiedHourForSlot = '2026-11-15T14:00';
 
-    // เลื่อนเฉพาะเวลา
     const resA = Logic.updateAppointmentRecord(apt, { appointmentTime: '16:00', location: 'อาคาร B' }, { nowIso: '2026-11-15T09:30:00+07:00' });
     assertEqual(resA.record.notifiedDayForSlot, '2026-11-15', 'เลื่อนเฉพาะเวลา notifiedDayForSlot ต้องคงเดิม');
     assertEqual(resA.record.notifiedHourForSlot, '', 'เลื่อนเวลา notifiedHourForSlot ต้องถูกล้าง');
     assertEqual(resA.record.rescheduleCount, 1, 'rescheduleCount ต้องเป็น 1');
 
-    // เลื่อนวัน
     const resB = Logic.updateAppointmentRecord(resA.record, { appointmentDate: '2026-11-20' }, { nowIso: '2026-11-15T10:00:00+07:00' });
     assertEqual(resB.record.notifiedDayForSlot, '', 'เลื่อนวัน notifiedDayForSlot ต้องถูกล้าง');
     assertEqual(resB.record.notifiedHourForSlot, '', 'เลื่อนวัน notifiedHourForSlot ต้องถูกล้าง');
 
-    // คืนสถานะนัด (reopened) จาก สิ้นสุด -> นัดหมายแล้ว
     const resComp = Logic.updateAppointmentRecord(resB.record, { status: Logic.STATUS.COMPLETED }, { nowIso: '2026-11-20T17:00:00+07:00' });
     assertEqual(resComp.record.status, Logic.STATUS.COMPLETED, 'สถานะเป็น สิ้นสุดการนัดหมาย');
     const resReopened = Logic.updateAppointmentRecord(resComp.record, { status: Logic.STATUS.CONFIRMED }, { nowIso: '2026-11-20T17:30:00+07:00' });
@@ -233,7 +230,6 @@
     const hAdmin = Logic.hashPassword('admin');
     assertEqual(hAdmin, '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', 'SHA-256 ของ admin ถูกต้อง');
 
-    // ตรวจสอบการล็อกอิน
     const authSuccess = Logic.authenticateUser(Logic.DEFAULT_USERS, 'admin', 'admin');
     assert(authSuccess.ok && authSuccess.user && authSuccess.user.role === 'ADMIN', 'เข้าสู่ระบบ admin สำเร็จ');
 
@@ -257,97 +253,69 @@
     const valUpdateOk = Logic.validateUserInput({ username: 'somchai', displayName: 'คุณสมชาย (อัปเดต)', role: 'ADMIN' }, false);
     assert(valUpdateOk.valid && valUpdateOk.sanitized.role === 'ADMIN', 'อัปเดตผู้ใช้เดิมโดยไม่ส่งรหัสผ่านใหม่ต้องผ่าน');
 
-    // ทดสอบการสมัครสมาชิกใหม่ด้วยตนเอง (Self-Registration)
     const regSuccess = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
       username: 'anan01',
       displayName: 'คุณอนันต์ ฝ่ายประสานงาน',
       password: '5678',
       confirmPassword: '5678',
-      role: 'ADMIN' // แม้ส่ง ADMIN มา ระบบสมัครต้องบังคับเป็น STAFF เสมอ
+      role: 'ADMIN'
     }, '2026-11-11T10:00:00+07:00');
     assert(regSuccess.ok && regSuccess.user.role === 'STAFF' && regSuccess.record.isActive === true, 'สมัครสมาชิกใหม่ต้องได้สิทธิ์ STAFF และเปิดใช้งานทันที');
 
-    // ทดสอบเข้าสู่ระบบด้วยบัญชีที่เพิ่งสมัคร
     const loginNewUser = Logic.authenticateUser([...Logic.DEFAULT_USERS, regSuccess.record], 'anan01', '5678');
     assert(loginNewUser.ok && loginNewUser.user.displayName === 'คุณอนันต์ ฝ่ายประสานงาน', 'บัญชีที่สมัครใหม่ต้องล็อกอินได้ทันที');
 
-    // ทดสอบสมัครชื่อผู้ใช้ซ้ำ
     const regDupUser = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
-      username: 'somchai',
-      displayName: 'คุณสมชาย คนใหม่',
-      password: '1234',
-      confirmPassword: '1234'
+      username: 'somchai', displayName: 'คุณสมชาย คนใหม่', password: '1234', confirmPassword: '1234'
     });
     assert(!regDupUser.ok, 'สมัครด้วย username ซ้ำต้องไม่ผ่าน');
 
-    // ทดสอบรหัสผ่านยืนยันไม่ตรงกัน
     const regMismatchPw = Logic.registerUserAccount(Logic.DEFAULT_USERS, {
-      username: 'newstaff',
-      displayName: 'พนักงานใหม่',
-      password: '1234',
-      confirmPassword: '9999'
+      username: 'newstaff', displayName: 'พนักงานใหม่', password: '1234', confirmPassword: '9999'
     });
     assert(!regMismatchPw.ok, 'รหัสผ่านยืนยันไม่ตรงกันต้องไม่ผ่าน');
   });
 
   // --- Suite 9: User Attribution & Reschedule Immutability ---
   runTest('9. User Attribution', 'บันทึกผู้สร้าง ผู้เสร็จสิ้น ผู้ยกเลิก และคงชื่อผู้สร้างเดิมไว้เสมอ', () => {
-    // 1. นายสมชาย สร้างนัดหมาย
     const apt = Logic.createAppointmentRecord({
-      title: 'นัดตรวจระบบสำคัญ',
-      appointmentDate: '2026-11-20',
-      appointmentTime: '10:00',
-      location: 'ห้องประชุม A',
-      contactPerson: 'คุณลูกค้า',
-      createdBy: 'คุณสมชาย'
+      title: 'นัดตรวจระบบสำคัญ', appointmentDate: '2026-11-20', appointmentTime: '10:00',
+      location: 'ห้องประชุม A', contactPerson: 'คุณลูกค้า', createdBy: 'คุณสมชาย'
     }, [], '2026-11-10T09:00:00+07:00');
 
     assertEqual(apt.createdBy, 'คุณสมชาย', 'ผู้สร้างต้องเป็นคุณสมชาย');
     assertEqual(apt.statusChangedBy, '', 'ตอนสร้างสถานะเป็น นัดหมายแล้ว ยังไม่มีผู้เปลี่ยนสถานะ');
 
-    // 2. นายวิภาดา เข้ามาเลื่อนเวลา และเปลี่ยนสถานที่
     const resEdit = Logic.updateAppointmentRecord(apt, {
-      appointmentTime: '11:00',
-      location: 'ห้องประชุม B',
-      updatedBy: 'คุณวิภาดา'
+      appointmentTime: '11:00', location: 'ห้องประชุม B', updatedBy: 'คุณวิภาดา'
     }, { nowIso: '2026-11-10T10:00:00+07:00', reason: 'ห้อง A ติดใช้งาน' });
 
     assertEqual(resEdit.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างเดิมต้องไม่เปลี่ยน');
     assertEqual(resEdit.record.updatedBy, 'คุณวิภาดา', 'ผู้แก้ไขล่าสุดต้องเป็นคุณวิภาดา');
 
-    // 3. ผู้ดูแลระบบ มากดยืนยัน เสร็จสิ้นการนัดหมาย
     const resComplete = Logic.updateAppointmentRecord(resEdit.record, {
-      status: Logic.STATUS.COMPLETED,
-      statusChangedBy: 'ผู้ดูแลระบบ',
-      updatedBy: 'ผู้ดูแลระบบ'
+      status: Logic.STATUS.COMPLETED, statusChangedBy: 'ผู้ดูแลระบบ', updatedBy: 'ผู้ดูแลระบบ'
     }, { nowIso: '2026-11-20T12:00:00+07:00' });
 
     assertEqual(resComplete.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างเดิมต้องยังคงเป็นคุณสมชาย');
     assertEqual(resComplete.record.statusChangedBy, 'ผู้ดูแลระบบ', 'ผู้ยืนยันเสร็จสิ้นต้องเป็นผู้ดูแลระบบ');
     assertEqual(resComplete.record.status, Logic.STATUS.COMPLETED, 'สถานะเป็น สิ้นสุดการนัดหมาย');
 
-    // 4. ทดสอบกรณียกเลิกนัดหมายพร้อมระบุสาเหตุ
     const resCancel = Logic.updateAppointmentRecord(apt, {
-      status: Logic.STATUS.CANCELLED,
-      statusChangedBy: 'คุณนภัสสร',
-      statusReason: 'ลูกค้ายกเลิกกะทันหัน',
-      updatedBy: 'คุณนภัสสร'
+      status: Logic.STATUS.CANCELLED, statusChangedBy: 'คุณนภัสสร', statusReason: 'ลูกค้ายกเลิกกะทันหัน', updatedBy: 'คุณนภัสสร'
     }, { nowIso: '2026-11-15T09:00:00+07:00' });
 
     assertEqual(resCancel.record.createdBy, 'คุณสมชาย', 'ชื่อผู้สร้างต้องยังคงเป็นคุณสมชาย');
     assertEqual(resCancel.record.statusChangedBy, 'คุณนภัสสร', 'ผู้ยกเลิกต้องเป็นคุณนภัสสร');
     assertEqual(resCancel.record.statusReason, 'ลูกค้ายกเลิกกะทันหัน', 'สาเหตุการยกเลิกต้องถูกต้อง');
 
-    // 5. ทดสอบกรณีคืนสถานะนัดหมายกลับเป็น นัดหมายแล้ว ต้องล้างข้อมูลผู้ยกเลิกและสาเหตุเดิม
     const resReopen = Logic.updateAppointmentRecord(resCancel.record, {
-      status: Logic.STATUS.CONFIRMED,
-      updatedBy: 'คุณสมชาย'
+      status: Logic.STATUS.CONFIRMED, updatedBy: 'คุณสมชาย'
     }, { nowIso: '2026-11-16T09:00:00+07:00', reason: 'คืนสถานะนัดหมาย' });
     assertEqual(resReopen.record.status, Logic.STATUS.CONFIRMED, 'สถานะต้องกลับมาเป็น นัดหมายแล้ว');
     assertEqual(resReopen.record.statusChangedBy, '', 'ต้องล้างชื่อผู้เปลี่ยนสถานะเดิมเมื่อคืนสถานะนัด');
     assertEqual(resReopen.record.statusReason, '', 'ต้องล้างสาเหตุการยกเลิกเดิมเมื่อคืนสถานะนัด');
 
-    // 6. ทดสอบคำนวณสถิติแยกตามรายชื่อผู้ใช้ (ไม่นับซ้ำระหว่างผู้สร้างและผู้ปิดงาน)
     const userStats = Logic.calculateUserStats([resComplete.record, resCancel.record]);
     const somchaiStat = userStats.find(u => u.user === 'คุณสมชาย');
     const adminStat = userStats.find(u => u.user === 'ผู้ดูแลระบบ');
@@ -365,19 +333,81 @@
       Logic.createAppointmentRecord({ id: 'APT-003', title: 'งานที่ 3 บ่าย', appointmentDate: '2026-11-25', appointmentTime: '13:00', location: 'ตึก C', contactPerson: 'คุณ ค' }, [], '2026-11-10T09:00:00+07:00')
     ];
 
-    // ตรวจสอบเวลา 10:00 วันที่ 2026-11-25 (ต้องชนกับงานที่ 1 แต่งานที่ 2 ยกเลิกไปแล้วไม่นับ)
     const conflicts = Logic.findTimeConflicts(list, '2026-11-25', '10:00');
     assertEqual(conflicts.length, 1, 'ต้องพบงานชนกัน 1 งาน');
     assertEqual(conflicts[0].id, 'APT-001', 'ต้องเป็นงาน APT-001');
 
-    // ตรวจสอบเวลา 10:00 โดยยกเว้นตัวเอง (APT-001) ต้องไม่ชน
     const selfConflicts = Logic.findTimeConflicts(list, '2026-11-25', '10:00', 'APT-001');
     assertEqual(selfConflicts.length, 0, 'เมื่อแก้ไขงานตัวเองต้องไม่แจ้งชนกับตัวเอง');
 
-    // ตรวจสอบเวลาที่ว่าง (14:00)
     const noConflicts = Logic.findTimeConflicts(list, '2026-11-25', '14:00');
     assertEqual(noConflicts.length, 0, 'เวลาที่ว่างต้องไม่พบงานชนกัน');
   });
+
+  // --- Suite 11: API Contract Parity ---
+  runTest('11. API Contract Parity', 'ตรวจสอบว่า CalendarLogic มีฟังก์ชันและค่าคงที่ครบ 43 รายการ', () => {
+    const expectedKeys = [
+      'API_VERSION', 'STATUS', 'VALID_STATUSES', 'USER_ROLES', 'DEFAULT_USERS',
+      'THAI_MONTHS_SHORT', 'THAI_MONTHS_FULL', 'LINE_MAX_TEXT_LENGTH',
+      'hasEmoji', 'sanitizeNoEmoji', 'normalizeStatus', 'hashPassword', 'authenticateUser', 'validateUserInput', 'registerUserAccount',
+      'normalizeYearToCE', 'toBuddhistYear', 'isLeapYearCE', 'getDaysInMonth',
+      'parseFlexibleDateInput', 'parseTimeInput', 'bangkokSlotToEpochMs', 'getBangkokParts', 'daysBetweenDates',
+      'formatThaiDateDisplay', 'isActiveStatus', 'isOverdue', 'buildAppointmentSlot', 'findTimeConflicts',
+      'validateAppointmentInput', 'generateAppointmentId', 'createAppointmentRecord', 'updateAppointmentRecord',
+      'isInQuietHours', 'evaluateAppointmentNotification', 'buildNotificationPlan',
+      'calculateYearlyStats', 'calculateUserStats', 'queryByMonth', 'queryByYear', 'queryMultiYearOverview',
+      'formatInstantAppointmentMessage', 'parseAndExecuteLineCommand'
+    ];
+    expectedKeys.forEach(k => {
+      assert(Logic[k] !== undefined, `CalendarLogic ต้องมีพร็อพเพอร์ตี ${k}`);
+    });
+    assertEqual(Object.keys(Logic).length, expectedKeys.length, `CalendarLogic ต้องมีจำนวนส่งออกครบ ${expectedKeys.length} รายการ`);
+  });
+
+  // --- Suite 12: HTML & DOM ID Integrity Audit ---
+  if (typeof require !== 'undefined') {
+    runTest('12. DOM ID Audit', 'ทุก DOM ID ใน app.js ($ และ on) ต้องปรากฏอยู่ใน index.html ครบถ้วน', () => {
+      const fs = require('fs'), path = require('path');
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      const indexHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+
+      const idRegex = /(?:\$\(['"]|on\(['"])([a-zA-Z0-9_-]+)['"]\)/g;
+      const ids = new Set();
+      let match;
+      while ((match = idRegex.exec(appJs)) !== null) {
+        ids.add(match[1]);
+      }
+      assert(ids.size > 30, 'ต้องตรวจพบ ID ใน app.js อย่างน้อย 30 รายการ');
+
+      const missing = [];
+      ids.forEach(id => {
+        const needle1 = `id="${id}"`, needle2 = `id='${id}'`;
+        if (!indexHtml.includes(needle1) && !indexHtml.includes(needle2)) {
+          missing.push(id);
+        }
+      });
+      assertEqual(missing.length, 0, `พบ ID ใน app.js ที่ไม่มีใน index.html: ${missing.join(', ')}`);
+    });
+
+    // --- Suite 13: GAS Backend & Performance Guard Audit ---
+    runTest('13. GAS Guard Audit', 'gas/Code.gs มีฟังก์ชันครบถ้วน และไม่เรียก formatPlainText_ ซ้ำซ้อนตอนอ่านข้อมูล', () => {
+      const fs = require('fs'), path = require('path');
+      const codeGs = fs.readFileSync(path.join(__dirname, 'gas', 'Code.gs'), 'utf8');
+
+      const requiredFns = [
+        'setupDatabase', 'installTriggerAuto', 'installTriggerEvery15Minutes', 'installTriggerDailyAt8AM',
+        'removeNotificationTriggers', 'runNotificationEngine', 'doGet', 'doPost',
+        'readAllApts_', 'createApt_', 'updateApt_', 'deleteApt_', 'handleUserLogin_', 'handleUserRegister_', 'saveUser_'
+      ];
+      requiredFns.forEach(fn => {
+        assert(codeGs.includes(`function ${fn}`), `Code.gs ต้องมีฟังก์ชัน ${fn}`);
+      });
+
+      // ตรวจสอบ Performance Guard: ตอนอ่านชีตปกติ (getSheetData_) ต้องไม่มีคำสั่ง formatPlainText_
+      const getSheetDataDef = codeGs.substring(codeGs.indexOf('function getSheetData_'), codeGs.indexOf('function setupDatabase'));
+      assert(!getSheetDataDef.includes('formatPlainText_'), 'getSheetData_ ต้องไม่มีการเรียก formatPlainText_ ซ้ำซ้อน');
+    });
+  }
 
   // --- Suite 7: Full Codebase Zero-Emoji Audit ---
   if (typeof require !== 'undefined') {
