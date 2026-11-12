@@ -1,5 +1,5 @@
 /**
- * app.js - UI Controller, State Management & User Attribution (v2.5.1)
+ * app.js - UI Controller, State Management & User Attribution (v2.5.2)
  * Modern SaaS UI with Time-First Cards, Split-View Calendar, User Authentication & Audit Trail
  * Zero-Emoji Policy Compliant
  */
@@ -60,10 +60,7 @@
   function loadSavedSession() {
     try { const su = localStorage.getItem(STORAGE.USERS); state.users = su ? JSON.parse(su) : [...Logic.DEFAULT_USERS]; } catch (_) { state.users = [...Logic.DEFAULT_USERS]; }
     state.currentUser = null;
-    try {
-      const uStr = localStorage.getItem(STORAGE.AUTH_USER);
-      if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; }
-    } catch (_) {}
+    try { const uStr = localStorage.getItem(STORAGE.AUTH_USER); if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; } } catch (_) {}
     updateUserSessionUI();
   }
 
@@ -81,17 +78,11 @@
     const isAuth = Boolean(state.currentUser && state.currentUser.username);
     if ($('authGateScreen')) $('authGateScreen').style.display = isAuth ? 'none' : 'flex';
     if ($('appShell')) $('appShell').style.display = isAuth ? 'block' : 'none';
-
     const authBadge = $('authModeBadge');
     if (authBadge) { authBadge.className = state.isLive ? 'mode-badge live' : 'mode-badge demo'; authBadge.textContent = state.isLive ? 'Sheets' : 'Demo'; }
-
     const nameEl = $('currentUserName'), roleEl = $('currentUserRole');
     if (nameEl) nameEl.textContent = isAuth ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
-    if (roleEl) {
-      const r = isAuth && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF';
-      roleEl.textContent = r; roleEl.className = `badge-role ${r.toLowerCase()}`;
-    }
-
+    if (roleEl) { const r = isAuth && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF'; roleEl.textContent = r; roleEl.className = `badge-role ${r.toLowerCase()}`; }
     const isAdmin = Boolean(isAuth && state.currentUser.role === 'ADMIN');
     if ($('userManagementSection')) $('userManagementSection').style.opacity = isAdmin ? '1' : '0.85';
     if ($('btnOpenAddUserModal')) $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
@@ -103,9 +94,7 @@
     ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal'].forEach(closeModal);
     if ($('loginUsername')) $('loginUsername').value = '';
     if ($('loginPassword')) $('loginPassword').value = '';
-    switchAuthTab('login');
-    updateUserSessionUI();
-    showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
+    switchAuthTab('login'); updateUserSessionUI(); showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
   }
 
   const pendingIds = new Set();
@@ -136,14 +125,12 @@
       if (state.isLive && state.gasUrl) {
         try {
           const res = await callGasApi('login', { username: un, password: pw });
-          userObj = res.user;
-          if (Array.isArray(res.appointments)) syncBundle = res;
+          userObj = res.user; if (Array.isArray(res.appointments)) syncBundle = res;
         } catch (apiErr) {
           if (String(apiErr.message || '').includes('ไม่รู้จัก action')) {
             const localRes = Logic.authenticateUser(state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
             if (!localRes.ok) throw new Error(localRes.error);
-            userObj = localRes.user;
-            showToast('เซิร์ฟเวอร์ GAS เป็นเวอร์ชันเดิม ระบบใช้บัญชีในเครื่องชั่วคราว', 'warn');
+            userObj = localRes.user; showToast('เซิร์ฟเวอร์ GAS เป็นเวอร์ชันเดิม ระบบใช้บัญชีในเครื่องชั่วคราว', 'warn');
           } else throw apiErr;
         }
       } else {
@@ -151,17 +138,13 @@
         if (!res.ok) throw new Error(res.error);
         userObj = res.user;
       }
-      state.currentUser = userObj;
-      localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj));
+      state.currentUser = userObj; localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj));
       updateUserSessionUI();
-      if (state.isLive && state.gasUrl) {
-        if (syncBundle) { applySyncBundle(syncBundle); renderAll(); }
-        else await syncWithServer(true);
-      } else { loadDemoData(); renderAll(); }
+      if (state.isLive && state.gasUrl) { if (syncBundle) { applySyncBundle(syncBundle); renderAll(); } else await syncWithServer(true); }
+      else { loadDemoData(); renderAll(); }
       showToast(`ยินดีต้อนรับ ${userObj.displayName} เข้าสู่ระบบ`, 'success');
     } catch (err) {
-      if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
-      else showToast(err.message, 'error');
+      if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; } else showToast(err.message, 'error');
     } finally {
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'เข้าสู่ระบบ'; }
     }
@@ -176,7 +159,6 @@
       const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
       const localReg = Logic.registerUserAccount(uList, { username, displayName, password, confirmPassword });
       if (!localReg.ok) throw new Error(localReg.error);
-
       if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังสร้างบัญชี...'; }
       let userObj = localReg.user, syncBundle = null;
       if (state.isLive && state.gasUrl) {
@@ -185,32 +167,20 @@
           if (res && res.user) userObj = res.user;
           if (res && res.users) state.users = res.users;
           if (res && Array.isArray(res.appointments)) syncBundle = res;
-        } catch (apiErr) {
-          state.users = [...uList, localReg.record];
-          try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
-        }
-      } else {
-        state.users = [...uList, localReg.record];
-        try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {}
-      }
-
+        } catch (_) { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {} }
+      } else { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {} }
       if ($('regUsername')) $('regUsername').value = '';
       if ($('regDisplayName')) $('regDisplayName').value = '';
       if ($('regPassword')) $('regPassword').value = '';
       if ($('regConfirmPassword')) $('regConfirmPassword').value = '';
-
       state.currentUser = { ...userObj, role: 'STAFF' };
       localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser));
-      switchAuthTab('login');
-      updateUserSessionUI();
-      if (state.isLive && state.gasUrl) {
-        if (syncBundle) { applySyncBundle(syncBundle); renderAll(); }
-        else await syncWithServer(true);
-      } else { loadDemoData(); renderAll(); }
+      switchAuthTab('login'); updateUserSessionUI();
+      if (state.isLive && state.gasUrl) { if (syncBundle) { applySyncBundle(syncBundle); renderAll(); } else await syncWithServer(true); }
+      else { loadDemoData(); renderAll(); }
       showToast(`สมัครสมาชิกสำเร็จ ยินดีต้อนรับ ${state.currentUser.displayName} (STAFF)`, 'success');
     } catch (err) {
-      if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; }
-      else showToast(err.message, 'error');
+      if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; } else showToast(err.message, 'error');
     } finally {
       if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'สมัครสมาชิกและเข้าใช้งานทันที'; }
     }
@@ -475,12 +445,8 @@
 
     const selYr = Logic.queryByYear(state.appointments, state.overviewYear, { nowIso: Logic.getBangkokParts().isoStr }), s = selYr.stats;
     $('selectedYearHeader').textContent = `สรุปสถิติตลอดทั้งปี พ.ศ. ${selYr.buddhistYear} (ค.ศ. ${selYr.ceYear})`;
-    $('yearEndSummaryCards').innerHTML = `
-      <div class="stat-box"><span class="stat-box-title">งานนัดหมายทั้งหมด</span><span class="stat-box-val">${s.total}</span><span class="stat-box-sub">รายการสะสมทั้งปี</span></div>
-      <div class="stat-box" style="border-left:4px solid var(--st-conf-border);"><span class="stat-box-title">นัดหมายแล้ว (รอดำเนินการ)</span><span class="stat-box-val">${s.active}</span><span class="stat-box-sub">รอถึงกำหนดนัดหมาย</span></div>
-      <div class="stat-box" style="border-left:4px solid var(--st-comp-border);"><span class="stat-box-title">สิ้นสุดการนัดหมาย</span><span class="stat-box-val">${s.completed}</span><span class="stat-box-sub">อัตราความสำเร็จ ${s.completionRate}%</span></div>
-      <div class="stat-box" style="border-left:4px solid var(--st-canc-border);"><span class="stat-box-title">ยกเลิกการนัดหมาย</span><span class="stat-box-val">${s.cancelled}</span><span class="stat-box-sub">อัตราการยกเลิก ${s.cancellationRate}%</span></div>
-      <div class="stat-box"><span class="stat-box-title">การเลื่อนนัดสะสม</span><span class="stat-box-val">${s.rescheduleTotal}</span><span class="stat-box-sub">ครั้งที่มีการเลื่อนวัน/เวลา</span></div>`;
+    const b = (t, v, sub, col) => `<div class="stat-box"${col ? ` style="border-left:4px solid ${col};"` : ''}><span class="stat-box-title">${t}</span><span class="stat-box-val">${v}</span><span class="stat-box-sub">${sub}</span></div>`;
+    $('yearEndSummaryCards').innerHTML = b('งานนัดหมายทั้งหมด', s.total, 'รายการสะสมทั้งปี') + b('นัดหมายแล้ว (รอดำเนินการ)', s.active, 'รอถึงกำหนดนัดหมาย', 'var(--st-conf-border)') + b('สิ้นสุดการนัดหมาย', s.completed, `อัตราความสำเร็จ ${s.completionRate}%`, 'var(--st-comp-border)') + b('ยกเลิกการนัดหมาย', s.cancelled, `อัตราการยกเลิก ${s.cancellationRate}%`, 'var(--st-canc-border)') + b('การเลื่อนนัดสะสม', s.rescheduleTotal, 'ครั้งที่มีการเลื่อนวัน/เวลา');
 
     const uPerfGrid = $('userPerformanceGrid');
     if (uPerfGrid) {
@@ -562,12 +528,19 @@
     }
   }
 
+  function fillAptForm(f) {
+    $('formAptId').value = f.id || ''; $('formExpectedUpdatedAt').value = f.updatedAt || '';
+    $('formTitle').value = f.title || ''; $('formStatus').value = f.status || Logic.STATUS.CONFIRMED;
+    $('formContactPerson').value = f.contactPerson || ''; $('formDate').value = f.date || '';
+    $('formTime').value = f.time || '09:00'; $('formLocation').value = f.location || '';
+    $('formRemindDays').value = String(f.remindDays != null ? f.remindDays : 1);
+    $('formRemindHours').value = String(f.remindHours != null ? f.remindHours : 1);
+    $('formNotes').value = f.notes || ''; $('formRescheduleReason').value = '';
+    updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
+  }
+
   function openCreateModal(prefillDate) {
     $('modalTitle').textContent = 'สร้างนัดหมายใหม่';
-    $('formAptId').value = $('formExpectedUpdatedAt').value = $('formNotes').value = $('formRescheduleReason').value = $('formTitle').value = $('formContactPerson').value = $('formLocation').value = '';
-    $('formStatus').value = Logic.STATUS.CONFIRMED;
-    $('formDate').value = typeof prefillDate === 'string' && prefillDate ? prefillDate : Logic.getBangkokParts().dateStr;
-    $('formTime').value = '09:00'; $('formRemindDays').value = $('formRemindHours').value = '1';
     if ($('formNotifyLine')) $('formNotifyLine').checked = true;
     if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนนัดหมายใหม่เข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = $('btnDeleteApt').style.display = 'none';
@@ -575,19 +548,12 @@
       $('formCreatedByPill').textContent = `ผู้สร้างนัดหมาย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
       $('formCreatedByPill').style.display = 'inline-block';
     }
-    updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
+    fillAptForm({ date: typeof prefillDate === 'string' && prefillDate ? prefillDate : Logic.getBangkokParts().dateStr });
   }
 
   function openEditModal(id) {
     const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a) return;
     $('modalTitle').textContent = `แก้ไขนัดหมาย ${a.id}`;
-    $('formAptId').value = a.id; $('formExpectedUpdatedAt').value = a.updatedAt || '';
-    $('formTitle').value = a.title || ''; $('formStatus').value = Logic.normalizeStatus(a.status);
-    $('formContactPerson').value = a.contactPerson || ''; $('formDate').value = a.appointmentDate || '';
-    $('formTime').value = a.appointmentTime || ''; $('formLocation').value = a.location || '';
-    $('formRemindDays').value = String(a.remindDaysBefore != null ? a.remindDaysBefore : 1);
-    $('formRemindHours').value = String(a.remindHoursBefore != null ? a.remindHoursBefore : 1);
-    $('formNotes').value = a.notes || ''; $('formRescheduleReason').value = '';
     if ($('formNotifyLine')) $('formNotifyLine').checked = false;
     if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนการแก้ไขนัดหมายเข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = 'block'; $('btnDeleteApt').style.display = 'inline-flex';
@@ -595,7 +561,7 @@
       $('formCreatedByPill').textContent = `ผู้สร้างนัดหมายเดิม: ${a.createdBy || a.updatedBy || '-'} | แก้ไขโดย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
       $('formCreatedByPill').style.display = 'inline-block';
     }
-    updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
+    fillAptForm({ id: a.id, updatedAt: a.updatedAt, title: a.title, status: Logic.normalizeStatus(a.status), contactPerson: a.contactPerson, date: a.appointmentDate, time: a.appointmentTime, location: a.location, remindDays: a.remindDaysBefore, remindHours: a.remindHoursBefore, notes: a.notes });
   }
 
   function updateDateThaiPreview() {
@@ -1022,28 +988,14 @@
       loadDemoData(); renderAll(); showToast('สลับเป็นโหมดจำลองข้อมูลในเครื่อง (Demo) แล้ว', 'warn');
     });
     on('btnSavePolicy', 'click', () => {
-      const prevMeta = { ...state.meta };
-      const m = {
-        DAILY_DIGEST_HOUR: String(+$('cfgDigestHour').value || 8),
-        ENABLE_LINE_BOT_QUERY: $('cfgEnableBotQuery').checked ? 'TRUE' : 'FALSE',
-        PRIVACY_MASK_CONTACT: $('cfgPrivacyMask').checked ? 'TRUE' : 'FALSE',
-        NOTIFY_ON_STATUS_CHANGE: $('cfgNotifyStatusChange') && $('cfgNotifyStatusChange').checked ? 'TRUE' : 'FALSE'
-      };
-      state.meta = { ...state.meta, ...m };
-      renderAll();
-      showToast(state.isLive ? 'บันทึกนโยบายเรียบร้อยแล้ว' : 'บันทึกนโยบายเรียบร้อยแล้ว (Demo)', 'success');
-      if (state.isLive) {
-        setBgSync(true);
-        callGasApi('updateMeta', { meta: m })
-          .catch(err => { state.meta = prevMeta; renderAll(); showToast('บันทึกนโยบายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error'); })
-          .finally(() => setBgSync(false));
-      }
+      const prevMeta = { ...state.meta }, m = { DAILY_DIGEST_HOUR: String(+$('cfgDigestHour').value || 8), ENABLE_LINE_BOT_QUERY: $('cfgEnableBotQuery').checked ? 'TRUE' : 'FALSE', PRIVACY_MASK_CONTACT: $('cfgPrivacyMask').checked ? 'TRUE' : 'FALSE', NOTIFY_ON_STATUS_CHANGE: $('cfgNotifyStatusChange') && $('cfgNotifyStatusChange').checked ? 'TRUE' : 'FALSE' };
+      state.meta = { ...state.meta, ...m }; renderAll(); showToast(state.isLive ? 'บันทึกนโยบายเรียบร้อยแล้ว' : 'บันทึกนโยบายเรียบร้อยแล้ว (Demo)', 'success');
+      if (state.isLive) { setBgSync(true); callGasApi('updateMeta', { meta: m }).catch(err => { state.meta = prevMeta; renderAll(); showToast('บันทึกนโยบายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error'); }).finally(() => setBgSync(false)); }
     });
 
     const handleTriggerSetup = async (mode, desc) => {
       if (!state.isLive) { showToast(`[Demo] จำลองการติดตั้ง ${desc} สำเร็จ`, 'info'); return; }
-      try { const r = await callGasApi('setupTriggers', { mode }); showToast(r.message || `ตั้งค่า ${desc} เรียบร้อย`, 'success'); }
-      catch (err) { showToast(err.message, 'error'); }
+      try { const r = await callGasApi('setupTriggers', { mode }); showToast(r.message || `ตั้งค่า ${desc} เรียบร้อย`, 'success'); } catch (err) { showToast(err.message, 'error'); }
     };
     on('btnInstallAutoTrigger', 'click', () => handleTriggerSetup('auto', 'Trigger อัจฉริยะ'));
     on('btnInstallDailyTrigger', 'click', () => handleTriggerSetup('daily', 'Trigger สรุปเช้าวันละครั้ง'));
@@ -1052,13 +1004,11 @@
 
     on('btnTestValidateLine', 'click', async () => {
       if (!state.isLive) { $('botSimOutput').textContent = '[Demo] ข้อความผ่านการตรวจสอบรูปแบบ Zero-Emoji พร้อมเชื่อม LINE'; showToast('ตรวจสอบรูปแบบสำเร็จ (Demo)', 'success'); return; }
-      try { const r = await callGasApi('testNotification', { dryRun: true }); $('botSimOutput').textContent = `[Validate] ${r.ok ? 'สำเร็จ HTTP ' + r.httpStatus : 'ไม่สำเร็จ: ' + r.error}`; showToast(r.ok ? 'Validate ผ่านเรียบร้อย' : 'Validate ไม่ผ่าน', r.ok ? 'success' : 'error'); }
-      catch (e) { $('botSimOutput').textContent = '[Error] ' + e.message; }
+      try { const r = await callGasApi('testNotification', { dryRun: true }); $('botSimOutput').textContent = `[Validate] ${r.ok ? 'สำเร็จ HTTP ' + r.httpStatus : 'ไม่สำเร็จ: ' + r.error}`; showToast(r.ok ? 'Validate ผ่านเรียบร้อย' : 'Validate ไม่ผ่าน', r.ok ? 'success' : 'error'); } catch (e) { $('botSimOutput').textContent = '[Error] ' + e.message; }
     });
     on('btnTestRealPush', 'click', async () => {
       if (!state.isLive || !confirm('การทดสอบจริงจะหักโควตา LINE ตามจำนวนสมาชิกกลุ่ม ยืนยันหรือไม่?')) return;
-      try { const r = await callGasApi('testNotification', { dryRun: false }); $('botSimOutput').textContent = `[Push จริง] ${r.ok ? 'สำเร็จ' : r.error}`; await syncWithServer(true); showToast(r.ok ? 'ส่งข้อความทดสอบสำเร็จ' : 'ส่งไม่สำเร็จ', r.ok ? 'success' : 'error'); }
-      catch (e) { $('botSimOutput').textContent = '[Error] ' + e.message; }
+      try { const r = await callGasApi('testNotification', { dryRun: false }); $('botSimOutput').textContent = `[Push จริง] ${r.ok ? 'สำเร็จ' : r.error}`; await syncWithServer(true); showToast(r.ok ? 'ส่งข้อความทดสอบสำเร็จ' : 'ส่งไม่สำเร็จ', r.ok ? 'success' : 'error'); } catch (e) { $('botSimOutput').textContent = '[Error] ' + e.message; }
     });
 
     on('btnRunBotSim', 'click', runBotSim);

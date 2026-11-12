@@ -1,11 +1,11 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.1)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.2)
  * Timezone: Asia/Bangkok (UTC+07:00)
  * Features: User Authentication, User Attribution, Reschedule Audit, LINE Bot & Trigger Automation
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.5.1';
+var API_VER = '2.5.2';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
@@ -332,6 +332,20 @@ function handleUserLogin_(username, password) {
   return bundle;
 }
 
+function buildUserRow_(headers, id, un, pwHash, disp, role, active, created, login) {
+  return headers.map(function (h) {
+    if (h === 'userId') return id;
+    if (h === 'username') return un;
+    if (h === 'passwordHash') return pwHash;
+    if (h === 'displayName') return disp;
+    if (h === 'role') return role;
+    if (h === 'isActive') return active;
+    if (h === 'createdAt') return created;
+    if (h === 'lastLoginAt') return login || '';
+    return '';
+  });
+}
+
 function handleUserRegister_(payload) {
   var p = payload || {}, un = sanitizeNoEmoji(p.username || '').toLowerCase(), disp = sanitizeNoEmoji(p.displayName || ''), pw = String(p.password || '');
   var confirmPw = p.confirmPassword !== undefined ? String(p.confirmPassword || '') : pw;
@@ -353,16 +367,7 @@ function handleUserRegister_(payload) {
   }
 
   var nowIso = getBkkNow_().isoStr, newId = 'USR-' + String(maxIdNum + 1).padStart(3, '0');
-  var newRow = headers.map(function (h) {
-    if (h === 'userId') return newId;
-    if (h === 'username') return un;
-    if (h === 'passwordHash') return hashPassword_(pw);
-    if (h === 'displayName') return disp;
-    if (h === 'role') return 'STAFF';
-    if (h === 'isActive') return 'TRUE';
-    if (h === 'createdAt' || h === 'lastLoginAt') return nowIso;
-    return '';
-  });
+  var newRow = buildUserRow_(headers, newId, un, hashPassword_(pw), disp, 'STAFF', 'TRUE', nowIso, nowIso);
   appendPlainRow_(d.sh, newRow, rows.length + 1);
   var bundle = buildSyncBundle_(readPublicUsers_());
   bundle.user = { userId: newId, username: un, displayName: disp, role: 'STAFF' };
@@ -418,16 +423,7 @@ function saveUser_(payload) {
     var role = (p.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF';
     var isActive = p.isActive !== false && String(p.isActive).toUpperCase() !== 'FALSE' ? 'TRUE' : 'FALSE';
     var newId = 'USR-' + String(maxIdNum + 1).padStart(3, '0');
-    var newRow = headers.map(function (h) {
-      if (h === 'userId') return newId;
-      if (h === 'username') return un;
-      if (h === 'passwordHash') return hashPassword_(p.password);
-      if (h === 'displayName') return disp;
-      if (h === 'role') return role;
-      if (h === 'isActive') return isActive;
-      if (h === 'createdAt') return nowIso;
-      return '';
-    });
+    var newRow = buildUserRow_(headers, newId, un, hashPassword_(p.password), disp, role, isActive, nowIso, '');
     appendPlainRow_(d.sh, newRow, rows.length + 1);
     return { userId: newId, username: un, displayName: disp, role: role, isActive: isActive === 'TRUE' };
   }
@@ -727,151 +723,53 @@ function parseQueryString_(qs) {
 }
 
 function buildAptFlexMsg_(apt, isUpdate, maskContact, webAppUrl) {
+  function fRow(lbl, val, bold, col, wrap) {
+    var v = { type: 'text', text: String(val || '-'), size: 'sm', flex: 5, color: col || '#334155' };
+    if (bold) v.weight = 'bold';
+    if (wrap) v.wrap = true;
+    return { type: 'box', layout: 'baseline', spacing: 'sm', contents: [{ type: 'text', text: lbl, color: '#64748b', size: 'sm', flex: 2 }, v] };
+  }
   var c = sanitizeNoEmoji(apt.contactPerson || '-');
   if (maskContact && c.length > 2) c = c.slice(0, 2) + '***';
   var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || 'ผู้ใช้งานระบบ');
   var st = normalizeStatus_(apt.status);
-
-  var hdrText = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
-  var stColor = '#4f46e5';
+  var hdrText = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]', stColor = '#4f46e5';
   if (st === STATUS.COMPLETED) { hdrText = '[แจ้งเตือนสิ้นสุดการนัดหมาย]'; stColor = '#10b981'; }
   else if (st === STATUS.CANCELLED) { hdrText = '[แจ้งเตือนยกเลิกการนัดหมาย]'; stColor = '#ef4444'; }
   else if (isUpdate && apt.reopened) { hdrText = '[แจ้งเตือนการคืนสถานะนัดหมาย]'; stColor = '#4f46e5'; }
 
   var infoRows = [
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'วันนัด', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: fmtThaiDate_(apt.appointmentDate), size: 'sm', flex: 5, weight: 'bold', color: '#1e293b' }
-    ]},
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'เวลา', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: (apt.appointmentTime || '-') + ' น.', size: 'sm', flex: 5, weight: 'bold', color: '#1e293b' }
-    ]},
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'สถานที่', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: sanitizeNoEmoji(apt.location || '-'), size: 'sm', flex: 5, wrap: true, color: '#334155' }
-    ]},
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'ผู้นัดพบ', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: c, size: 'sm', flex: 5, wrap: true, color: '#334155' }
-    ]},
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'สถานะ', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: '[' + st + ']', size: 'sm', flex: 5, weight: 'bold', color: stColor }
-    ]},
-    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-      { type: 'text', text: 'ผู้สร้าง', color: '#64748b', size: 'sm', flex: 2 },
-      { type: 'text', text: creator, size: 'sm', flex: 5, color: '#64748b' }
-    ]}
+    fRow('วันนัด', fmtThaiDate_(apt.appointmentDate), true, '#1e293b'),
+    fRow('เวลา', (apt.appointmentTime || '-') + ' น.', true, '#1e293b'),
+    fRow('สถานที่', sanitizeNoEmoji(apt.location || '-'), false, '#334155', true),
+    fRow('ผู้นัดพบ', c, false, '#334155', true),
+    fRow('สถานะ', '[' + st + ']', true, stColor),
+    fRow('ผู้สร้าง', creator, false, '#64748b')
   ];
-
-  if (st === STATUS.COMPLETED && apt.statusChangedBy) {
-    infoRows.push({
-      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-        { type: 'text', text: 'ผู้เสร็จสิ้น', color: '#64748b', size: 'sm', flex: 2 },
-        { type: 'text', text: sanitizeNoEmoji(apt.statusChangedBy), size: 'sm', flex: 5, weight: 'bold', color: '#10b981' }
-      ]
-    });
-  } else if (st === STATUS.CANCELLED) {
-    if (apt.statusChangedBy) {
-      infoRows.push({
-        type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-          { type: 'text', text: 'ผู้ยกเลิก', color: '#64748b', size: 'sm', flex: 2 },
-          { type: 'text', text: sanitizeNoEmoji(apt.statusChangedBy), size: 'sm', flex: 5, weight: 'bold', color: '#ef4444' }
-        ]
-      });
-    }
-    if (apt.statusReason) {
-      infoRows.push({
-        type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-          { type: 'text', text: 'สาเหตุ', color: '#64748b', size: 'sm', flex: 2 },
-          { type: 'text', text: sanitizeNoEmoji(apt.statusReason), size: 'sm', flex: 5, wrap: true, color: '#ef4444' }
-        ]
-      });
-    }
+  if (st === STATUS.COMPLETED && apt.statusChangedBy) infoRows.push(fRow('ผู้เสร็จสิ้น', sanitizeNoEmoji(apt.statusChangedBy), true, '#10b981'));
+  else if (st === STATUS.CANCELLED) {
+    if (apt.statusChangedBy) infoRows.push(fRow('ผู้ยกเลิก', sanitizeNoEmoji(apt.statusChangedBy), true, '#ef4444'));
+    if (apt.statusReason) infoRows.push(fRow('สาเหตุ', sanitizeNoEmoji(apt.statusReason), false, '#ef4444', true));
   } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) {
-    infoRows.push({
-      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-        { type: 'text', text: 'ผู้แก้ไข', color: '#64748b', size: 'sm', flex: 2 },
-        { type: 'text', text: sanitizeNoEmoji(apt.updatedBy), size: 'sm', flex: 5, color: '#64748b' }
-      ]
-    });
+    infoRows.push(fRow('ผู้แก้ไข', sanitizeNoEmoji(apt.updatedBy), false, '#64748b'));
   }
-
-  if (apt.notes) {
-    infoRows.push({
-      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
-        { type: 'text', text: 'หมายเหตุ', color: '#64748b', size: 'sm', flex: 2 },
-        { type: 'text', text: sanitizeNoEmoji(apt.notes), size: 'sm', flex: 5, wrap: true, color: '#475569' }
-      ]
-    });
-  }
+  if (apt.notes) infoRows.push(fRow('หมายเหตุ', sanitizeNoEmoji(apt.notes), false, '#475569', true));
 
   var bubble = {
-    type: 'bubble',
-    size: 'mega',
-    header: {
-      type: 'box',
-      layout: 'vertical',
-      paddingBottom: 'none',
-      contents: [
-        { type: 'text', text: hdrText, weight: 'bold', color: stColor, size: 'sm' },
-        { type: 'text', text: sanitizeNoEmoji(apt.id || '-'), size: 'xs', color: '#64748b', margin: 'xs' }
-      ]
-    },
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      spacing: 'md',
-      contents: [
-        { type: 'text', text: sanitizeNoEmoji(apt.title || '-'), weight: 'bold', size: 'md', wrap: true, color: '#0f172a' },
-        { type: 'separator', color: '#e2e8f0' },
-        { type: 'box', layout: 'vertical', spacing: 'sm', contents: infoRows }
-      ]
-    }
+    type: 'bubble', size: 'mega',
+    header: { type: 'box', layout: 'vertical', paddingBottom: 'none', contents: [{ type: 'text', text: hdrText, weight: 'bold', color: stColor, size: 'sm' }, { type: 'text', text: sanitizeNoEmoji(apt.id || '-'), size: 'xs', color: '#64748b', margin: 'xs' }] },
+    body: { type: 'box', layout: 'vertical', spacing: 'md', contents: [{ type: 'text', text: sanitizeNoEmoji(apt.title || '-'), weight: 'bold', size: 'md', wrap: true, color: '#0f172a' }, { type: 'separator', color: '#e2e8f0' }, { type: 'box', layout: 'vertical', spacing: 'sm', contents: infoRows }] }
   };
-
   if (st === STATUS.CONFIRMED) {
     bubble.footer = {
-      type: 'box',
-      layout: 'horizontal',
-      spacing: 'md',
-      paddingTop: 'sm',
+      type: 'box', layout: 'horizontal', spacing: 'md', paddingTop: 'sm',
       contents: [
-        {
-          type: 'button',
-          style: 'primary',
-          color: '#10b981',
-          height: 'sm',
-          action: {
-            type: 'postback',
-            label: 'เสร็จสิ้น',
-            data: 'action=quickComplete&id=' + encodeURIComponent(apt.id),
-            displayText: 'บันทึกเสร็จสิ้น [' + apt.id + ']'
-          }
-        },
-        {
-          type: 'button',
-          style: 'secondary',
-          color: '#ef4444',
-          height: 'sm',
-          action: {
-            type: 'postback',
-            label: 'ยกเลิก',
-            data: 'action=quickCancel&id=' + encodeURIComponent(apt.id),
-            displayText: 'ขอยกเลิกนัดหมาย [' + apt.id + ']'
-          }
-        }
+        { type: 'button', style: 'primary', color: '#10b981', height: 'sm', action: { type: 'postback', label: 'เสร็จสิ้น', data: 'action=quickComplete&id=' + encodeURIComponent(apt.id), displayText: 'บันทึกเสร็จสิ้น [' + apt.id + ']' } },
+        { type: 'button', style: 'secondary', color: '#ef4444', height: 'sm', action: { type: 'postback', label: 'ยกเลิก', data: 'action=quickCancel&id=' + encodeURIComponent(apt.id), displayText: 'ขอยกเลิกนัดหมาย [' + apt.id + ']' } }
       ]
     };
   }
-
-  var altText = hdrText + ' [' + (apt.id || '') + '] ' + sanitizeNoEmoji(apt.title || '');
-  return {
-    type: 'flex',
-    altText: altText.slice(0, 400),
-    contents: bubble
-  };
+  return { type: 'flex', altText: (hdrText + ' [' + (apt.id || '') + '] ' + sanitizeNoEmoji(apt.title || '')).slice(0, 400), contents: bubble };
 }
 
 function testNotification_(isDry, custom) {
@@ -1045,13 +943,10 @@ function parseWebhookCmd_(raw) {
     var up = list.filter(function (a) { return a.status === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= now.dateStr; });
     return up.length ? fmt('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (' + up.length + ' รายการ)', up) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
   }
-  if (arg === 'วันนี้') {
-    var td = list.filter(function (a) { return a.appointmentDate === now.dateStr && a.status !== STATUS.CANCELLED; });
-    return td.length ? fmt('[คิวงานวันนี้ ' + fmtThaiDate_(now.dateStr) + '] (' + td.length + ' รายการ)', td) : '[คิวงานวันนี้ ' + fmtThaiDate_(now.dateStr) + ']\nไม่มีนัดหมาย';
-  }
-  if (arg === 'พรุ่งนี้') {
-    var tm = getBkkNow_(now.epochMs + 86400000).dateStr, tmi = list.filter(function (a) { return a.appointmentDate === tm && a.status !== STATUS.CANCELLED; });
-    return tmi.length ? fmt('[คิวงานพรุ่งนี้ ' + fmtThaiDate_(tm) + '] (' + tmi.length + ' รายการ)', tmi) : '[คิวงานพรุ่งนี้ ' + fmtThaiDate_(tm) + ']\nไม่มีนัดหมาย';
+  if (arg === 'วันนี้' || arg === 'พรุ่งนี้') {
+    var dt = arg === 'วันนี้' ? now.dateStr : getBkkNow_(now.epochMs + 86400000).dateStr;
+    var itms = list.filter(function (a) { return a.appointmentDate === dt && a.status !== STATUS.CANCELLED; });
+    return itms.length ? fmt('[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + '] (' + itms.length + ' รายการ)', itms) : '[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + ']\nไม่มีนัดหมาย';
   }
   if (arg === 'สัปดาห์นี้') {
     var wk = list.filter(function (a) { return a.appointmentDate && a.status !== STATUS.CANCELLED && [diffDays_(now.dateStr, a.appointmentDate)].some(function (d) { return d !== null && d >= 0 && d <= 7; }); });

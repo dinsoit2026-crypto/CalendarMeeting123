@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.5.1)
+ * tests.js - Automated Test Suite for Calendar System (v2.5.2)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -214,14 +214,16 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0 และ 2.5.1 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 7, 'ต้องมีประวัติอย่างน้อย 7 เวอร์ชัน');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0, 2.5.1 และ 2.5.2 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 8, 'ต้องมีประวัติอย่างน้อย 8 เวอร์ชัน');
     const v240 = PatchNotes.find(p => p.version === '2.4.0');
     const v250 = PatchNotes.find(p => p.version === '2.5.0');
     const v251 = PatchNotes.find(p => p.version === '2.5.1');
+    const v252 = PatchNotes.find(p => p.version === '2.5.2');
     assert(v240 && v240.changes && v240.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.4.0');
     assert(v250 && v250.changes && v250.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.0');
     assert(v251 && v251.changes && v251.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.1');
+    assert(v252 && v252.changes && v252.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.2');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 

@@ -1,6 +1,6 @@
 /**
  * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
- * Notification Engine, Multi-Year & Year-End Statistics, User Auth & Attribution (v2.5.1)
+ * Notification Engine, Multi-Year & Year-End Statistics, User Auth & Attribution (v2.5.2)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function (root, factory) {
@@ -9,7 +9,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const API_VERSION = '2.5.1', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.5.2', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({ CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' });
@@ -29,31 +29,28 @@
 
   // Pure JavaScript SHA-256
   function hashPassword(str) {
-    const raw = unescape(encodeURIComponent(String(str || '')));
-    const maxWord = Math.pow(2, 32), words = [], asciiBitLength = raw.length * 8;
+    const raw = unescape(encodeURIComponent(String(str || ''))), maxWord = Math.pow(2, 32), words = [], asciiBitLength = raw.length * 8;
     let hash = [], k = [], primeCounter = 0, isComposite = {};
-    for (let candidate = 2; primeCounter < 64; candidate++) {
-      if (!isComposite[candidate]) {
-        for (let i = 0; i < 313; i += candidate) isComposite[i] = candidate;
-        hash[primeCounter] = (Math.pow(candidate, 0.5) * maxWord) | 0;
-        k[primeCounter++] = (Math.pow(candidate, 1 / 3) * maxWord) | 0;
+    for (let c = 2; primeCounter < 64; c++) {
+      if (!isComposite[c]) {
+        for (let i = 0; i < 313; i += c) isComposite[i] = c;
+        hash[primeCounter] = (Math.pow(c, 0.5) * maxWord) | 0;
+        k[primeCounter++] = (Math.pow(c, 1 / 3) * maxWord) | 0;
       }
     }
     let ascii = raw + '\x80';
     while (ascii.length % 64 - 56) ascii += '\x00';
     for (let i = 0; i < ascii.length; i++) words[i >> 2] |= ascii.charCodeAt(i) << ((3 - i) % 4) * 8;
-    words[words.length] = ((asciiBitLength / maxWord) | 0);
-    words[words.length] = (asciiBitLength);
+    words[words.length] = ((asciiBitLength / maxWord) | 0); words[words.length] = asciiBitLength;
     for (let j = 0; j < words.length;) {
-      const w = words.slice(j, j += 16), oldHash = hash.slice(0);
+      const w = words.slice(j, j += 16), old = hash.slice(0);
       for (let i = 0; i < 64; i++) {
         const w15 = w[i - 15], w2 = w[i - 2], a = hash[0], e = hash[4];
-        const temp1 = hash[7] + ((e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + ((w15 >>> 7 | w15 << 25) ^ (w15 >>> 18 | w15 << 14) ^ (w15 >>> 3)) + w[i - 7] + ((w2 >>> 17 | w2 << 15) ^ (w2 >>> 19 | w2 << 13) ^ (w2 >>> 10))) | 0);
-        const temp2 = ((a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
-        hash = [(temp1 + temp2) | 0].concat(hash);
-        hash[4] = (hash[4] + temp1) | 0;
+        const t1 = hash[7] + ((e >>> 6 | e << 26) ^ (e >>> 11 | e << 21) ^ (e >>> 25 | e << 7)) + ((e & hash[5]) ^ ((~e) & hash[6])) + k[i] + (w[i] = (i < 16) ? w[i] : (w[i - 16] + ((w15 >>> 7 | w15 << 25) ^ (w15 >>> 18 | w15 << 14) ^ (w15 >>> 3)) + w[i - 7] + ((w2 >>> 17 | w2 << 15) ^ (w2 >>> 19 | w2 << 13) ^ (w2 >>> 10))) | 0);
+        const t2 = ((a >>> 2 | a << 30) ^ (a >>> 13 | a << 19) ^ (a >>> 22 | a << 10)) + ((a & hash[1]) ^ (a & hash[2]) ^ (hash[1] & hash[2]));
+        hash = [(t1 + t2) | 0].concat(hash); hash[4] = (hash[4] + t1) | 0;
       }
-      for (let i = 0; i < 8; i++) hash[i] = (hash[i] + oldHash[i]) | 0;
+      for (let i = 0; i < 8; i++) hash[i] = (hash[i] + old[i]) | 0;
     }
     let result = '';
     for (let i = 0; i < 8; i++) for (let j = 3; j + 1; j--) { const b = (hash[i] >> (j * 8)) & 255; result += ((b < 16) ? '0' : '') + b.toString(16); }
@@ -78,15 +75,19 @@
 
   function validateUserInput(input, isCreate = true) {
     const errs = [], un = sanitizeNoEmoji(input.username || '').toLowerCase(), disp = sanitizeNoEmoji(input.displayName || '');
-    const role = (input.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF';
-    const isActive = input.isActive !== false && String(input.isActive).toUpperCase() !== 'FALSE';
     if (isCreate) {
       if (!un || un.length < 3 || un.length > 30 || !/^[a-z0-9_.-]+$/.test(un)) errs.push('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
       if (!input.password || String(input.password).length < 4) errs.push('รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร');
     }
     if (!disp) errs.push('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียก');
-    const passwordHash = input.password ? hashPassword(input.password) : (input.passwordHash || '');
-    return { valid: !errs.length, errors: errs, sanitized: { username: un, displayName: disp, role, isActive, passwordHash } };
+    return {
+      valid: !errs.length, errors: errs,
+      sanitized: {
+        username: un, displayName: disp, role: (input.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF',
+        isActive: input.isActive !== false && String(input.isActive).toUpperCase() !== 'FALSE',
+        passwordHash: input.password ? hashPassword(input.password) : (input.passwordHash || '')
+      }
+    };
   }
 
   function registerUserAccount(users, input, nowIso) {
@@ -182,8 +183,7 @@
 
   function findTimeConflicts(appointments, dateStr, timeStr, excludeId) {
     const d = parseFlexibleDateInput(dateStr), t = parseTimeInput(timeStr);
-    if (!d || !t) return [];
-    return (appointments || []).filter(a => a && !a.deletedAt && (!excludeId || a.id !== excludeId) && normalizeStatus(a.status) !== STATUS.CANCELLED && a.appointmentDate === d && a.appointmentTime === t);
+    return (!d || !t) ? [] : (appointments || []).filter(a => a && !a.deletedAt && (!excludeId || a.id !== excludeId) && normalizeStatus(a.status) !== STATUS.CANCELLED && a.appointmentDate === d && a.appointmentTime === t);
   }
 
   // Appointment Validation & Record Management
@@ -193,7 +193,6 @@
     const location = sanitizeNoEmoji(input.location || ''), contactPerson = sanitizeNoEmoji(input.contactPerson || '');
     const pDate = input.appointmentDate ? parseFlexibleDateInput(input.appointmentDate) : '';
     const pTime = input.appointmentTime ? parseTimeInput(input.appointmentTime) : '';
-
     if (!title) errs.push('กรุณาระบุหัวข้องาน');
     if (!pDate) errs.push('กรุณาระบุวันที่นัดหมาย');
     if (!pTime) errs.push('กรุณาระบุเวลานัดหมาย (HH:mm)');
@@ -201,20 +200,18 @@
     if (!contactPerson) errs.push('กรุณาระบุชื่อผู้นัดพบ');
     if (input.appointmentDate && pDate === null) errs.push('รูปแบบวันที่ไม่ถูกต้อง');
     if (input.appointmentTime && pTime === null) errs.push('รูปแบบเวลาไม่ถูกต้อง (HH:mm)');
-
     const rDays = input.remindDaysBefore != null && input.remindDaysBefore !== '' ? Number(input.remindDaysBefore) : 1;
     const rHours = input.remindHoursBefore != null && input.remindHoursBefore !== '' ? Number(input.remindHoursBefore) : 1;
     if (!Number.isInteger(rDays) || rDays < 0 || rDays > 365) errs.push('จำนวนวันแจ้งเตือนต้องเป็น 0-365');
     if (!Number.isInteger(rHours) || rHours < 0 || rHours > 168) errs.push('จำนวนชั่วโมงแจ้งเตือนต้องเป็น 0-168');
-
     const createdBy = sanitizeNoEmoji(input.createdBy || input.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ';
-    const updatedBy = sanitizeNoEmoji(input.updatedBy || createdBy) || createdBy;
     return {
       valid: !errs.length, errors: errs,
       sanitized: {
         title, appointmentDate: pDate || '', appointmentTime: pTime || '', location, contactPerson, status,
         remindDaysBefore: rDays, remindHoursBefore: rHours, notes: sanitizeNoEmoji(input.notes || ''),
-        createdBy, updatedBy, statusChangedBy: sanitizeNoEmoji(input.statusChangedBy || ''),
+        createdBy, updatedBy: sanitizeNoEmoji(input.updatedBy || createdBy) || createdBy,
+        statusChangedBy: sanitizeNoEmoji(input.statusChangedBy || ''),
         statusChangedAt: sanitizeNoEmoji(input.statusChangedAt || ''), statusReason: sanitizeNoEmoji(input.statusReason || '')
       }
     };
@@ -249,17 +246,13 @@
       err.code = 'CONCURRENCY_CONFLICT';
       throw err;
     }
-    const merged = { ...existing, ...patch };
-    const v = validateAppointmentInput(merged);
+    const merged = { ...existing, ...patch }, v = validateAppointmentInput(merged);
     if (!v.valid) throw new Error(v.errors.join(' | '));
 
     const s = v.sanitized, bkk = getBangkokParts(opts.nowIso), reason = sanitizeNoEmoji(patch.reason || opts.reason || patch.statusReason || '');
     const logs = ['appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status']
       .filter(f => String(existing[f] || '') !== String(s[f] || ''))
-      .map((f, i) => ({
-        logId: `LOG-${bkk.epochMs}-${i + 1}`, appointmentId: existing.id, changedAt: bkk.isoStr,
-        changedBy: s.updatedBy, fieldChanged: f, oldValue: String(existing[f] || ''), newValue: String(s[f] || ''), reason
-      }));
+      .map((f, i) => ({ logId: `LOG-${bkk.epochMs}-${i + 1}`, appointmentId: existing.id, changedAt: bkk.isoStr, changedBy: s.updatedBy, fieldChanged: f, oldValue: String(existing[f] || ''), newValue: String(s[f] || ''), reason }));
 
     const dateChanged = String(existing.appointmentDate || '') !== String(s.appointmentDate || '');
     const timeChanged = String(existing.appointmentTime || '') !== String(s.appointmentTime || '');
@@ -269,26 +262,16 @@
 
     let daySlot = (dateChanged || reopened || Number(existing.remindDaysBefore || 0) !== Number(s.remindDaysBefore || 0)) ? '' : (existing.notifiedDayForSlot || '');
     let hourSlot = (dateChanged || timeChanged || reopened || Number(existing.remindHoursBefore || 0) !== Number(s.remindHoursBefore || 0)) ? '' : (existing.notifiedHourForSlot || '');
-
     const createdBy = existing.createdBy || s.createdBy || existing.updatedBy || 'ผู้ใช้งานระบบ';
     let statusChangedBy = existing.statusChangedBy || '', statusChangedAt = existing.statusChangedAt || '', statusReason = existing.statusReason || '';
 
     if (statusChanged) {
       if (s.status === STATUS.CONFIRMED) { statusChangedBy = statusChangedAt = statusReason = ''; }
-      else {
-        statusChangedBy = sanitizeNoEmoji(patch.statusChangedBy || s.updatedBy || 'ผู้ใช้งานระบบ');
-        statusChangedAt = bkk.isoStr;
-        statusReason = sanitizeNoEmoji(patch.statusReason || reason || '');
-      }
+      else { statusChangedBy = sanitizeNoEmoji(patch.statusChangedBy || s.updatedBy || 'ผู้ใช้งานระบบ'); statusChangedAt = bkk.isoStr; statusReason = sanitizeNoEmoji(patch.statusReason || reason || ''); }
     } else if (patch.statusReason !== undefined) statusReason = sanitizeNoEmoji(patch.statusReason);
 
     return {
-      record: {
-        ...existing, ...s, createdBy, statusChangedBy, statusChangedAt, statusReason,
-        notifiedDayForSlot: daySlot, notifiedHourForSlot: hourSlot,
-        rescheduleCount: (+existing.rescheduleCount || 0) + countInc,
-        updatedAt: bkk.isoStr, updatedBy: s.updatedBy
-      },
+      record: { ...existing, ...s, createdBy, statusChangedBy, statusChangedAt, statusReason, notifiedDayForSlot: daySlot, notifiedHourForSlot: hourSlot, rescheduleCount: (+existing.rescheduleCount || 0) + countInc, updatedAt: bkk.isoStr, updatedBy: s.updatedBy },
       logs, dateChanged, timeChanged, reopened, statusChanged
     };
   }
@@ -301,16 +284,12 @@
 
   function evaluateAppointmentNotification(apt, nowIso, settings) {
     const cfg = settings || {};
-    if (!apt || apt.deletedAt || !isActiveStatus(apt.status) || !apt.appointmentDate || !apt.appointmentTime) {
-      return { shouldNotifyDay: false, shouldNotifyHour: false, reason: 'INVALID_OR_INACTIVE' };
-    }
+    if (!apt || apt.deletedAt || !isActiveStatus(apt.status) || !apt.appointmentDate || !apt.appointmentTime) return { shouldNotifyDay: false, shouldNotifyHour: false, reason: 'INVALID_OR_INACTIVE' };
     const nowBkk = getBangkokParts(nowIso), aptEp = bangkokSlotToEpochMs(apt.appointmentDate, apt.appointmentTime);
     if (aptEp === null || nowBkk.epochMs >= aptEp) return { shouldNotifyDay: false, shouldNotifyHour: false, reason: 'PAST' };
 
-    const quiet = isInQuietHours(nowBkk.hour, cfg.quietHoursStart, cfg.quietHoursEnd);
-    const curSlot = buildAppointmentSlot(apt), rHours = +apt.remindHoursBefore || 0, rDays = +apt.remindDaysBefore || 0;
-    const diffH = (aptEp - nowBkk.epochMs) / 3600000;
-
+    const quiet = isInQuietHours(nowBkk.hour, cfg.quietHoursStart, cfg.quietHoursEnd), curSlot = buildAppointmentSlot(apt);
+    const rHours = +apt.remindHoursBefore || 0, rDays = +apt.remindDaysBefore || 0, diffH = (aptEp - nowBkk.epochMs) / 3600000;
     if (rHours > 0 && apt.notifiedHourForSlot !== curSlot && diffH > 0 && diffH <= rHours && (!quiet || cfg.allowHourlyInQuietHours)) {
       return { shouldNotifyDay: false, shouldNotifyHour: true, supersedesDay: true, targetDaySlot: apt.appointmentDate, targetHourSlot: curSlot, diffHours: diffH, reason: 'HOURLY_DUE' };
     }
@@ -328,30 +307,20 @@
     const lines = [
       `${idx ? `${idx}. ` : ''}[${a.id}] ${sanitizeNoEmoji(a.title)}`,
       `   วันนัด: ${formatThaiDateDisplay(a.appointmentDate, false)} เวลา ${a.appointmentTime || '-'} น.`,
-      `   สถานที่: ${sanitizeNoEmoji(a.location || '-')}`,
-      `   ผู้นัดพบ: ${maskContact(a.contactPerson, cfg && cfg.privacyMaskContact)}`,
-      `   สถานะ: [${sanitizeNoEmoji(normalizeStatus(a.status))}]`,
-      `   ผู้สร้าง: ${sanitizeNoEmoji(a.createdBy || a.updatedBy || '-')}`
+      `   สถานที่: ${sanitizeNoEmoji(a.location || '-')}`, `   ผู้นัดพบ: ${maskContact(a.contactPerson, cfg && cfg.privacyMaskContact)}`,
+      `   สถานะ: [${sanitizeNoEmoji(normalizeStatus(a.status))}]`, `   ผู้สร้าง: ${sanitizeNoEmoji(a.createdBy || a.updatedBy || '-')}`
     ];
     if (a.statusChangedBy && normalizeStatus(a.status) !== STATUS.CONFIRMED) lines.push(`   ผู้ดำเนินการ: ${sanitizeNoEmoji(a.statusChangedBy)}`);
     return lines.join('\n');
   };
 
   function buildNotificationPlan(appointments, nowIso, settings) {
-    const cfg = settings || {}, list = Array.isArray(appointments) ? appointments : [];
-    const hourly = [], digest = [], slotUpdates = [];
-
-    list.forEach(a => {
+    const cfg = settings || {}, hourly = [], digest = [], slotUpdates = [];
+    (Array.isArray(appointments) ? appointments : []).forEach(a => {
       const ev = evaluateAppointmentNotification(a, nowIso, cfg);
-      if (ev.shouldNotifyHour) {
-        hourly.push(a);
-        slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: ev.targetHourSlot, triggerType: 'HOURLY_REMINDER' });
-      } else if (ev.shouldNotifyDay) {
-        digest.push(a);
-        slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: a.notifiedHourForSlot || '', triggerType: 'DAILY_DIGEST' });
-      }
+      if (ev.shouldNotifyHour) { hourly.push(a); slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: ev.targetHourSlot, triggerType: 'HOURLY_REMINDER' }); }
+      else if (ev.shouldNotifyDay) { digest.push(a); slotUpdates.push({ id: a.id, notifiedDayForSlot: ev.targetDaySlot, notifiedHourForSlot: a.notifiedHourForSlot || '', triggerType: 'DAILY_DIGEST' }); }
     });
-
     const sortFn = (a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b));
     hourly.sort(sortFn); digest.sort(sortFn);
     if (!hourly.length && !digest.length) return { shouldPush: false, hourlyItems: [], digestItems: [], slotUpdates: [], messageText: '' };
@@ -363,10 +332,8 @@
     const limit = +cfg.quotaLimit || 300, used = +cfg.quotaUsed || 0;
     if (limit > 0 && used / limit >= 0.8) parts.push(`[แจ้งเตือนโควตา] เดือนนี้ใช้โควตา LINE ไปแล้ว ${used}/${limit} ข้อความ`);
     if (cfg.webAppUrl) parts.push(`ดูตารางงาน: ${sanitizeNoEmoji(cfg.webAppUrl)}`);
-
     let txt = sanitizeNoEmoji(parts.join('\n\n'));
-    if (txt.length > LINE_MAX_LEN) txt = txt.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนหน้าเว็บแอป)';
-    return { shouldPush: true, hourlyItems: hourly, digestItems: digest, slotUpdates, messageText: txt };
+    return { shouldPush: true, hourlyItems: hourly, digestItems: digest, slotUpdates, messageText: txt.length > LINE_MAX_LEN ? txt.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนหน้าเว็บแอป)' : txt };
   }
 
   // Yearly & User Statistics
@@ -374,8 +341,7 @@
     const stats = { total: 0, active: 0, completed: 0, cancelled: 0, overdue: 0, rescheduleTotal: 0, completionRate: 0, cancellationRate: 0 };
     (list || []).forEach(a => {
       if (!a || a.deletedAt) return;
-      stats.total += 1;
-      stats.rescheduleTotal += (+a.rescheduleCount || 0);
+      stats.total += 1; stats.rescheduleTotal += (+a.rescheduleCount || 0);
       const st = normalizeStatus(a.status);
       if (st === STATUS.CONFIRMED) stats.active += 1;
       else if (st === STATUS.COMPLETED) stats.completed += 1;
@@ -397,8 +363,7 @@
     };
     (list || []).forEach(a => {
       if (!a || a.deletedAt) return;
-      const cBy = sanitizeNoEmoji(a.createdBy || a.updatedBy || 'ไม่ระบุชื่อ') || 'ไม่ระบุชื่อ';
-      const creatorStat = ensureUser(cBy);
+      const cBy = sanitizeNoEmoji(a.createdBy || a.updatedBy || 'ไม่ระบุชื่อ') || 'ไม่ระบุชื่อ', creatorStat = ensureUser(cBy);
       creatorStat.createdTotal += 1;
       const st = normalizeStatus(a.status);
       if (st === STATUS.CONFIRMED) creatorStat.activeTotal += 1;
@@ -409,19 +374,17 @@
   }
 
   function queryByMonth(appointments, yInput, mInput, options) {
-    const opts = options || {}, ce = normalizeYearToCE(yInput), m = Number(mInput);
+    const ce = normalizeYearToCE(yInput), m = Number(mInput);
     if (!ce || m < 1 || m > 12) throw new Error('ระบุเดือนหรือปีไม่ถูกต้อง');
-    const pfx = `${ce}-${pad2(m)}-`;
-    const items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(pfx));
+    const pfx = `${ce}-${pad2(m)}-`, items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(pfx));
     items.sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
-    return { ceYear: ce, buddhistYear: ce + 543, month: m, monthNameThai: THAI_MONTHS_FULL[m - 1], items, stats: calculateYearlyStats(items, opts.nowIso) };
+    return { ceYear: ce, buddhistYear: ce + 543, month: m, monthNameThai: THAI_MONTHS_FULL[m - 1], items, stats: calculateYearlyStats(items, (options || {}).nowIso) };
   }
 
   function queryByYear(appointments, yInput, options) {
     const opts = options || {}, ce = normalizeYearToCE(yInput);
     if (!ce) throw new Error('ระบุปีไม่ถูกต้อง');
-    const pfx = `${ce}-`;
-    const items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(pfx));
+    const items = (appointments || []).filter(a => a && !a.deletedAt && a.appointmentDate && a.appointmentDate.startsWith(`${ce}-`));
     items.sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
     const months = Array.from({ length: 12 }, (_, i) => {
       const mi = i + 1, mItems = items.filter(a => a.appointmentDate.startsWith(`${ce}-${pad2(mi)}-`));
@@ -448,22 +411,16 @@
 
     const creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || '-');
     const lines = [
-      hdr,
-      `รหัส: ${sanitizeNoEmoji(apt.id || '-')}`,
-      `หัวข้อ: ${sanitizeNoEmoji(apt.title || '-')}`,
+      hdr, `รหัส: ${sanitizeNoEmoji(apt.id || '-')}`, `หัวข้อ: ${sanitizeNoEmoji(apt.title || '-')}`,
       `วันนัด: ${formatThaiDateDisplay(apt.appointmentDate, false)} เวลา ${sanitizeNoEmoji(apt.appointmentTime || '-')} น.`,
-      `สถานที่: ${sanitizeNoEmoji(apt.location || '-')}`,
-      `ผู้นัดพบ: ${maskContact(apt.contactPerson, cfg && cfg.privacyMaskContact)}`,
-      `สถานะ: [${sanitizeNoEmoji(st)}]`,
-      `ผู้สร้างนัดหมาย: ${creator}`
+      `สถานที่: ${sanitizeNoEmoji(apt.location || '-')}`, `ผู้นัดพบ: ${maskContact(apt.contactPerson, cfg && cfg.privacyMaskContact)}`,
+      `สถานะ: [${sanitizeNoEmoji(st)}]`, `ผู้สร้างนัดหมาย: ${creator}`
     ];
     if (st === STATUS.COMPLETED && apt.statusChangedBy) lines.push(`ผู้ยืนยันเสร็จสิ้น: ${sanitizeNoEmoji(apt.statusChangedBy)}`);
     else if (st === STATUS.CANCELLED) {
       if (apt.statusChangedBy) lines.push(`ผู้ยกเลิกนัด: ${sanitizeNoEmoji(apt.statusChangedBy)}`);
       if (apt.statusReason) lines.push(`สาเหตุการยกเลิก: ${sanitizeNoEmoji(apt.statusReason)}`);
-    } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) {
-      lines.push(`ผู้แก้ไขล่าสุด: ${sanitizeNoEmoji(apt.updatedBy)}`);
-    }
+    } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) lines.push(`ผู้แก้ไขล่าสุด: ${sanitizeNoEmoji(apt.updatedBy)}`);
     if (apt.notes) lines.push(`หมายเหตุ: ${sanitizeNoEmoji(apt.notes)}`);
     return sanitizeNoEmoji(lines.join('\n'));
   }
@@ -475,42 +432,24 @@
     const cfg = settings || {};
     if (cfg.enableLineBotQuery === false) return '[ระบบปิดการค้นหาผ่านแชทชั่วคราว] กรุณาตรวจสอบผ่านหน้าเว็บแอป';
 
-    const arg = text.replace(/^คิว\s*/, '').trim(), bkk = getBangkokParts(nowIso);
-    const list = (appointments || []).filter(a => a && !a.deletedAt);
+    const arg = text.replace(/^คิว\s*/, '').trim(), bkk = getBangkokParts(nowIso), list = (appointments || []).filter(a => a && !a.deletedAt);
     const fmtList = (hdr, itms) => {
       let o = `${hdr}\n` + itms.map((a, i) => formatAptLine(a, i + 1, cfg)).join('\n\n');
       return sanitizeNoEmoji(o.length > LINE_MAX_LEN ? o.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนเว็บแอป)' : o);
     };
 
     if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
-      return [
-        '[คำสั่งตรวจสอบตารางงาน]',
-        '- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดหมายที่กำลังจะมาถึงทั้งหมด',
-        '- คิว วันนี้ : นัดหมายวันนี้',
-        '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้',
-        '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า',
-        '- คิว ค้างอยู่ : งานเลยกำหนดเวลา',
-        '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน',
-        '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569',
-        '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน',
-        '- คิว ปี YYYY : เช่น คิว ปี 2570',
-        '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง',
-        '- คิว โควตา : ตรวจสอบโควตารายเดือน'
-      ].join('\n');
+      return ['[คำสั่งตรวจสอบตารางงาน]', '- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดหมายที่กำลังจะมาถึงทั้งหมด', '- คิว วันนี้ : นัดหมายวันนี้', '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้', '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- คิว ค้างอยู่ : งานเลยกำหนดเวลา', '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569', '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- คิว ปี YYYY : เช่น คิว ปี 2570', '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง', '- คิว โควตา : ตรวจสอบโควตารายเดือน'].join('\n');
     }
     if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
     if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
       const itms = list.filter(a => normalizeStatus(a.status) === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= bkk.dateStr).sort((a, b) => buildAppointmentSlot(a).localeCompare(buildAppointmentSlot(b)));
       return itms.length ? fmtList(`[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (${itms.length} รายการ)`, itms) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
     }
-    if (arg === 'วันนี้') {
-      const itms = list.filter(a => a.appointmentDate === bkk.dateStr && a.status !== STATUS.CANCELLED);
-      return itms.length ? fmtList(`[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}] (${itms.length} รายการ)`, itms) : `[คิวงานวันนี้ ${formatThaiDateDisplay(bkk.dateStr, false)}]\nไม่มีรายการนัดหมาย`;
-    }
-    if (arg === 'พรุ่งนี้') {
-      const tmr = getBangkokParts(bkk.epochMs + 86400000).dateStr;
-      const itms = list.filter(a => a.appointmentDate === tmr && a.status !== STATUS.CANCELLED);
-      return itms.length ? fmtList(`[คิวงานพรุ่งนี้ ${formatThaiDateDisplay(tmr, false)}] (${itms.length} รายการ)`, itms) : `[คิวงานพรุ่งนี้ ${formatThaiDateDisplay(tmr, false)}]\nไม่มีรายการนัดหมาย`;
+    if (arg === 'วันนี้' || arg === 'พรุ่งนี้') {
+      const targetDate = arg === 'วันนี้' ? bkk.dateStr : getBangkokParts(bkk.epochMs + 86400000).dateStr;
+      const itms = list.filter(a => a.appointmentDate === targetDate && a.status !== STATUS.CANCELLED);
+      return itms.length ? fmtList(`[คิวงาน${arg} ${formatThaiDateDisplay(targetDate, false)}] (${itms.length} รายการ)`, itms) : `[คิวงาน${arg} ${formatThaiDateDisplay(targetDate, false)}]\nไม่มีรายการนัดหมาย`;
     }
     if (arg === 'สัปดาห์นี้') {
       const itms = list.filter(a => a.appointmentDate && a.status !== STATUS.CANCELLED && [daysBetweenDates(bkk.dateStr, a.appointmentDate)].some(d => d !== null && d >= 0 && d <= 7));
@@ -531,9 +470,7 @@
       const r = queryByMonth(list, y, m, { nowIso });
       return r.items.length ? fmtList(`[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear} (${r.ceYear})] รวม ${r.stats.total} รายการ (สิ้นสุด ${r.stats.completed} | ยกเลิก ${r.stats.cancelled})`, r.items) : `[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear}]\nไม่มีรายการนัดหมาย`;
     }
-    if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
-      return formatYearCommandReply(queryByYear(list, arg === 'ปีนี้' ? bkk.year : bkk.year + 1, { nowIso }), cfg);
-    }
+    if (arg === 'ปีนี้' || arg === 'ปีหน้า') return formatYearCommandReply(queryByYear(list, arg === 'ปีนี้' ? bkk.year : bkk.year + 1, { nowIso }), cfg);
     const ym = arg.match(/^ปี\s*(\d{4})$/);
     if (ym) {
       const y = normalizeYearToCE(ym[1]);
