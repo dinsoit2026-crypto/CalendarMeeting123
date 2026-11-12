@@ -1,11 +1,11 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.0)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.1)
  * Timezone: Asia/Bangkok (UTC+07:00)
  * Features: User Authentication, User Attribution, Reschedule Audit, LINE Bot & Trigger Automation
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 
-var API_VER = '2.5.0';
+var API_VER = '2.5.1';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];

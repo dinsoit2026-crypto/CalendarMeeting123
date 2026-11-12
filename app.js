@@ -1,5 +1,5 @@
 /**
- * app.js - UI Controller, State Management & User Attribution (v2.5.0 Optimized)
+ * app.js - UI Controller, State Management & User Attribution (v2.5.1)
  * Modern SaaS UI with Time-First Cards, Split-View Calendar, User Authentication & Audit Trail
  * Zero-Emoji Policy Compliant
  */
