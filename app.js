@@ -49,7 +49,7 @@
     document.documentElement.setAttribute('data-theme', state.theme);
     if ($('iconThemeSun')) $('iconThemeSun').style.display = state.theme === 'dark' ? 'inline' : 'none';
     if ($('iconThemeMoon')) $('iconThemeMoon').style.display = state.theme === 'dark' ? 'none' : 'inline';
-    try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) {}
+    try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) { }
   }
 
   function switchTab(id) {
@@ -60,7 +60,7 @@
   function loadSavedSession() {
     try { const su = localStorage.getItem(STORAGE.USERS); state.users = su ? JSON.parse(su) : [...Logic.DEFAULT_USERS]; } catch (_) { state.users = [...Logic.DEFAULT_USERS]; }
     state.currentUser = null;
-    try { const uStr = localStorage.getItem(STORAGE.AUTH_USER); if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; } } catch (_) {}
+    try { const uStr = localStorage.getItem(STORAGE.AUTH_USER); if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; } } catch (_) { }
     updateUserSessionUI();
   }
 
@@ -90,7 +90,7 @@
 
   function handleLogout() {
     state.currentUser = null;
-    try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) {}
+    try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) { }
     ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal'].forEach(closeModal);
     if ($('loginUsername')) $('loginUsername').value = '';
     if ($('loginPassword')) $('loginPassword').value = '';
@@ -167,8 +167,8 @@
           if (res && res.user) userObj = res.user;
           if (res && res.users) state.users = res.users;
           if (res && Array.isArray(res.appointments)) syncBundle = res;
-        } catch (_) { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {} }
-      } else { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) {} }
+        } catch (_) { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) { } }
+      } else { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) { } }
       if ($('regUsername')) $('regUsername').value = '';
       if ($('regDisplayName')) $('regDisplayName').value = '';
       if ($('regPassword')) $('regPassword').value = '';
@@ -187,7 +187,7 @@
   }
 
   function initApp() {
-    try { const s = localStorage.getItem(STORAGE.THEME); if (s) state.theme = s; } catch (_) {}
+    try { const s = localStorage.getItem(STORAGE.THEME); if (s) state.theme = s; } catch (_) { }
     applyTheme(state.theme);
 
     try {
@@ -200,7 +200,7 @@
       }
       if ($('cfgGasUrl')) $('cfgGasUrl').value = state.gasUrl;
       if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode;
-    } catch (_) {}
+    } catch (_) { }
 
     loadSavedSession();
     initMonthSelector();
@@ -212,7 +212,7 @@
     } else if (state.isLive && state.gasUrl) {
       callGasApi('listUsers', {}).then(d => {
         if (d && Array.isArray(d.users) && d.users.length) state.users = d.users;
-      }).catch(() => {});
+      }).catch(() => { });
     } else {
       loadDemoData();
     }
@@ -226,7 +226,7 @@
       const a = localStorage.getItem(STORAGE.APTS), l = localStorage.getItem(STORAGE.LOGS), u = localStorage.getItem(STORAGE.USERS);
       state.users = u ? JSON.parse(u) : [...Logic.DEFAULT_USERS];
       if (a) { state.appointments = JSON.parse(a); state.rescheduleLogs = l ? JSON.parse(l) : []; return; }
-    } catch (_) {}
+    } catch (_) { }
 
     state.users = [...Logic.DEFAULT_USERS];
     const now = Logic.getBangkokParts(), tmr = Logic.getBangkokParts(now.epochMs + 86400000), nYr = now.year + 1;
@@ -815,7 +815,7 @@
       }
       if (state.editingUserId && state.currentUser && state.currentUser.userId === state.editingUserId) {
         state.currentUser.displayName = disp; state.currentUser.role = role;
-        try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser)); } catch (_) {}
+        try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser)); } catch (_) { }
         updateUserSessionUI();
       }
       if (!state.isLive) saveDemoData();
