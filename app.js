@@ -1,5 +1,5 @@
 /**
- * app.js - Web Frontend Controller, State Management & User Attribution (v2.5.2)
+ * app.js - Web Frontend Controller, State Management & User Attribution (v2.5.3)
  *
  * สถาปัตยกรรมและคู่มือการพัฒนาต่อ (Developer Handover Guide):
  * 1. โครงสร้างระบบ (Architecture Overview):

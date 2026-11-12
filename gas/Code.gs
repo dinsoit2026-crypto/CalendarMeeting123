@@ -1,5 +1,5 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.2)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.5.3)
  *
  * สถาปัตยกรรมและคู่มือการส่งต่องาน (Backend Developer Handover Guide):
  * 1. บทบาทหน้าที่ (Core Responsibilities):
@@ -16,7 +16,7 @@
  *    - Zero-Emoji Policy: ไม่อนุญาตให้มีอิโมจิในฐานข้อมูลและข้อความที่ส่งออก 100%
  */
 
-var API_VER = '2.5.2';
+var API_VER = '2.5.3';
 // รายชื่อแผ่นงาน (Sheets) ใน Google Spreadsheet
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 // โครงสร้างคอลัมน์ของแต่ละแผ่นงาน (Database Schema)
@@ -762,13 +762,253 @@ function parseQueryString_(qs) {
   return obj;
 }
 
-function buildAptFlexMsg_(apt, isUpdate, maskContact, webAppUrl) {
-  function fRow(lbl, val, bold, col, wrap) {
-    var v = { type: 'text', text: String(val || '-'), size: 'sm', flex: 5, color: col || '#334155' };
-    if (bold) v.weight = 'bold';
-    if (wrap) v.wrap = true;
-    return { type: 'box', layout: 'baseline', spacing: 'sm', contents: [{ type: 'text', text: lbl, color: '#64748b', size: 'sm', flex: 2 }, v] };
+function fRow(lbl, val, bold, col, wrap) {
+  var v = { type: 'text', text: String(val || '-'), size: 'sm', flex: 5, color: col || '#334155' };
+  if (bold) v.weight = 'bold';
+  if (wrap) v.wrap = true;
+  return { type: 'box', layout: 'baseline', spacing: 'sm', contents: [{ type: 'text', text: lbl, color: '#64748b', size: 'sm', flex: 2 }, v] };
+}
+
+function buildStatusResultFlex_(apt, actionType, actingUser, reason, nowTime) {
+  var isComp = actionType === 'COMPLETED' || actionType === 'quickComplete';
+  var hdrText = isComp ? '[บันทึกสิ้นสุดนัดหมายเรียบร้อย]' : '[บันทึกยกเลิกนัดหมายเรียบร้อย]';
+  var stText = isComp ? '[สิ้นสุดการนัดหมาย]' : '[ยกเลิกการนัดหมาย]';
+  var stColor = isComp ? '#10b981' : '#ef4444';
+  var bgHdr = isComp ? '#ecfdf5' : '#fef2f2';
+  var rows = [
+    fRow('สถานะ', stText, true, stColor),
+    fRow(isComp ? 'ผู้เสร็จสิ้น' : 'ผู้ยกเลิก', actingUser || 'สมาชิก LINE', true, '#1e293b')
+  ];
+  if (!isComp && reason) rows.push(fRow('สาเหตุ', sanitizeNoEmoji(reason), false, '#ef4444', true));
+  if (apt && apt.appointmentDate) rows.push(fRow('วันนัด', fmtThaiDate_(apt.appointmentDate) + ' (' + (apt.appointmentTime || '-') + ' น.)', false, '#64748b'));
+  if (apt && apt.location) rows.push(fRow('สถานที่', sanitizeNoEmoji(apt.location), false, '#334155', true));
+
+  var bubble = {
+    type: 'bubble', size: 'mega',
+    styles: { header: { backgroundColor: bgHdr } },
+    header: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        {
+          type: 'box', layout: 'baseline',
+          contents: [
+            { type: 'text', text: hdrText, weight: 'bold', color: stColor, size: 'sm', flex: 8 },
+            { type: 'text', text: (nowTime || '') + ' น.', color: '#64748b', size: 'xs', align: 'end', flex: 4 }
+          ]
+        },
+        { type: 'text', text: sanitizeNoEmoji((apt && apt.id) || '-'), size: 'xs', color: '#64748b', margin: 'xs', weight: 'bold' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: sanitizeNoEmoji((apt && apt.title) || '-'), weight: 'bold', size: 'md', color: '#0f172a', wrap: true },
+        { type: 'separator', margin: 'sm', color: '#e2e8f0' },
+        { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: rows }
+      ]
+    }
+  };
+  return { type: 'flex', altText: (hdrText + ' [' + ((apt && apt.id) || '') + '] ' + ((apt && apt.title) || '')).slice(0, 400), contents: bubble };
+}
+
+function buildNoticeFlex_(id, title, desc, curStatus, actor, reason) {
+  var rows = [];
+  if (curStatus) rows.push(fRow('สถานะปัจจุบัน', '[' + curStatus + ']', true, curStatus === STATUS.COMPLETED ? '#10b981' : '#ef4444'));
+  if (actor) rows.push(fRow('ดำเนินการโดย', sanitizeNoEmoji(actor + (reason ? ' (' + reason + ')' : '')), false, '#475569', true));
+
+  var bubble = {
+    type: 'bubble', size: 'mega',
+    styles: { header: { backgroundColor: '#fffbeb' } },
+    header: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'text', text: '[แจ้งเตือนสถานะนัดหมาย]', weight: 'bold', color: '#d97706', size: 'sm' },
+        { type: 'text', text: sanitizeNoEmoji(id || '-'), size: 'xs', color: '#92400e', margin: 'xs', weight: 'bold' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: sanitizeNoEmoji(title || 'รายการนี้ได้รับการดำเนินการไปแล้ว'), weight: 'bold', size: 'md', color: '#1e293b', wrap: true },
+        { type: 'separator', margin: 'sm', color: '#fef3c7' },
+        { type: 'text', text: sanitizeNoEmoji(desc || ''), size: 'sm', color: '#64748b', wrap: true },
+        { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'sm', contents: rows }
+      ]
+    }
+  };
+  return { type: 'flex', altText: ('[แจ้งเตือน] นัดหมาย [' + id + '] ' + (desc || '')).slice(0, 400), contents: bubble };
+}
+
+function buildHelpFlex_(webAppUrl) {
+  var cmds = [
+    { cmd: 'คิว วันนี้', desc: 'ดูนัดหมายเฉพาะวันนี้' },
+    { cmd: 'คิว พรุ่งนี้', desc: 'ดูนัดหมายวันพรุ่งนี้' },
+    { cmd: 'คิว สัปดาห์นี้', desc: 'ดูนัดหมาย 7 วันข้างหน้า' },
+    { cmd: 'คิว ทั้งหมด', desc: 'ดูนัดหมายรอพบทั้งหมด' },
+    { cmd: 'คิว ปีนี้', desc: 'สรุปผลงานและสถิติประจำปี' },
+    { cmd: 'คิว โควตา', desc: 'เช็คโควตาข้อความ LINE' }
+  ];
+  var rows = cmds.map(function (c) {
+    return {
+      type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'xs',
+      contents: [
+        { type: 'text', text: c.cmd, weight: 'bold', color: '#2563eb', size: 'sm', flex: 4 },
+        { type: 'text', text: c.desc, color: '#64748b', size: 'sm', flex: 6 }
+      ]
+    };
+  });
+  var bubble = {
+    type: 'bubble', size: 'mega',
+    styles: { header: { backgroundColor: '#eff6ff' } },
+    header: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'text', text: '[คำสั่งตรวจสอบตารางงาน]', weight: 'bold', color: '#1d4ed8', size: 'sm' },
+        { type: 'text', text: 'แตะปุ่มด้านล่างหรือพิมพ์คำสั่งเพื่อค้นหา', size: 'xs', color: '#3b82f6', margin: 'xs' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: 'คำสั่งลัดที่ใช้งานบ่อย:', weight: 'bold', size: 'sm', color: '#0f172a' },
+        { type: 'separator', color: '#dbeafe' },
+        { type: 'box', layout: 'vertical', spacing: 'sm', margin: 'md', contents: rows }
+      ]
+    },
+    footer: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        {
+          type: 'box', layout: 'horizontal', spacing: 'sm',
+          contents: [
+            { type: 'button', style: 'primary', color: '#2563eb', height: 'sm', action: { type: 'message', label: 'คิว วันนี้', text: 'คิว วันนี้' } },
+            { type: 'button', style: 'secondary', color: '#f1f5f9', height: 'sm', action: { type: 'message', label: 'คิว พรุ่งนี้', text: 'คิว พรุ่งนี้' } }
+          ]
+        },
+        {
+          type: 'box', layout: 'horizontal', spacing: 'sm',
+          contents: [
+            { type: 'button', style: 'secondary', color: '#f1f5f9', height: 'sm', action: { type: 'message', label: 'คิว ทั้งหมด', text: 'คิว ทั้งหมด' } },
+            { type: 'button', style: 'secondary', color: '#f1f5f9', height: 'sm', action: { type: 'message', label: 'คิว ปีนี้', text: 'คิว ปีนี้' } }
+          ]
+        }
+      ]
+    }
+  };
+  if (webAppUrl) {
+    bubble.footer.contents.push({
+      type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }
+    });
   }
+  return { type: 'flex', altText: '[คำสั่งตรวจสอบตารางงาน] แตะเพื่อดูคำสั่งทั้งหมด', contents: bubble };
+}
+
+function buildQueueFlex_(title, count, items, webAppUrl, mask) {
+  var rows = items.map(function (a, i) {
+    var c = sanitizeNoEmoji(a.contactPerson || '-');
+    if (mask && c.length > 2) c = c.slice(0, 2) + '***';
+    return {
+      type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md',
+      contents: [
+        {
+          type: 'box', layout: 'baseline', spacing: 'sm',
+          contents: [
+            { type: 'text', text: (i + 1) + '. ' + (a.appointmentTime ? a.appointmentTime + ' น.' : '-'), size: 'xs', color: '#1e3a8a', weight: 'bold', flex: 3 },
+            { type: 'text', text: sanitizeNoEmoji(a.title || '-'), size: 'sm', weight: 'bold', color: '#0f172a', flex: 7, wrap: true }
+          ]
+        },
+        {
+          type: 'box', layout: 'baseline', spacing: 'sm',
+          contents: [
+            { type: 'text', text: 'สถานที่', size: 'xs', color: '#94a3b8', flex: 2 },
+            { type: 'text', text: sanitizeNoEmoji((a.location || '-') + ' | ผู้นัด: ' + c), size: 'xs', color: '#64748b', flex: 8, wrap: true }
+          ]
+        }
+      ]
+    };
+  });
+  if (!items.length) {
+    rows.push({ type: 'text', text: 'ไม่มีรายการนัดหมายตามเงื่อนไขที่เลือก', size: 'sm', color: '#64748b', margin: 'md' });
+  }
+
+  var bubble = {
+    type: 'bubble', size: 'mega',
+    styles: { header: { backgroundColor: '#f0f9ff' } },
+    header: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'text', text: sanitizeNoEmoji(title), weight: 'bold', color: '#0369a1', size: 'sm' },
+        { type: 'text', text: 'พบ ' + count + ' รายการ' + (count > items.length ? ' (แสดง ' + items.length + ' รายการแรก)' : ''), size: 'xs', color: '#0284c7', margin: 'xs' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: 'รายการนัดหมาย:', weight: 'bold', size: 'sm', color: '#0f172a' },
+        { type: 'separator', color: '#e0f2fe' },
+        { type: 'box', layout: 'vertical', contents: rows }
+      ]
+    }
+  };
+  if (webAppUrl) {
+    bubble.footer = {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดดูตารางงานทั้งหมดบนเว็บแอป', uri: webAppUrl } }
+      ]
+    };
+  }
+  return { type: 'flex', altText: (title + ' (' + count + ' รายการ)').slice(0, 400), contents: bubble };
+}
+
+function buildYearStatsFlex_(year, total, act, comp, canc, rate, sampleItems, webAppUrl) {
+  var bRow = function (lbl, val, col) {
+    return {
+      type: 'box', layout: 'baseline', spacing: 'sm',
+      contents: [
+        { type: 'text', text: lbl, size: 'sm', color: '#64748b', flex: 4 },
+        { type: 'text', text: String(val), size: 'sm', weight: 'bold', color: col || '#1e293b', flex: 6 }
+      ]
+    };
+  };
+  var statRows = [
+    bRow('งานทั้งหมด', total + ' งาน', '#0f172a'),
+    bRow('นัดหมายแล้ว', act + ' งาน', '#4f46e5'),
+    bRow('สิ้นสุดการนัดหมาย', comp + ' งาน (สำเร็จ ' + rate + '%)', '#10b981'),
+    bRow('ยกเลิกการนัดหมาย', canc + ' งาน', '#ef4444')
+  ];
+
+  var bubble = {
+    type: 'bubble', size: 'mega',
+    styles: { header: { backgroundColor: '#fff7ed' } },
+    header: {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'text', text: '[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + ']', weight: 'bold', color: '#ea580c', size: 'sm' },
+        { type: 'text', text: 'สรุปผลงานและการดำเนินงานตลอดทั้งปี', size: 'xs', color: '#c2410c', margin: 'xs' }
+      ]
+    },
+    body: {
+      type: 'box', layout: 'vertical', spacing: 'sm',
+      contents: [
+        { type: 'text', text: 'ภาพรวมผลงานประจำปี:', weight: 'bold', size: 'sm', color: '#0f172a' },
+        { type: 'separator', color: '#ffedd5' },
+        { type: 'box', layout: 'vertical', spacing: 'xs', margin: 'md', contents: statRows }
+      ]
+    }
+  };
+  if (webAppUrl) {
+    bubble.footer = {
+      type: 'box', layout: 'vertical',
+      contents: [
+        { type: 'button', style: 'link', height: 'sm', action: { type: 'uri', label: 'เปิดดูแดชบอร์ดรายปีบนเว็บแอป', uri: webAppUrl } }
+      ]
+    };
+  }
+  return { type: 'flex', altText: ('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + '] รวม ' + total + ' งาน').slice(0, 400), contents: bubble };
+}
+
+function buildAptFlexMsg_(apt, isUpdate, maskContact, webAppUrl) {
   var c = sanitizeNoEmoji(apt.contactPerson || '-');
   if (maskContact && c.length > 2) c = c.slice(0, 2) + '***';
   var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || 'ผู้ใช้งานระบบ');
@@ -870,21 +1110,22 @@ function refreshLineQuotaCache_() {
 function handleLinePostback_(ev, gid, uid, props) {
   var pbData = parseQueryString_((ev && ev.postback && ev.postback.data) || '');
   var action = pbData.action || '', id = pbData.id || '';
-  if (!id) return '[ข้อผิดพลาด] ไม่พบรหัสนัดหมาย';
+  if (!id) return buildNoticeFlex_('-', 'ข้อมูลไม่ถูกต้อง', 'ไม่พบรหัสนัดหมายในการทำรายการ', '', '', '');
 
   return withLock_(function () {
     var apts = readAllApts_(false), targetApt = null;
     for (var i = 0; i < apts.length; i++) {
       if (apts[i].id === id) { targetApt = apts[i]; break; }
     }
-    if (!targetApt) return '[แจ้งเตือน] ไม่พบรายการนัดหมาย ' + id + ' ในระบบ (อาจถูกลบไปแล้ว)';
+    if (!targetApt) return buildNoticeFlex_(id, 'ไม่พบรายการนัดหมาย', 'ไม่พบรายการนัดหมาย ' + id + ' ในระบบ (อาจถูกลบไปแล้ว)', '', '', '');
 
     var curSt = normalizeStatus_(targetApt.status);
     if (curSt === STATUS.COMPLETED) {
-      return '[แจ้งเตือน] นัดหมาย [' + id + '] นี้ได้ถูกบันทึกเสร็จสิ้นไปแล้วโดย ' + (targetApt.statusChangedBy || 'ผู้ใช้งาน') + (targetApt.statusChangedAt ? ' เมื่อ ' + fmtThaiDate_(targetApt.statusChangedAt.slice(0, 10)) : '');
+      var when = targetApt.statusChangedAt ? ' เมื่อ ' + fmtThaiDate_(targetApt.statusChangedAt.slice(0, 10)) : '';
+      return buildNoticeFlex_(id, 'รายการนี้ได้รับการดำเนินการไปแล้ว', 'นัดหมายนี้ได้รับการบันทึกเสร็จสิ้นไปแล้ว', STATUS.COMPLETED, (targetApt.statusChangedBy || 'ผู้ใช้งาน') + when, '');
     }
     if (curSt === STATUS.CANCELLED) {
-      return '[แจ้งเตือน] นัดหมาย [' + id + '] นี้ได้ถูกยกเลิกไปแล้วโดย ' + (targetApt.statusChangedBy || 'ผู้ใช้งาน') + (targetApt.statusReason ? ' (' + targetApt.statusReason + ')' : '');
+      return buildNoticeFlex_(id, 'รายการนี้ได้รับการดำเนินการไปแล้ว', 'นัดหมายนี้ได้รับการยกเลิกไปแล้ว', STATUS.CANCELLED, (targetApt.statusChangedBy || 'ผู้ใช้งาน'), (targetApt.statusReason || ''));
     }
 
     var token = props.getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '';
@@ -898,12 +1139,7 @@ function handleLinePostback_(ev, gid, uid, props) {
         updatedBy: actingUser
       }, targetApt.updatedAt, 'เสร็จสิ้นผ่าน LINE', actingUser);
 
-      return '[บันทึกเสร็จสิ้นนัดหมายเรียบร้อย]\n' +
-        'รหัส: ' + id + '\n' +
-        'หัวข้อ: ' + sanitizeNoEmoji(targetApt.title) + '\n' +
-        'สถานะ: [' + STATUS.COMPLETED + ']\n' +
-        'ผู้ดำเนินการ: ' + actingUser + '\n' +
-        'เวลา: ' + getBkkNow_().timeStr + ' น.';
+      return buildStatusResultFlex_(targetApt, 'COMPLETED', actingUser, '', getBkkNow_().timeStr);
     }
 
     if (action === 'quickCancel') {
@@ -915,13 +1151,7 @@ function handleLinePostback_(ev, gid, uid, props) {
         updatedBy: actingUser
       }, targetApt.updatedAt, cancelReason, actingUser);
 
-      return '[บันทึกยกเลิกนัดหมายเรียบร้อย]\n' +
-        'รหัส: ' + id + '\n' +
-        'หัวข้อ: ' + sanitizeNoEmoji(targetApt.title) + '\n' +
-        'สถานะ: [' + STATUS.CANCELLED + ']\n' +
-        'ผู้ยกเลิก: ' + actingUser + '\n' +
-        'สาเหตุ: ' + cancelReason + '\n' +
-        'เวลา: ' + getBkkNow_().timeStr + ' น.';
+      return buildStatusResultFlex_(targetApt, 'CANCELLED', actingUser, cancelReason, getBkkNow_().timeStr);
     }
 
     return null;
@@ -968,29 +1198,29 @@ function handleLineWebhook_(body, qParams) {
 function parseWebhookCmd_(raw) {
   var txt = sanitizeNoEmoji(raw || '').trim();
   if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(txt)) return null;
-  var m = getMetaMap_(); if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return '[ระบบปิดค้นหาผ่านแชทชั่วคราว] กรุณาดูบนเว็บแอป';
+  var m = getMetaMap_(), webAppUrl = m.WEB_APP_URL || '';
+  if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return buildNoticeFlex_('-', 'ระบบปิดค้นหาชั่วคราว', 'ผู้ดูแลระบบปิดการค้นหาผ่านแชทชั่วคราว กรุณาดูบนเว็บแอป', '', '', '');
   var arg = txt.replace(/^คิว\s*/, '').trim(), now = getBkkNow_(), list = readAllApts_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
-  var fmt = function (hdr, itms) {
-    var o = hdr + '\n' + itms.map(function (a, i) { return fmtAptLine_(a, i + 1, mask); }).join('\n\n');
-    return o.length > 4500 ? o.slice(0, 4420) + '\n...(ดูเพิ่มเติมบนเว็บแอป)' : o;
-  };
 
   if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
-    return '[คำสั่งตรวจสอบตารางงาน]\n- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดที่กำลังจะมาถึงทั้งหมด\n- คิว วันนี้ : นัดวันนี้\n- คิว พรุ่งนี้ : นัดพรุ่งนี้\n- คิว สัปดาห์นี้ : นัดใน 7 วัน\n- คิว ค้างอยู่ : นัดเลยกำหนด\n- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน\n- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569\n- คิว ปีนี้ / คิว ปี YYYY : สรุปสถิติประจำปี\n- คิว ค้นหา <คำค้น> : ค้นหางาน\n- คิว โควตา : เช็คโควตารายเดือน';
+    return buildHelpFlex_(webAppUrl);
   }
-  if (arg === 'โควตา') return '[โควตา LINE เดือนนี้] ใช้ไปแล้ว ' + (m.CACHED_QUOTA_USED || '0') + ' / ' + (m.CACHED_QUOTA_LIMIT || '300') + ' ข้อความ';
+  if (arg === 'โควตา') {
+    var uLim = m.CACHED_QUOTA_LIMIT || '300', uUsed = m.CACHED_QUOTA_USED || '0';
+    return buildNoticeFlex_('โควตา LINE', 'สถานะโควตาข้อความประจำเดือน', 'ใช้ไปแล้ว ' + uUsed + ' จากทั้งหมด ' + uLim + ' ข้อความ (คงเหลือ ' + Math.max(0, +uLim - +uUsed) + ' ข้อความ)', '', '', '');
+  }
   if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
     var up = list.filter(function (a) { return a.status === STATUS.CONFIRMED && a.appointmentDate && a.appointmentDate >= now.dateStr; });
-    return up.length ? fmt('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด] (' + up.length + ' รายการ)', up) : '[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]\nไม่มีรายการนัดหมายที่กำลังจะมาถึง';
+    return buildQueueFlex_('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]', up.length, up.slice(0, 5), webAppUrl, mask);
   }
   if (arg === 'วันนี้' || arg === 'พรุ่งนี้') {
     var dt = arg === 'วันนี้' ? now.dateStr : getBkkNow_(now.epochMs + 86400000).dateStr;
     var itms = list.filter(function (a) { return a.appointmentDate === dt && a.status !== STATUS.CANCELLED; });
-    return itms.length ? fmt('[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + '] (' + itms.length + ' รายการ)', itms) : '[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + ']\nไม่มีนัดหมาย';
+    return buildQueueFlex_('[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + ']', itms.length, itms.slice(0, 5), webAppUrl, mask);
   }
   if (arg === 'สัปดาห์นี้') {
     var wk = list.filter(function (a) { return a.appointmentDate && a.status !== STATUS.CANCELLED && [diffDays_(now.dateStr, a.appointmentDate)].some(function (d) { return d !== null && d >= 0 && d <= 7; }); });
-    return wk.length ? fmt('[คิวงานใน 7 วันข้างหน้า] (' + wk.length + ' รายการ)', wk) : '[คิวงานใน 7 วันข้างหน้า]\nไม่มีนัดหมาย';
+    return buildQueueFlex_('[คิวงานใน 7 วันข้างหน้า]', wk.length, wk.slice(0, 5), webAppUrl, mask);
   }
   if (arg === 'ค้างอยู่') {
     var ov = list.filter(function (a) {
@@ -998,11 +1228,11 @@ function parseWebhookCmd_(raw) {
       var ep = bkkSlotToEpoch_(a.appointmentDate, a.appointmentTime || '23:59');
       return ep !== null && now.epochMs > ep;
     });
-    return ov.length ? fmt('[คิวงานเลยกำหนดเวลา] (' + ov.length + ' รายการ)', ov) : '[คิวงานเลยกำหนด]\nไม่มีรายการค้าง';
+    return buildQueueFlex_('[คิวงานเลยกำหนดเวลา]', ov.length, ov.slice(0, 5), webAppUrl, mask);
   }
   if (arg === 'เดือนนี้') {
     var pfx = now.year + '-' + pad2_(now.month) + '-', mi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(pfx) === 0; });
-    return mi.length ? fmt('[งานเดือน' + TH_MONTHS[now.month - 1] + ' ' + (now.year + 543) + '] (' + mi.length + ' รายการ)', mi) : 'ไม่มีนัดหมายเดือนนี้';
+    return buildQueueFlex_('[งานเดือน' + TH_MONTHS[now.month - 1] + ' ' + (now.year + 543) + ']', mi.length, mi.slice(0, 5), webAppUrl, mask);
   }
   var mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
   if (mm) {
@@ -1010,9 +1240,9 @@ function parseWebhookCmd_(raw) {
     if (yr > 2400) yr -= 543;
     if (mo >= 1 && mo <= 12) {
       var mpfx = yr + '-' + pad2_(mo) + '-', mlist = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(mpfx) === 0; });
-      return mlist.length ? fmt('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + '] (' + mlist.length + ' รายการ)', mlist) : 'ไม่มีนัดหมายในเดือนที่เลือก';
+      return mlist.length ? buildQueueFlex_('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + ']', mlist.length, mlist.slice(0, 5), webAppUrl, mask) : buildNoticeFlex_('-', 'ไม่มีนัดหมาย', 'ไม่มีนัดหมายในเดือนที่เลือก', '', '', '');
     }
-    return '[ข้อผิดพลาด] รูปแบบเดือนไม่ถูกต้อง เช่น คิว เดือน 12/2569';
+    return buildNoticeFlex_('-', 'รูปแบบเดือนไม่ถูกต้อง', 'กรุณาระบุรูปแบบเดือน เช่น คิว เดือน 12/2569', '', '', '');
   }
   if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
     var ty = arg === 'ปีนี้' ? now.year : now.year + 1, yi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(ty + '-') === 0; });
@@ -1020,14 +1250,12 @@ function parseWebhookCmd_(raw) {
     var canc = yi.filter(function(a){ return a.status === STATUS.CANCELLED; }).length;
     var act = yi.filter(function(a){ return a.status === STATUS.CONFIRMED; }).length;
     var rate = yi.length > 0 ? Math.round((comp / yi.length) * 100) : 0;
-    var hdr = '[สรุปสถิติประจำปี พ.ศ. ' + (ty + 543) + ']\nรวมทั้งหมด: ' + yi.length + ' งาน | นัดหมายแล้ว: ' + act + ' | สิ้นสุด: ' + comp + ' (' + rate + '%) | ยกเลิก: ' + canc;
-    if (!yi.length) return hdr + '\nยังไม่มีนัดหมายในปีนี้';
-    return hdr + '\n' + yi.slice(0, 8).map(function (a, i) { return (i + 1) + '. [' + a.appointmentDate + '] ' + a.title + ' (' + a.status + ') - สร้างโดย: ' + (a.createdBy || a.updatedBy || '-'); }).join('\n');
+    return buildYearStatsFlex_(ty, yi.length, act, comp, canc, rate, yi.slice(0, 5), webAppUrl);
   }
   var sm = arg.match(/^ค้นหา\s+(.+)$/);
   if (sm) {
     var kw = sm[1].trim().toLowerCase(), found = list.filter(function (a) { return (a.id + ' ' + a.title + ' ' + a.location + ' ' + a.contactPerson + ' ' + (a.createdBy || '') + ' ' + (a.statusChangedBy || '')).toLowerCase().indexOf(kw) !== -1; });
-    return found.length ? fmt('[ผลการค้นหา "' + sm[1].trim() + '"] (' + found.length + ' รายการ)', found.slice(0, 15)) : 'ไม่พบงานที่ตรงกัน';
+    return buildQueueFlex_('[ผลการค้นหา "' + sm[1].trim() + '"]', found.length, found.slice(0, 5), webAppUrl, mask);
   }
-  return '[ไม่พบคำสั่ง] พิมพ์ "คิว ช่วยเหลือ" เพื่อดูคำสั่งทั้งหมด';
+  return buildHelpFlex_(webAppUrl);
 }

@@ -1,6 +1,6 @@
 /**
  * logic.js - Core Business Logic, Validation, Timezone (Asia/Bangkok),
- * Notification Engine, Multi-Year & Year-End Statistics, User Auth & Attribution (v2.5.2)
+ * Notification Engine, Multi-Year & Year-End Statistics, User Auth & Attribution (v2.5.3)
  *
  * สถาปัตยกรรมและคู่มือการพัฒนาต่อ (Core Logic Handover Guide):
  * 1. หลักการออกแบบ (Design Principles):
@@ -26,7 +26,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const API_VERSION = '2.5.2', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.5.3', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({ CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' });

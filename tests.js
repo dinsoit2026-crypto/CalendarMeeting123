@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.5.2)
+ * tests.js - Automated Test Suite for Calendar System (v2.5.3)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -214,16 +214,18 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0, 2.5.1 และ 2.5.2 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 8, 'ต้องมีประวัติอย่างน้อย 8 เวอร์ชัน');
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0, 2.5.1, 2.5.2 และ 2.5.3 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 9, 'ต้องมีประวัติอย่างน้อย 9 เวอร์ชัน');
     const v240 = PatchNotes.find(p => p.version === '2.4.0');
     const v250 = PatchNotes.find(p => p.version === '2.5.0');
     const v251 = PatchNotes.find(p => p.version === '2.5.1');
     const v252 = PatchNotes.find(p => p.version === '2.5.2');
+    const v253 = PatchNotes.find(p => p.version === '2.5.3');
     assert(v240 && v240.changes && v240.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.4.0');
     assert(v250 && v250.changes && v250.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.0');
     assert(v251 && v251.changes && v251.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.1');
     assert(v252 && v252.changes && v252.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.2');
+    assert(v253 && v253.changes && v253.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.3');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 
@@ -481,6 +483,38 @@
       const aptDone = { ...apt, status: Logic.STATUS.COMPLETED, statusChangedBy: 'คุณสมชาย' };
       const flexDone = sandbox.buildAptFlexMsg_(aptDone, true, false, '');
       assert(!flexDone.contents.footer, 'นัดที่เสร็จสิ้นแล้วต้องไม่มีปุ่มใน footer');
+
+      // ตรวจสอบการ์ดยืนยันผลเสร็จสิ้น (กรอบสีเขียว #10b981 / #ecfdf5)
+      const resComp = sandbox.buildStatusResultFlex_(apt, 'quickComplete', 'คุณสมชาย', '', '15:30');
+      assert(resComp && resComp.type === 'flex', 'Result Complete ต้องเป็น flex');
+      assertEqual(resComp.contents.styles.header.backgroundColor, '#ecfdf5', 'พื้นหลังหัวการ์ดเสร็จสิ้นต้องเป็นสีเขียวอ่อน');
+      assert(!Logic.hasEmoji(JSON.stringify(resComp)), 'Result Complete ต้องไม่มีอิโมจิ');
+
+      // ตรวจสอบการ์ดยืนยันผลยกเลิก (กรอบสีแดง #ef4444 / #fef2f2)
+      const resCanc = sandbox.buildStatusResultFlex_(apt, 'quickCancel', 'B∆LL', 'ยกเลิกผ่าน LINE โดย B∆LL', '15:31');
+      assert(resCanc && resCanc.type === 'flex', 'Result Cancel ต้องเป็น flex');
+      assertEqual(resCanc.contents.styles.header.backgroundColor, '#fef2f2', 'พื้นหลังหัวการ์ดยกเลิกต้องเป็นสีแดงอ่อน');
+      assert(!Logic.hasEmoji(JSON.stringify(resCanc)), 'Result Cancel ต้องไม่มีอิโมจิ');
+
+      // ตรวจสอบการ์ดแจ้งเตือนกดซ้ำ (Notice Card สีส้มเตือนภัย #fffbeb / #d97706)
+      const noticeCard = sandbox.buildNoticeFlex_('APT-001', 'รายการนี้ได้รับการดำเนินการไปแล้ว', 'นัดหมายนี้ได้รับการยกเลิกไปแล้ว', Logic.STATUS.CANCELLED, 'B∆LL', 'ยกเลิกผ่าน LINE');
+      assert(noticeCard && noticeCard.type === 'flex', 'Notice Card ต้องเป็น flex');
+      assertEqual(noticeCard.contents.styles.header.backgroundColor, '#fffbeb', 'พื้นหลังหัวการ์ดแจ้งเตือนต้องเป็นสีเหลืองส้มอ่อน');
+      assert(!Logic.hasEmoji(JSON.stringify(noticeCard)), 'Notice Card ต้องไม่มีอิโมจิ');
+
+      // ตรวจสอบการ์ดเมนูช่วยเหลือและปุ่มลัด
+      const helpCard = sandbox.buildHelpFlex_('https://example.com');
+      assert(helpCard && helpCard.type === 'flex' && helpCard.contents.footer.contents.length >= 2, 'Help Card ต้องมีปุ่มลัด');
+      assert(!Logic.hasEmoji(JSON.stringify(helpCard)), 'Help Card ต้องไม่มีอิโมจิ');
+
+      // ตรวจสอบการ์ดสรุปคิวงานและแดชบอร์ดรายปี
+      const queueCard = sandbox.buildQueueFlex_('คิวงานวันนี้', 1, [apt], 'https://example.com', false);
+      assert(queueCard && queueCard.type === 'flex', 'Queue Card ต้องเป็น flex');
+      assert(!Logic.hasEmoji(JSON.stringify(queueCard)), 'Queue Card ต้องไม่มีอิโมจิ');
+
+      const yrCard = sandbox.buildYearStatsFlex_(2026, 4, 1, 2, 1, 50, [], 'https://example.com');
+      assert(yrCard && yrCard.type === 'flex', 'Year Stats Card ต้องเป็น flex');
+      assert(!Logic.hasEmoji(JSON.stringify(yrCard)), 'Year Stats Card ต้องไม่มีอิโมจิ');
     });
   }
 
