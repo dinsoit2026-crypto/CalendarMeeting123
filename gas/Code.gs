@@ -37,12 +37,17 @@ function hashPassword_(str) {
 }
 
 // Request-level cache to eliminate repetitive SpreadsheetApp calls
-var _ss = null, _shMap = {};
+var _ss = null, _shMap = {}, _metaCache = null;
 function getSs_() { return _ss || (_ss = SpreadsheetApp.getActiveSpreadsheet()); }
 
 function formatPlainText_(sh, colCount) {
   var c = Math.max(colCount || 1, 1), r = Math.max(sh.getMaxRows(), 500);
   sh.getRange(1, 1, r, c).setNumberFormat('@');
+}
+
+function appendPlainRow_(sh, rowVals, knownLastRow) {
+  var nextRow = (knownLastRow != null ? knownLastRow : sh.getLastRow()) + 1;
+  sh.getRange(nextRow, 1, 1, rowVals.length).setNumberFormat('@').setValues([rowVals]);
 }
 
 function ensureSheet_(ss, name, cols, isSetup) {
@@ -93,7 +98,7 @@ function setupDatabase() {
     ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE', WEB_APP_URL: ''
   };
   var cur = getMetaMap_(), now = getBkkNow_().isoStr, mSh = ensureSheet_(ss, SH_META, META_COLS, true);
-  Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) mSh.appendRow([k, defs[k], now]); });
+  Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) { mSh.appendRow([k, defs[k], now]); cur[k] = defs[k]; } });
   formatPlainText_(mSh, META_COLS.length);
   return 'ตั้งค่าโครงสร้างชีต Plain Text และบัญชีเริ่มต้นสำเร็จ';
 }
@@ -107,13 +112,16 @@ function removeNotificationTriggers() {
   return 'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย';
 }
 
+function getTrigMs_(entry) { return entry && typeof entry === 'object' ? (+entry.ms || 0) : (+entry || 0); }
+function getTrigId_(entry) { return entry && typeof entry === 'object' ? String(entry.id || '') : ''; }
+
 function cleanExpiredTriggers_(existingTriggers) {
   try {
     var props = PropertiesService.getScriptProperties(), map = JSON.parse(props.getProperty('ONEOFF_TRIGGERS_JSON') || '{}');
     var nowMs = Date.now(), changed = false, all = existingTriggers || ScriptApp.getProjectTriggers();
     all.forEach(function (t) {
-      var uid = t.getUniqueId();
-      if (map[uid] && map[uid] <= nowMs) { ScriptApp.deleteTrigger(t); delete map[uid]; changed = true; }
+      var uid = t.getUniqueId(), ms = getTrigMs_(map[uid]);
+      if (ms && ms <= nowMs) { ScriptApp.deleteTrigger(t); delete map[uid]; changed = true; }
     });
     if (changed) props.setProperty('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
   } catch (_) {}
@@ -147,25 +155,50 @@ function setupNotificationTriggers_(mode) {
 
 function scheduleExactReminderForApt_(apt) {
   try {
-    if (!apt || apt.status !== STATUS.CONFIRMED || !apt.appointmentDate || !apt.appointmentTime) return;
-    var ep = bkkSlotToEpoch_(apt.appointmentDate, apt.appointmentTime);
-    if (!ep) return;
-    var rH = +apt.remindHoursBefore || 1, remindMs = ep - (rH * 3600000), nowMs = getBkkNow_().epochMs;
-    if (remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000)) {
-      var allTriggers = ScriptApp.getProjectTriggers();
-      cleanExpiredTriggers_(allTriggers);
-      var props = PropertiesService.getScriptProperties(), map = JSON.parse(props.getProperty('ONEOFF_TRIGGERS_JSON') || '{}');
-      if (allTriggers.length >= 16) {
+    if (!apt || !apt.id) return;
+    var props = PropertiesService.getScriptProperties(), map = JSON.parse(props.getProperty('ONEOFF_TRIGGERS_JSON') || '{}');
+    var aptUids = Object.keys(map).filter(function (u) { return getTrigId_(map[u]) === apt.id; });
+    var ep = (apt.status === STATUS.CONFIRMED && apt.appointmentDate && apt.appointmentTime) ? bkkSlotToEpoch_(apt.appointmentDate, apt.appointmentTime) : null;
+    var rH = +apt.remindHoursBefore || 1, remindMs = ep ? ep - (rH * 3600000) : 0, nowMs = getBkkNow_().epochMs;
+    var shouldCreate = Boolean(ep && remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000));
+
+    if (!shouldCreate && !aptUids.length) return;
+    if (shouldCreate && aptUids.length === 1 && Math.abs(getTrigMs_(map[aptUids[0]]) - remindMs) < 60000) return;
+
+    var allTriggers = ScriptApp.getProjectTriggers(), changed = false, activeCount = allTriggers.length, slotCovered = false;
+    allTriggers.forEach(function (t) {
+      var uid = t.getUniqueId(), ms = getTrigMs_(map[uid]), tAptId = getTrigId_(map[uid]);
+      if ((ms && ms <= nowMs) || (tAptId && tAptId === apt.id)) {
+        ScriptApp.deleteTrigger(t); delete map[uid]; activeCount--; changed = true;
+      } else if (shouldCreate && ms && Math.abs(ms - remindMs) < 60000) {
+        slotCovered = true;
+      }
+    });
+
+    if (shouldCreate && !slotCovered) {
+      if (activeCount >= 16) {
         for (var i = 0; i < allTriggers.length; i++) {
           var tUid = allTriggers[i].getUniqueId();
-          if (map[tUid]) { ScriptApp.deleteTrigger(allTriggers[i]); delete map[tUid]; break; }
+          if (map[tUid]) { ScriptApp.deleteTrigger(allTriggers[i]); delete map[tUid]; changed = true; break; }
         }
       }
       var newTrig = ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create();
-      map[newTrig.getUniqueId()] = remindMs;
-      props.setProperty('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
+      map[newTrig.getUniqueId()] = { ms: remindMs, id: apt.id };
+      changed = true;
     }
+    if (changed) props.setProperty('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
   } catch (_) {}
+}
+
+function buildSyncBundle_(optUsers) {
+  return {
+    appointments: readAllApts_(),
+    users: optUsers || readPublicUsers_(),
+    rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50),
+    notificationLogs: readLogs_(SH_NOTIF_LOGS, NOTIF_LOG_COLS, 30),
+    meta: getMetaMap_(),
+    serverTime: getBkkNow_().isoStr
+  };
 }
 
 // HTTP Endpoints
@@ -192,15 +225,7 @@ function doPost(e) {
     if (a === 'listUsers') return json_({ ok: true, data: { users: readPublicUsers_() } });
     if (a === 'saveUser') return withLock_(function () { return json_({ ok: true, data: { user: saveUser_(body.userPayload) } }); });
     if (a === 'deleteUser') return withLock_(function () { return json_({ ok: true, data: { result: deleteUser_(body.userId) } }); });
-    if (a === 'list') return json_({
-      ok: true,
-      data: {
-        appointments: readAllApts_(), users: readPublicUsers_(),
-        rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50),
-        notificationLogs: readLogs_(SH_NOTIF_LOGS, NOTIF_LOG_COLS, 30),
-        meta: getMetaMap_(), serverTime: getBkkNow_().isoStr
-      }
-    });
+    if (a === 'list') return json_({ ok: true, data: buildSyncBundle_() });
     if (a === 'create') return withLock_(function () {
       var apt = createApt_(body.payload || {});
       var lineNotification = body.notifyLine !== false ? sendInstantAptNotification_(apt, false) : null;
@@ -213,7 +238,7 @@ function doPost(e) {
         res.lineNotification = sendInstantAptNotification_(res.appointment, true);
         res.meta = getMetaMap_();
       }
-      if (res && res.appointment) scheduleExactReminderForApt_(res.appointment);
+      if (res && res.appointment && res.needsTriggerSync) scheduleExactReminderForApt_(res.appointment);
       return json_({ ok: true, data: res });
     });
     if (a === 'delete') return withLock_(function () {
@@ -268,40 +293,43 @@ function fmtThaiDate_(d) {
 function readAllUsersInternal_() {
   var d = getSheetData_(SH_USERS, USER_COLS);
   return d.rows.reduce(function (arr, r, idx) {
-    var o = { _rowIndex: idx + 2 };
+    var o = { _rowIndex: idx + 2, _headers: d.headers, _sh: d.sh };
     d.headers.forEach(function (h, i) { o[h] = String(r[i] || '').trim(); });
     if (o.userId && o.username) arr.push(o);
     return arr;
   }, []);
 }
 
+function toPublicUser_(u) {
+  return {
+    userId: u.userId, username: u.username, displayName: sanitizeNoEmoji(u.displayName || u.username),
+    role: u.role === 'ADMIN' ? 'ADMIN' : 'STAFF', isActive: String(u.isActive).toUpperCase() !== 'FALSE',
+    createdAt: u.createdAt, lastLoginAt: u.lastLoginAt
+  };
+}
+
 function readPublicUsers_() {
-  return readAllUsersInternal_().map(function (u) {
-    return {
-      userId: u.userId, username: u.username, displayName: sanitizeNoEmoji(u.displayName || u.username),
-      role: u.role === 'ADMIN' ? 'ADMIN' : 'STAFF', isActive: String(u.isActive).toUpperCase() !== 'FALSE',
-      createdAt: u.createdAt, lastLoginAt: u.lastLoginAt
-    };
-  });
+  return readAllUsersInternal_().map(toPublicUser_);
 }
 
 function handleUserLogin_(username, password) {
   var un = sanitizeNoEmoji(username || '').toLowerCase(), pw = String(password || '');
   if (!un || !pw) throw new Error('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');
-  var users = readAllUsersInternal_(), targetUser = null, targetRow = -1;
+  var users = readAllUsersInternal_(), targetUser = null;
   for (var i = 0; i < users.length; i++) {
-    if (users[i].username.toLowerCase() === un) { targetUser = users[i]; targetRow = users[i]._rowIndex; break; }
+    if (users[i].username.toLowerCase() === un) { targetUser = users[i]; break; }
   }
   if (!targetUser) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้');
   if (String(targetUser.isActive).toUpperCase() === 'FALSE') throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
   if (targetUser.passwordHash !== hashPassword_(pw)) throw new Error('รหัสผ่านไม่ถูกต้อง');
 
-  var nowIso = getBkkNow_().isoStr, sh = ensureSheet_(getSs_(), SH_USERS, USER_COLS);
-  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getDisplayValues()[0];
-  var colIdx = headers.indexOf('lastLoginAt') + 1;
-  if (colIdx > 0 && targetRow > 1) sh.getRange(targetRow, colIdx).setValue(nowIso);
+  var nowIso = getBkkNow_().isoStr, colIdx = (targetUser._headers || USER_COLS).indexOf('lastLoginAt') + 1;
+  if (colIdx > 0 && targetUser._rowIndex > 1 && targetUser._sh) targetUser._sh.getRange(targetUser._rowIndex, colIdx).setValue(nowIso);
+  targetUser.lastLoginAt = nowIso;
 
-  return { user: { userId: targetUser.userId, username: targetUser.username, displayName: sanitizeNoEmoji(targetUser.displayName || targetUser.username), role: targetUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF' } };
+  var bundle = buildSyncBundle_(users.map(toPublicUser_));
+  bundle.user = { userId: targetUser.userId, username: targetUser.username, displayName: sanitizeNoEmoji(targetUser.displayName || targetUser.username), role: targetUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF' };
+  return bundle;
 }
 
 function handleUserRegister_(payload) {
@@ -335,9 +363,10 @@ function handleUserRegister_(payload) {
     if (h === 'createdAt' || h === 'lastLoginAt') return nowIso;
     return '';
   });
-  d.sh.appendRow(newRow);
-  d.sh.getRange(d.sh.getLastRow(), 1, 1, headers.length).setNumberFormat('@');
-  return { user: { userId: newId, username: un, displayName: disp, role: 'STAFF' }, users: readPublicUsers_() };
+  appendPlainRow_(d.sh, newRow, rows.length + 1);
+  var bundle = buildSyncBundle_(readPublicUsers_());
+  bundle.user = { userId: newId, username: un, displayName: disp, role: 'STAFF' };
+  return bundle;
 }
 
 function saveUser_(payload) {
@@ -399,8 +428,7 @@ function saveUser_(payload) {
       if (h === 'createdAt') return nowIso;
       return '';
     });
-    d.sh.appendRow(newRow);
-    d.sh.getRange(d.sh.getLastRow(), 1, 1, headers.length).setNumberFormat('@');
+    appendPlainRow_(d.sh, newRow, rows.length + 1);
     return { userId: newId, username: un, displayName: disp, role: role, isActive: isActive === 'TRUE' };
   }
 }
@@ -440,7 +468,11 @@ function readAllApts_(includeDeleted) {
 
 function createApt_(inp) {
   var d = getSheetData_(SH_APTS, APT_COLS), now = getBkkNow_(), pfx = 'APT-' + now.dateStr.replace(/-/g, '') + '-';
-  var max = readAllApts_(true).reduce(function (m, x) { return x.id && x.id.indexOf(pfx) === 0 ? Math.max(m, +x.id.slice(pfx.length) || 0) : m; }, 0);
+  var idIdx = Math.max(0, d.headers.indexOf('id'));
+  var max = d.rows.reduce(function (m, r) {
+    var rid = String(r[idIdx] || '').trim();
+    return rid.indexOf(pfx) === 0 ? Math.max(m, +rid.slice(pfx.length) || 0) : m;
+  }, 0);
   var creator = sanitizeNoEmoji(inp.createdBy || inp.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ';
   var st = normalizeStatus_(inp.status);
   var rec = {
@@ -454,8 +486,7 @@ function createApt_(inp) {
   };
   validateApt_(rec);
   var rowVals = d.headers.map(function (c) { return rec[c] !== undefined ? String(rec[c]) : ''; });
-  d.sh.appendRow(rowVals);
-  d.sh.getRange(d.sh.getLastRow(), 1, 1, d.headers.length).setNumberFormat('@');
+  appendPlainRow_(d.sh, rowVals, d.rows.length + 1);
   return rec;
 }
 
@@ -518,7 +549,7 @@ function updateApt_(id, patch, expUpdated, reason, currentUser) {
 
   var updatedVals = headers.map(function (c) { return String(up[c] !== undefined ? up[c] : ''); });
   d.sh.getRange(targetRow, 1, 1, headers.length).setNumberFormat('@').setValues([updatedVals]);
-  return { appointment: up, logs: logs };
+  return { appointment: up, logs: logs, needsTriggerSync: Boolean(dChg || tChg || rHChg || statusChanged) };
 }
 
 function deleteApt_(id, user) {
@@ -531,7 +562,7 @@ function deleteApt_(id, user) {
         removed = {}; headers.forEach(function (c, i) { removed[c] = String(rows[r][i] || '').trim(); });
         var lSh = ensureSheet_(getSs_(), SH_RE_LOGS, RE_LOG_COLS);
         var le = { logId: 'LOG-' + now.epochMs + '-DEL', appointmentId: id, changedAt: now.isoStr, changedBy: sanitizeNoEmoji(user || 'ผู้ใช้งานระบบ'), fieldChanged: 'DELETED', oldValue: removed.title || '-', newValue: 'ลบนัดหมาย', reason: 'ลบออกจากระบบ' };
-        lSh.appendRow(RE_LOG_COLS.map(function (c) { return le[c]; }));
+        appendPlainRow_(lSh, RE_LOG_COLS.map(function (c) { return le[c]; }));
       }
       d.sh.deleteRow(r + 2);
     }
@@ -545,23 +576,26 @@ function validateApt_(r) {
 }
 
 function getMetaMap_() {
+  if (_metaCache) return _metaCache;
   var d = getSheetData_(SH_META, META_COLS);
-  return d.rows.reduce(function (m, r) { if (r[0]) m[String(r[0]).trim()] = String(r[1] || '').trim(); return m; }, {});
+  _metaCache = d.rows.reduce(function (m, r) { if (r[0]) m[String(r[0]).trim()] = String(r[1] || '').trim(); return m; }, {});
+  return _metaCache;
 }
 
 function updateMeta_(obj) {
-  var d = getSheetData_(SH_META, META_COLS), now = getBkkNow_().isoStr;
-  var keyMap = {};
+  var d = getSheetData_(SH_META, META_COLS), now = getBkkNow_().isoStr, m = getMetaMap_(), keyMap = {};
   for (var i = 0; i < d.rows.length; i++) {
     var k = String(d.rows[i][0]).trim();
     if (k) keyMap[k] = i + 2;
   }
+  var nextRow = d.rows.length + 1;
   Object.keys(obj || {}).forEach(function (k) {
     var v = sanitizeNoEmoji(obj[k]);
+    m[k] = v;
     if (keyMap[k]) d.sh.getRange(keyMap[k], 2, 1, 2).setNumberFormat('@').setValues([[v, now]]);
-    else d.sh.appendRow([k, v, now]);
+    else { appendPlainRow_(d.sh, [k, v, now], nextRow); keyMap[k] = ++nextRow; }
   });
-  return getMetaMap_();
+  return m;
 }
 
 function readLogs_(name, cols, lim) {
@@ -646,51 +680,233 @@ function fmtAptLine_(a, idx, mask) {
 }
 
 // LINE API & Webhook
-function pushLine_(target, text, retryKey, isDry, type, aptIds) {
+function pushLine_(target, msg, retryKey, isDry, type, aptIds) {
   var token = PropertiesService.getScriptProperties().getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '', now = getBkkNow_().isoStr;
   if (!token) return { ok: false, error: 'ไม่มี Token' };
   var url = isDry ? 'https://api.line.me/v2/bot/message/validate/push' : 'https://api.line.me/v2/bot/message/push';
-  var payload = isDry ? { messages: [{ type: 'text', text: sanitizeNoEmoji(text) }] } : { to: target, messages: [{ type: 'text', text: sanitizeNoEmoji(text) }] };
+  var msgObj = (typeof msg === 'object' && msg !== null) ? msg : { type: 'text', text: sanitizeNoEmoji(msg) };
+  var payload = isDry ? { messages: [msgObj] } : { to: target, messages: [msgObj] };
   var hdrs = { 'Authorization': 'Bearer ' + token }; if (!isDry && retryKey) hdrs['X-Line-Retry-Key'] = retryKey;
 
   var res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', headers: hdrs, payload: JSON.stringify(payload), muteHttpExceptions: true });
   var code = res.getResponseCode(), ok = code >= 200 && code < 300;
-  ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS).appendRow(['NLOG-' + Date.now(), now, type || 'PUSH', aptIds || '-', target || '-', String(code), retryKey || '-', ok ? '' : res.getContentText()]);
+  appendPlainRow_(ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS), ['NLOG-' + Date.now(), now, type || 'PUSH', aptIds || '-', target || '-', String(code), retryKey || '-', ok ? '' : res.getContentText()]);
   return { ok: ok, httpStatus: code, error: ok ? null : res.getContentText() };
+}
+
+function sendLineReply_(replyToken, msg, props) {
+  var token = (props || PropertiesService.getScriptProperties()).getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '';
+  if (!token || !replyToken) return;
+  var msgObj = (typeof msg === 'object' && msg !== null) ? msg : { type: 'text', text: sanitizeNoEmoji(msg) };
+  UrlFetchApp.fetch('https://api.line.me/v2/bot/message/reply', {
+    method: 'post', contentType: 'application/json', headers: { 'Authorization': 'Bearer ' + token },
+    payload: JSON.stringify({ replyToken: replyToken, messages: [msgObj] }), muteHttpExceptions: true
+  });
+}
+
+function getLineUserName_(gid, uid, token) {
+  if (!token || !uid) return 'สมาชิก LINE';
+  try {
+    var url = gid ? ('https://api.line.me/v2/bot/group/' + gid + '/member/' + uid) : ('https://api.line.me/v2/bot/profile/' + uid);
+    var res = UrlFetchApp.fetch(url, { headers: { 'Authorization': 'Bearer ' + token }, muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) {
+      var data = JSON.parse(res.getContentText());
+      if (data && data.displayName) return sanitizeNoEmoji(data.displayName);
+    }
+  } catch (_) {}
+  return 'สมาชิก LINE';
+}
+
+function parseQueryString_(qs) {
+  var obj = {}, pairs = String(qs || '').split('&');
+  for (var i = 0; i < pairs.length; i++) {
+    var p = pairs[i].split('=');
+    if (p.length === 2) obj[decodeURIComponent(p[0])] = decodeURIComponent(p[1]);
+  }
+  return obj;
+}
+
+function buildAptFlexMsg_(apt, isUpdate, maskContact, webAppUrl) {
+  var c = sanitizeNoEmoji(apt.contactPerson || '-');
+  if (maskContact && c.length > 2) c = c.slice(0, 2) + '***';
+  var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || 'ผู้ใช้งานระบบ');
+  var st = normalizeStatus_(apt.status);
+
+  var hdrText = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
+  var stColor = '#4f46e5';
+  if (st === STATUS.COMPLETED) { hdrText = '[แจ้งเตือนสิ้นสุดการนัดหมาย]'; stColor = '#10b981'; }
+  else if (st === STATUS.CANCELLED) { hdrText = '[แจ้งเตือนยกเลิกการนัดหมาย]'; stColor = '#ef4444'; }
+  else if (isUpdate && apt.reopened) { hdrText = '[แจ้งเตือนการคืนสถานะนัดหมาย]'; stColor = '#4f46e5'; }
+
+  var infoRows = [
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'วันนัด', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: fmtThaiDate_(apt.appointmentDate), size: 'sm', flex: 5, weight: 'bold', color: '#1e293b' }
+    ]},
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'เวลา', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: (apt.appointmentTime || '-') + ' น.', size: 'sm', flex: 5, weight: 'bold', color: '#1e293b' }
+    ]},
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'สถานที่', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: sanitizeNoEmoji(apt.location || '-'), size: 'sm', flex: 5, wrap: true, color: '#334155' }
+    ]},
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'ผู้นัดพบ', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: c, size: 'sm', flex: 5, wrap: true, color: '#334155' }
+    ]},
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'สถานะ', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: '[' + st + ']', size: 'sm', flex: 5, weight: 'bold', color: stColor }
+    ]},
+    { type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+      { type: 'text', text: 'ผู้สร้าง', color: '#64748b', size: 'sm', flex: 2 },
+      { type: 'text', text: creator, size: 'sm', flex: 5, color: '#64748b' }
+    ]}
+  ];
+
+  if (st === STATUS.COMPLETED && apt.statusChangedBy) {
+    infoRows.push({
+      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+        { type: 'text', text: 'ผู้เสร็จสิ้น', color: '#64748b', size: 'sm', flex: 2 },
+        { type: 'text', text: sanitizeNoEmoji(apt.statusChangedBy), size: 'sm', flex: 5, weight: 'bold', color: '#10b981' }
+      ]
+    });
+  } else if (st === STATUS.CANCELLED) {
+    if (apt.statusChangedBy) {
+      infoRows.push({
+        type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+          { type: 'text', text: 'ผู้ยกเลิก', color: '#64748b', size: 'sm', flex: 2 },
+          { type: 'text', text: sanitizeNoEmoji(apt.statusChangedBy), size: 'sm', flex: 5, weight: 'bold', color: '#ef4444' }
+        ]
+      });
+    }
+    if (apt.statusReason) {
+      infoRows.push({
+        type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+          { type: 'text', text: 'สาเหตุ', color: '#64748b', size: 'sm', flex: 2 },
+          { type: 'text', text: sanitizeNoEmoji(apt.statusReason), size: 'sm', flex: 5, wrap: true, color: '#ef4444' }
+        ]
+      });
+    }
+  } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) {
+    infoRows.push({
+      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+        { type: 'text', text: 'ผู้แก้ไข', color: '#64748b', size: 'sm', flex: 2 },
+        { type: 'text', text: sanitizeNoEmoji(apt.updatedBy), size: 'sm', flex: 5, color: '#64748b' }
+      ]
+    });
+  }
+
+  if (apt.notes) {
+    infoRows.push({
+      type: 'box', layout: 'baseline', spacing: 'sm', contents: [
+        { type: 'text', text: 'หมายเหตุ', color: '#64748b', size: 'sm', flex: 2 },
+        { type: 'text', text: sanitizeNoEmoji(apt.notes), size: 'sm', flex: 5, wrap: true, color: '#475569' }
+      ]
+    });
+  }
+
+  var bubble = {
+    type: 'bubble',
+    size: 'mega',
+    header: {
+      type: 'box',
+      layout: 'vertical',
+      paddingBottom: 'none',
+      contents: [
+        { type: 'text', text: hdrText, weight: 'bold', color: stColor, size: 'sm' },
+        { type: 'text', text: sanitizeNoEmoji(apt.id || '-'), size: 'xs', color: '#64748b', margin: 'xs' }
+      ]
+    },
+    body: {
+      type: 'box',
+      layout: 'vertical',
+      spacing: 'md',
+      contents: [
+        { type: 'text', text: sanitizeNoEmoji(apt.title || '-'), weight: 'bold', size: 'md', wrap: true, color: '#0f172a' },
+        { type: 'separator', color: '#e2e8f0' },
+        { type: 'box', layout: 'vertical', spacing: 'sm', contents: infoRows }
+      ]
+    }
+  };
+
+  if (st === STATUS.CONFIRMED) {
+    bubble.footer = {
+      type: 'box',
+      layout: 'horizontal',
+      spacing: 'md',
+      paddingTop: 'sm',
+      contents: [
+        {
+          type: 'button',
+          style: 'primary',
+          color: '#10b981',
+          height: 'sm',
+          action: {
+            type: 'postback',
+            label: 'เสร็จสิ้น',
+            data: 'action=quickComplete&id=' + encodeURIComponent(apt.id),
+            displayText: 'บันทึกเสร็จสิ้น [' + apt.id + ']'
+          }
+        },
+        {
+          type: 'button',
+          style: 'secondary',
+          color: '#ef4444',
+          height: 'sm',
+          action: {
+            type: 'postback',
+            label: 'ยกเลิก',
+            data: 'action=quickCancel&id=' + encodeURIComponent(apt.id),
+            displayText: 'ขอยกเลิกนัดหมาย [' + apt.id + ']'
+          }
+        }
+      ]
+    };
+  }
+
+  var altText = hdrText + ' [' + (apt.id || '') + '] ' + sanitizeNoEmoji(apt.title || '');
+  return {
+    type: 'flex',
+    altText: altText.slice(0, 400),
+    contents: bubble
+  };
 }
 
 function testNotification_(isDry, custom) {
   var t = PropertiesService.getScriptProperties().getProperty('LINE_TARGET_ID') || '';
-  return pushLine_(t, custom || '[ทดสอบระบบแจ้งเตือน]\nตรวจสอบรูปแบบสำเร็จ (Zero-Emoji)', Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
+  if (custom) {
+    return pushLine_(t, custom, Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
+  }
+  var sampleApt = {
+    id: 'APT-TEST-001',
+    title: 'ทดสอบระบบแจ้งเตือนแบบโต้ตอบ (Zero-Emoji)',
+    appointmentDate: getBkkNow_().dateStr,
+    appointmentTime: '14:00',
+    location: 'ห้องประชุมใหญ่ ชั้น 5',
+    contactPerson: 'คุณทดสอบ',
+    status: STATUS.CONFIRMED,
+    createdBy: 'ผู้ดูแลระบบ',
+    notes: 'ทดสอบปุ่มเสร็จสิ้นและยกเลิกบน LINE Flex Message'
+  };
+  var flex = buildAptFlexMsg_(sampleApt, false, false, '');
+  return pushLine_(t, flex, Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
 }
 
 function sendInstantAptNotification_(apt, isUpdate) {
   var target = PropertiesService.getScriptProperties().getProperty('LINE_TARGET_ID') || '';
   if (!target || !apt) return { sent: false, reason: 'NO_TARGET' };
   var m = getMetaMap_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
-  var c = sanitizeNoEmoji(apt.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***';
 
-  var hdr = isUpdate ? '[แจ้งเตือนการอัปเดตนัดหมาย]' : '[แจ้งเตือนนัดหมายใหม่]';
   var notifType = isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE';
   var st = normalizeStatus_(apt.status);
-  if (st === STATUS.COMPLETED) { hdr = '[แจ้งเตือนสิ้นสุดการนัดหมาย]'; notifType = 'INSTANT_COMPLETED'; }
-  else if (st === STATUS.CANCELLED) { hdr = '[แจ้งเตือนยกเลิกการนัดหมาย]'; notifType = 'INSTANT_CANCELLED'; }
-  else if (isUpdate && apt.reopened) { hdr = '[แจ้งเตือนการคืนสถานะนัดหมาย]'; notifType = 'INSTANT_REOPEN'; }
+  if (st === STATUS.COMPLETED) notifType = 'INSTANT_COMPLETED';
+  else if (st === STATUS.CANCELLED) notifType = 'INSTANT_CANCELLED';
+  else if (isUpdate && apt.reopened) notifType = 'INSTANT_REOPEN';
 
-  var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || '-');
-  var lines = [
-    hdr, 'รหัส: ' + sanitizeNoEmoji(apt.id || '-'), 'หัวข้อ: ' + sanitizeNoEmoji(apt.title || '-'),
-    'วันนัด: ' + fmtThaiDate_(apt.appointmentDate) + ' เวลา ' + sanitizeNoEmoji(apt.appointmentTime || '-') + ' น.',
-    'สถานที่: ' + sanitizeNoEmoji(apt.location || '-'), 'ผู้นัดพบ: ' + c, 'สถานะ: [' + sanitizeNoEmoji(apt.status) + ']', 'ผู้สร้างนัดหมาย: ' + creator
-  ];
-  if (st === STATUS.COMPLETED && apt.statusChangedBy) lines.push('ผู้ยืนยันเสร็จสิ้น: ' + sanitizeNoEmoji(apt.statusChangedBy));
-  else if (st === STATUS.CANCELLED) {
-    if (apt.statusChangedBy) lines.push('ผู้ยกเลิกนัด: ' + sanitizeNoEmoji(apt.statusChangedBy));
-    if (apt.statusReason) lines.push('สาเหตุการยกเลิก: ' + sanitizeNoEmoji(apt.statusReason));
-  } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) lines.push('ผู้แก้ไขล่าสุด: ' + sanitizeNoEmoji(apt.updatedBy));
-  if (apt.notes) lines.push('หมายเหตุ: ' + sanitizeNoEmoji(apt.notes));
-
-  var pushRes = pushLine_(target, sanitizeNoEmoji(lines.join('\n')), Utilities.getUuid(), false, notifType, apt.id);
+  var flexMsg = buildAptFlexMsg_(apt, isUpdate, mask, m.WEB_APP_URL || '');
+  var pushRes = pushLine_(target, flexMsg, Utilities.getUuid(), false, notifType, apt.id);
   if (pushRes.ok) {
     var curUsed = +m.CACHED_QUOTA_USED || 0;
     updateMeta_({ CACHED_QUOTA_USED: String(curUsed + 1) });
@@ -713,6 +929,67 @@ function refreshLineQuotaCache_() {
   } catch (e) { return { limit: lim, used: used, error: e.message }; }
 }
 
+function handleLinePostback_(ev, gid, uid, props) {
+  var pbData = parseQueryString_((ev && ev.postback && ev.postback.data) || '');
+  var action = pbData.action || '', id = pbData.id || '';
+  if (!id) return '[ข้อผิดพลาด] ไม่พบรหัสนัดหมาย';
+
+  return withLock_(function () {
+    var apts = readAllApts_(false), targetApt = null;
+    for (var i = 0; i < apts.length; i++) {
+      if (apts[i].id === id) { targetApt = apts[i]; break; }
+    }
+    if (!targetApt) return '[แจ้งเตือน] ไม่พบรายการนัดหมาย ' + id + ' ในระบบ (อาจถูกลบไปแล้ว)';
+
+    var curSt = normalizeStatus_(targetApt.status);
+    if (curSt === STATUS.COMPLETED) {
+      return '[แจ้งเตือน] นัดหมาย [' + id + '] นี้ได้ถูกบันทึกเสร็จสิ้นไปแล้วโดย ' + (targetApt.statusChangedBy || 'ผู้ใช้งาน') + (targetApt.statusChangedAt ? ' เมื่อ ' + fmtThaiDate_(targetApt.statusChangedAt.slice(0, 10)) : '');
+    }
+    if (curSt === STATUS.CANCELLED) {
+      return '[แจ้งเตือน] นัดหมาย [' + id + '] นี้ได้ถูกยกเลิกไปแล้วโดย ' + (targetApt.statusChangedBy || 'ผู้ใช้งาน') + (targetApt.statusReason ? ' (' + targetApt.statusReason + ')' : '');
+    }
+
+    var token = props.getProperty('LINE_CHANNEL_ACCESS_TOKEN') || '';
+    var actingUser = getLineUserName_(gid, uid, token);
+
+    if (action === 'quickComplete') {
+      updateApt_(id, {
+        status: STATUS.COMPLETED,
+        statusChangedBy: actingUser,
+        statusReason: 'เสร็จสิ้นการนัดหมายผ่าน LINE',
+        updatedBy: actingUser
+      }, targetApt.updatedAt, 'เสร็จสิ้นผ่าน LINE', actingUser);
+
+      return '[บันทึกเสร็จสิ้นนัดหมายเรียบร้อย]\n' +
+        'รหัส: ' + id + '\n' +
+        'หัวข้อ: ' + sanitizeNoEmoji(targetApt.title) + '\n' +
+        'สถานะ: [' + STATUS.COMPLETED + ']\n' +
+        'ผู้ดำเนินการ: ' + actingUser + '\n' +
+        'เวลา: ' + getBkkNow_().timeStr + ' น.';
+    }
+
+    if (action === 'quickCancel') {
+      var cancelReason = 'ยกเลิกผ่าน LINE โดย ' + actingUser;
+      updateApt_(id, {
+        status: STATUS.CANCELLED,
+        statusChangedBy: actingUser,
+        statusReason: cancelReason,
+        updatedBy: actingUser
+      }, targetApt.updatedAt, cancelReason, actingUser);
+
+      return '[บันทึกยกเลิกนัดหมายเรียบร้อย]\n' +
+        'รหัส: ' + id + '\n' +
+        'หัวข้อ: ' + sanitizeNoEmoji(targetApt.title) + '\n' +
+        'สถานะ: [' + STATUS.CANCELLED + ']\n' +
+        'ผู้ยกเลิก: ' + actingUser + '\n' +
+        'สาเหตุ: ' + cancelReason + '\n' +
+        'เวลา: ' + getBkkNow_().timeStr + ' น.';
+    }
+
+    return null;
+  });
+}
+
 function handleLineWebhook_(body, qParams) {
   var props = PropertiesService.getScriptProperties(), expKey = props.getProperty('WEBHOOK_SECRET_KEY') || '';
   if (expKey && String(qParams.webhookKey || '') !== expKey) return json_({ ok: false, error: 'INVALID_KEY' });
@@ -726,18 +1003,25 @@ function handleLineWebhook_(body, qParams) {
     var src = ev.source || {}, gid = src.groupId || src.roomId || '', uid = src.userId || '';
 
     if (ev.type === 'join') {
-      ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS).appendRow(['NLOG-' + Date.now(), getBkkNow_().isoStr, 'JOIN', '-', gid || uid, '200', '-', 'พบ ID สำหรับตั้งค่า: ' + (gid || uid)]);
+      appendPlainRow_(ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS), ['NLOG-' + Date.now(), getBkkNow_().isoStr, 'JOIN', '-', gid || uid, '200', '-', 'พบ ID สำหรับตั้งค่า: ' + (gid || uid)]);
       return;
     }
+
+    if (ev.type === 'postback') {
+      if (grps.length && grps.indexOf(gid) === -1 && (!usrs.length || usrs.indexOf(uid) === -1)) return;
+      var pbReply = handleLinePostback_(ev, gid, uid, props);
+      if (pbReply && ev.replyToken) {
+        sendLineReply_(ev.replyToken, pbReply, props);
+      }
+      return;
+    }
+
     if (ev.type !== 'message' || !ev.message || ev.message.type !== 'text') return;
     if (grps.length && grps.indexOf(gid) === -1 && (!usrs.length || usrs.indexOf(uid) === -1)) return;
 
     var reply = parseWebhookCmd_(ev.message.text);
     if (reply && ev.replyToken) {
-      UrlFetchApp.fetch('https://api.line.me/v2/bot/message/reply', {
-        method: 'post', contentType: 'application/json', headers: { 'Authorization': 'Bearer ' + props.getProperty('LINE_CHANNEL_ACCESS_TOKEN') },
-        payload: JSON.stringify({ replyToken: ev.replyToken, messages: [{ type: 'text', text: sanitizeNoEmoji(reply) }] }), muteHttpExceptions: true
-      });
+      sendLineReply_(ev.replyToken, reply, props);
     }
   });
   return json_({ ok: true });

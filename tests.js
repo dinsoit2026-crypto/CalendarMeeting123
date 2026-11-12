@@ -214,12 +214,14 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 และ 2.5.0 ครบถ้วน', () => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0 และ 2.5.1 ครบถ้วน', () => {
     assert(Array.isArray(PatchNotes) && PatchNotes.length >= 7, 'ต้องมีประวัติอย่างน้อย 7 เวอร์ชัน');
     const v240 = PatchNotes.find(p => p.version === '2.4.0');
     const v250 = PatchNotes.find(p => p.version === '2.5.0');
+    const v251 = PatchNotes.find(p => p.version === '2.5.1');
     assert(v240 && v240.changes && v240.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.4.0');
     assert(v250 && v250.changes && v250.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.0');
+    assert(v251 && v251.changes && v251.changes.length > 0, 'ต้องมีบันทึกเวอร์ชัน 2.5.1');
     assert(!Logic.hasEmoji(JSON.stringify(PatchNotes)), 'ใน patchnotes.js ต้องไม่มีอิโมจิ');
   });
 
@@ -390,14 +392,16 @@
     });
 
     // --- Suite 13: GAS Backend & Performance Guard Audit ---
-    runTest('13. GAS Guard Audit', 'gas/Code.gs มีฟังก์ชันครบถ้วน และไม่เรียก formatPlainText_ ซ้ำซ้อนตอนอ่านข้อมูล', () => {
-      const fs = require('fs'), path = require('path');
+    runTest('13. GAS Guard Audit', 'gas/Code.gs มีฟังก์ชันครบถ้วน ไวยากรณ์ถูกต้อง และไม่เรียก formatPlainText_ ซ้ำซ้อนตอนอ่านข้อมูล', () => {
+      const fs = require('fs'), path = require('path'), vm = require('vm');
       const codeGs = fs.readFileSync(path.join(__dirname, 'gas', 'Code.gs'), 'utf8');
+      new vm.Script(codeGs, { filename: 'Code.gs' });
 
       const requiredFns = [
         'setupDatabase', 'installTriggerAuto', 'installTriggerEvery15Minutes', 'installTriggerDailyAt8AM',
         'removeNotificationTriggers', 'runNotificationEngine', 'doGet', 'doPost',
-        'readAllApts_', 'createApt_', 'updateApt_', 'deleteApt_', 'handleUserLogin_', 'handleUserRegister_', 'saveUser_'
+        'readAllApts_', 'createApt_', 'updateApt_', 'deleteApt_', 'handleUserLogin_', 'handleUserRegister_', 'saveUser_',
+        'buildSyncBundle_', 'appendPlainRow_', 'buildAptFlexMsg_', 'handleLinePostback_', 'sendLineReply_'
       ];
       requiredFns.forEach(fn => {
         assert(codeGs.includes(`function ${fn}`), `Code.gs ต้องมีฟังก์ชัน ${fn}`);
@@ -406,6 +410,75 @@
       // ตรวจสอบ Performance Guard: ตอนอ่านชีตปกติ (getSheetData_) ต้องไม่มีคำสั่ง formatPlainText_
       const getSheetDataDef = codeGs.substring(codeGs.indexOf('function getSheetData_'), codeGs.indexOf('function setupDatabase'));
       assert(!getSheetDataDef.includes('formatPlainText_'), 'getSheetData_ ต้องไม่มีการเรียก formatPlainText_ ซ้ำซ้อน');
+
+      // ตรวจสอบว่า createApt_ ไม่เรียก readAllApts_ ซ้ำซ้อน
+      const createAptDef = codeGs.substring(codeGs.indexOf('function createApt_'), codeGs.indexOf('function updateApt_'));
+      assert(!createAptDef.includes('readAllApts_'), 'createApt_ ต้องคำนวณรหัสจาก d.rows โดยไม่อ่านชีตซ้ำผ่าน readAllApts_');
+
+      // ตรวจสอบระบบแคช _metaCache และการซิงก์ Trigger เฉพาะเมื่อจำเป็น (needsTriggerSync)
+      assert(codeGs.includes('_metaCache'), 'Code.gs ต้องมีระบบแคช _metaCache ระดับคำขอ');
+      assert(codeGs.includes('needsTriggerSync'), 'updateApt_ และ doPost ต้องตรวจสอบ needsTriggerSync ก่อนเรียก Trigger');
+    });
+
+    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI (pendingIds, setBgSync, applySyncBundle) ครบถ้วน', () => {
+      const fs = require('fs'), path = require('path'), vm = require('vm');
+      const appJs = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+      new vm.Script(appJs, { filename: 'app.js' });
+      assert(appJs.includes('pendingIds'), 'app.js ต้องมีตัวล็อกรายการระหว่างซิงก์ (pendingIds)');
+      assert(appJs.includes('setBgSync'), 'app.js ต้องมีตัวแสดงสถานะซิงก์เบื้องหลัง (setBgSync)');
+      assert(appJs.includes('applySyncBundle'), 'app.js ต้องรองรับการรับข้อมูลชุดเริ่มต้นในรอบเดียว (applySyncBundle)');
+    });
+
+    runTest('13. GAS Guard Audit', 'LINE Flex Message และ Postback Action ทำงานถูกต้องและปราศจากอิโมจิ', () => {
+      const fs = require('fs'), path = require('path'), vm = require('vm');
+      const codeGs = fs.readFileSync(path.join(__dirname, 'gas', 'Code.gs'), 'utf8');
+
+      const sandbox = {
+        STATUS: Logic.STATUS,
+        normalizeStatus_: Logic.normalizeStatus,
+        sanitizeNoEmoji: Logic.sanitizeNoEmoji,
+        fmtThaiDate_: (d) => Logic.formatThaiDateDisplay(d, false)
+      };
+      vm.createContext(sandbox);
+      const codeToRun = codeGs.substring(codeGs.indexOf('function parseQueryString_'), codeGs.indexOf('function testNotification_'));
+      vm.runInContext(codeToRun, sandbox);
+
+      const apt = {
+        id: 'APT-20261112-001',
+        title: 'ประชุมตรวจรับงานระบบ',
+        appointmentDate: '2026-11-20',
+        appointmentTime: '10:00',
+        location: 'ห้องประชุม A',
+        contactPerson: 'คุณสมชาย',
+        status: Logic.STATUS.CONFIRMED,
+        createdBy: 'คุณวิภาดา'
+      };
+
+      const flex = sandbox.buildAptFlexMsg_(apt, false, false, '');
+      assert(flex && flex.type === 'flex', 'ต้องคืนค่าข้อความชนิด flex');
+      assert(flex.contents && flex.contents.type === 'bubble', 'container ต้องเป็น bubble');
+      assert(flex.contents.footer && flex.contents.footer.contents.length === 2, 'นัดสถานะ CONFIRMED ต้องมี 2 ปุ่มใน footer');
+
+      const btnComp = flex.contents.footer.contents[0];
+      const btnCanc = flex.contents.footer.contents[1];
+      assertEqual(btnComp.action.type, 'postback', 'ปุ่มเสร็จสิ้นต้องเป็น postback action');
+      assert(btnComp.action.data.includes('action=quickComplete'), 'postback data ต้องมี action=quickComplete');
+      assertEqual(btnCanc.action.type, 'postback', 'ปุ่มยกเลิกต้องเป็น postback action');
+      assert(btnCanc.action.data.includes('action=quickCancel'), 'postback data ต้องมี action=quickCancel');
+
+      const parsedComp = sandbox.parseQueryString_(btnComp.action.data);
+      assertEqual(parsedComp.action, 'quickComplete', 'ถอดรหัส action=quickComplete ถูกต้อง');
+      assertEqual(parsedComp.id, 'APT-20261112-001', 'ถอดรหัส id ถูกต้อง');
+
+      const parsedCanc = sandbox.parseQueryString_(btnCanc.action.data);
+      assertEqual(parsedCanc.action, 'quickCancel', 'ถอดรหัส action=quickCancel ถูกต้อง');
+      assertEqual(parsedCanc.id, 'APT-20261112-001', 'ถอดรหัส id ถูกต้อง');
+
+      assert(!Logic.hasEmoji(JSON.stringify(flex)), 'Flex Message ต้องไม่มีอิโมจิ');
+
+      const aptDone = { ...apt, status: Logic.STATUS.COMPLETED, statusChangedBy: 'คุณสมชาย' };
+      const flexDone = sandbox.buildAptFlexMsg_(aptDone, true, false, '');
+      assert(!flexDone.contents.footer, 'นัดที่เสร็จสิ้นแล้วต้องไม่มีปุ่มใน footer');
     });
   }
 
