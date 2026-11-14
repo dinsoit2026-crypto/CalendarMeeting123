@@ -4,6 +4,40 @@
 
 ---
 
+## เวอร์ชัน 2.6.1 (14 พฤศจิกายน 2569) - Low-Latency Caching, Parallel LINE API & Codebase Compaction
+> **จุดเด่น:** ขจัดอาการหน่วง 1-2 วินาทีในการทำรายการบนเว็บแอปและ LINE Bot ด้วย Cache ระดับ Request/Browser/LINE Profile, เรียก API โควตาแบบขนาน, Smart Trigger Fast-Skip และกระชับโค้ดทั้งโปรเจกต์โดยคงฟีเจอร์ 100%
+
+### 1. ลดความหน่วงฝั่ง Google Apps Script (`gas/Code.gs`)
+- **Request-Level Sheet & Properties Cache (`_dataCache`, `_propsCache`):** อ่านชีตและ ScriptProperties สูงสุด 1 ครั้งต่อ Request พร้อมล้างแคชเฉพาะชีตที่ถูกเขียน (`invalidateSheetCache_`) และอัปเดตเฉพาะคีย์ที่เปลี่ยนใน `updateMeta_`
+- **LINE Profile Cache (`LN_U_*`, TTL 6 ชั่วโมง):** แคชชื่อโปรไฟล์ LINE ใน `CacheService` เพื่อตัด HTTP roundtrip เมื่อสมาชิกในกลุ่มกดปุ่ม `quickComplete` / `quickCancel`
+- **Parallel Quota Fetch (`UrlFetchApp.fetchAll`):** ดึงค่า `quota` และ `consumption` พร้อมกันแบบขนาน และใน `runNotificationEngine()` ใช้ยอดโควตาที่แคชไว้บวกเพิ่มทีละ 1 แทนการยิง HTTP ก่อน/หลังส่งข้อความ
+- **Smart Trigger Sync Fast-Skip & 2-Col Slot Write:** ข้ามการเรียก `ScriptApp.getProjectTriggers()` เมื่อไม่จำเป็น และอัปเดตคอลัมน์ `notifiedDayForSlot`/`notifiedHourForSlot` แบบ 2 คอลัมน์ติดกันเมื่อเป็นไปได้
+
+### 2. ลดความหน่วงฝั่ง Frontend Web App (`app.js`)
+- **Instant Startup Live Cache (`CAL_LIVE_CACHE_V2`):** แสดงรายการนัดหมายล่าสุดทันทีใน `< 20ms` เมื่อรีเฟรชหรือเปิดหน้าเว็บ พร้อมซิงก์ข้อมูลล่าสุดกับ Google Sheets ในเบื้องหลัง (ล้างแคชอัตโนมัติเมื่อออกจากระบบ)
+- **Lazy Active-Tab Rendering (`renderActiveTab`):** วาด DOM เฉพาะแท็บที่ผู้ใช้เปิดใช้งานอยู่ แทนการ re-render ทุกแท็บในทุกรอบ mutation, คำนวณ `nowBkk` ครั้งเดียวต่อการเรนเดอร์รายการการ์ด และใช้ `requestAnimationFrame` สำหรับช่องค้นหา
+- **Zero-Redraw Reconciliation & `runBgTask`:** ข้ามการวาด DOM ซ้ำหลัง background sync ตอบกลับหากข้อมูลบนการ์ดตรงกับ Optimistic UI แล้ว
+
+### 3. กระชับโค้ดทั้งระบบ (Codebase Compaction)
+- กระชับโครงสร้างโค้ดใน `gas/Code.gs`, `app.js`, `logic.js`, `style.css`, `index.html`, และ `tests.js` โดยคง API Contract ครบ 43 รายการ, DOM IDs ครบถ้วน และผ่านชุดทดสอบ Zero-Emoji Policy ทั้ง 24 รายการ
+
+---
+
+## เวอร์ชัน 2.6.0 (14 พฤศจิกายน 2569) - Executive Indigo-Slate UI & Unified LINE Flex Notifications
+> **จุดเด่น:** ยกระดับหน้าเว็บและมือถือด้วยธีม Executive Indigo-Slate แยกสีแบรนด์/สถานะชัดเจน จัดระเบียบแถบ Header, โควตา LINE และแท็บคิวงานบนมือถือ พร้อมอัปเกรดป็อปอัพและข้อความแจ้งเตือน LINE Bot ทั้งหมดเป็น Flex Card แนวทางเดียวกัน
+
+### 1. ธีมสี Executive Indigo-Slate และการแสดงผลบนมือถือ (Responsive Web & Mobile UI)
+- **แยกสีแบรนด์ออกจากสีสถานะ:** ใช้ Royal Indigo (`#4f46e5`) เป็นสีหลักของปุ่มและตัวกระทำหลัก (CTA), Cyan/Sky (`#0284c7`) สำหรับสถานะนัดหมายแล้ว, Emerald (`#10b981`) สำหรับงานเสร็จสิ้น, Rose/Crimson (`#f43f5e`) สำหรับงานยกเลิก และ Red (`#ef4444`) / Amber (`#f59e0b`) สำหรับงานเลยกำหนดและแจ้งเตือนเร่งด่วน
+- **Top Header & LINE Quota Strip บนมือถือ (`<= 768px`):** จัดแถบ Header เป็น 2 แถวสะอาดตา ซ่อนรายละเอียดรองบนจอเล็ก คงปุ่มหลักครบถ้วน และจัดแถบโควตา LINE + Trigger Status ให้เรียงบรรทัดเดียวอ่านง่าย พร้อมสีแถบโควตาแบบ Traffic-Light (เขียว 0-79%, เหลืองอำพัน 80-89%, แดง 90%+)
+- **จัดระเบียบหน้า "คิวงาน" (`#tabList`):** KPI Summary Grid แบบ 1+2+2 บนมือถือ, แถบ Quick-Range Chips เลื่อนแนวนอนบนจอเล็ก, จัดกลุ่มรายการคิวงานแยกหัวข้อ (`งานเลยกำหนดเวลา`, `นัดหมายวันนี้`, `นัดหมายพรุ่งนี้`, `กำลังจะมาถึง`, `ประวัติงานที่ปิดหรือยกเลิกแล้ว`), และไฮไลต์ขอบแดงอ่อนสำหรับงานเลยกำหนด
+
+### 2. ยกระดับ LINE Bot Popups และระบบแจ้งเตือนอัตโนมัติเป็น Flex Message แนวทางเดียวกัน
+- **ระบบแจ้งเตือนรอบเช้าและก่อนเวลานัด (Hourly Reminder & Daily Digest):** เปลี่ยนจากข้อความล้วน (`fmtAptLine_`) เป็น Flex Message แบบ Bubble เดี่ยว หรือ Carousel (รองรับสูงสุด 9 บับเบิลรายตัว + 1 บับเบิลสรุปรวม = สูงสุด 10 บับเบิล เพื่อส่งได้ในโควตา Push เพียง 1 ครั้ง) พร้อมปุ่ม 1-Click Action บนการ์ดเตือนทันที
+- **ป็อปอัพแจ้งเตือนทันที (`buildAptFlexMsg_` / `buildAptBubble_`):** เพิ่มแถบสีพื้นหลังส่วนหัวการ์ด (`styles.header.backgroundColor`) แยกชัดเจนระหว่างงานใหม่, อัปเดต (ส่ง flag `reopened` เมื่อคืนสถานะจาก `updateApt_`), เสร็จสิ้น และยกเลิก พร้อมปรับปุ่ม "ยกเลิก" เป็นสีแดงทึบ และเพิ่มปุ่มเปิดดูรายละเอียดบนเว็บแอปเมื่อตั้งค่า `WEB_APP_URL`
+- **การ์ดคำสั่งคิวงาน (`buildQueueFlex_`) และโควตา (`buildQuotaFlex_`):** แสดงวันที่, เวลา, ป้ายสถานะ `[...]` และแถบสีด้านซ้ายแยกสีตามสถานะในทุกรายการ, รองรับโทนสีแดงเฉพาะคำสั่ง `คิว ค้างอยู่` และสีอำพันเฉพาะ `คิว วันนี้`, ปรับคำสั่ง `คิว โควตา` ให้ใช้การ์ด Traffic-Light พร้อมหลอดความจุแทนการ์ดเตือนสีส้ม และปรับ `buildHelpFlex_` / `buildYearStatsFlex_` ให้เข้าธีม Executive Indigo-Slate
+
+---
+
 ## เวอร์ชัน 2.5.3 (12 พฤศจิกายน 2569) - Full LINE Flex Message Redesign
 > **จุดเด่น:** ปรับโฉมข้อความตอบกลับบอทใน LINE สู่ Flex Message เต็มรูปแบบ: การ์ดยืนยันผลเสร็จสิ้น (กรอบเขียว), การ์ดยกเลิกนัด (กรอบแดง), การ์ดเตือนทำรายการซ้ำ (กรอบส้ม), และ Flex Cards ครอบคลุมทุกคำสั่งของบอท
 

@@ -1,26 +1,10 @@
 /**
- * app.js - Web Frontend Controller, State Management & User Attribution (v2.5.3)
- *
- * สถาปัตยกรรมและคู่มือการพัฒนาต่อ (Developer Handover Guide):
- * 1. โครงสร้างระบบ (Architecture Overview):
- *    - app.js (Frontend Controller): ควบคุม UI, จัดการ State, ระบบ Optimistic UI, และประสานงานกับ GAS API
- *    - logic.js (Domain Logic): ฟังก์ชันคำนวณวันเวลา (BKK UTC+07), SHA-256, Zero-Emoji Sanitizer, และสถิติ
- *    - gas/Code.gs (Backend Server): Google Apps Script Web App รองรับ Google Sheets DB และ LINE Messaging API
- *    - index.html & style.css: หน้าจอเว็บแบบ Responsive Mobile/Desktop ธีม Modern SaaS Ocean-Orange
- *
- * 2. หลักการสำคัญของระบบ (Core Principles):
- *    - Zero-Emoji Policy: ไม่อนุญาตให้มีอิโมจิในทุกส่วนของระบบ (ยกเว้นไอคอนปุ่มสลับธีมพระอาทิตย์/พระจันทร์ใน HTML)
- *    - Optimistic UI: เมื่อผู้ใช้สร้าง/แก้ไข/เปลี่ยนสถานะ หน้าจอจะอัปเดตทันที (< 20ms) และส่งคำขอไปเบื้องหลัง
- *      หากเกิดข้อผิดพลาดจะ Rollback ข้อมูลเดิมคืนอัตโนมัติ (Snapshot Rollback)
- *    - User Attribution: นัดหมายทุกรายการล็อกชื่อผู้สร้างเดิม (createdBy) และบันทึกผู้เปลี่ยนสถานะ (statusChangedBy)
- *    - Concurrency Control: ตรวจจับการแก้ไขชนกันผ่าน expectedUpdatedAt ป้องกันการบันทึกทับข้อมูลล่าสุด
+ * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.1)
+ * Zero-Emoji Policy | Instant Startup Live Cache | Lazy Active-Tab Render | Optimistic Concurrency
  */
 (function () {
   'use strict';
 
-  // ==========================================================================
-  // 1. DOM HELPERS, ESCAPING & SYSTEM CONSTANTS
-  // ==========================================================================
   const Logic = window.CalendarLogic, PatchNotes = window.PATCH_NOTES || [];
   const $ = id => document.getElementById(id), on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   const openModal = id => { const el = $(id); if (el) el.classList.add('active'); };
@@ -28,13 +12,11 @@
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   const escapeHtml = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ESC[c]);
 
-  // คีย์สำหรับบันทึกลง LocalStorage กรณีโหมด Demo หรือเก็บค่าคอนฟิกการเชื่อมต่อ
-  const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2' };
+  const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2', LIVE_CACHE: 'CAL_LIVE_CACHE_V2' };
   const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdiIEhkvSke--ro/exec';
   const DEFAULT_PASSCODE = 'CALL1234';
   const FIELD_LABELS = { appointmentDate: 'วันที่นัดหมาย', appointmentTime: 'เวลานัดหมาย', location: 'สถานที่', contactPerson: 'ผู้นัดพบ', status: 'สถานะ', DELETED: 'ลบนัดหมาย' };
 
-  // ไอคอน SVG แบบ Inline สำหรับใช้งานใน UI (Zero-Emoji)
   const ICO = {
     clock: '<svg viewBox="0 0 24 24" width="12" height="12"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>',
     user: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
@@ -44,24 +26,14 @@
     edit: '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>'
   };
 
-  // ==========================================================================
-  // 2. GLOBAL APPLICATION STATE
-  // ==========================================================================
   const state = {
     isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, currentUser: null, users: [], theme: 'light',
-    quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
+    activeTab: 'tabList', quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
     meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' },
     calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '',
     overviewYear: Logic.getBangkokParts().year, editingUserId: null
   };
 
-  // ==========================================================================
-  // 3. UI NOTIFICATIONS, THEME & TAB NAVIGATION
-  // ==========================================================================
-  /**
-   * แสดงข้อความแจ้งเตือน Toast ลอยที่มุมจอ (Auto-dismiss 3.2s)
-   * กรองอิโมจิออกอัตโนมัติเพื่อคง Zero-Emoji Policy
-   */
   function showToast(msg, type = 'info') {
     const c = $('toastContainer'); if (!c) return;
     const it = document.createElement('div');
@@ -71,9 +43,6 @@
     setTimeout(() => { it.style.opacity = '0'; it.style.transition = 'opacity 0.25s'; setTimeout(() => it.remove(), 260); }, 3200);
   }
 
-  /**
-   * สลับธีมแสดงผล Light / Dark (Deep Navy) พร้อมบันทึกลง LocalStorage
-   */
   function applyTheme(t) {
     state.theme = t === 'dark' ? 'dark' : 'light';
     document.documentElement.setAttribute('data-theme', state.theme);
@@ -82,30 +51,50 @@
     try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) { }
   }
 
-  /**
-   * สลับแท็บหน้าหลัก (tabList, tabMonth, tabYear, tabSettings, tabBot)
-   */
   function switchTab(id) {
-    document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === id));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === id));
+    state.activeTab = id || 'tabList';
+    document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === state.activeTab));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === state.activeTab));
+    renderActiveTab();
   }
 
   // ==========================================================================
-  // 4. AUTHENTICATION GATE & USER SESSION MANAGEMENT
+  // LIVE STARTUP CACHE & SESSION MANAGEMENT
   // ==========================================================================
-  /**
-   * โหลด Session ผู้ใช้งานจาก LocalStorage เมื่อเปิดหน้าเว็บ
-   */
+  function saveLiveCache() {
+    if (!state.isLive || !state.currentUser || !state.currentUser.username) return;
+    try {
+      localStorage.setItem(STORAGE.LIVE_CACHE, JSON.stringify({
+        user: state.currentUser.username, appointments: state.appointments,
+        rescheduleLogs: state.rescheduleLogs.slice(0, 60), users: state.users, meta: state.meta, ts: Date.now()
+      }));
+    } catch (_) { }
+  }
+
+  function loadLiveCache() {
+    if (!state.isLive || !state.currentUser || !state.currentUser.username) return false;
+    try {
+      const d = JSON.parse(localStorage.getItem(STORAGE.LIVE_CACHE) || 'null');
+      if (!d || d.user !== state.currentUser.username || !Array.isArray(d.appointments)) return false;
+      state.appointments = d.appointments;
+      if (Array.isArray(d.rescheduleLogs)) state.rescheduleLogs = d.rescheduleLogs;
+      if (Array.isArray(d.users) && d.users.length) state.users = d.users;
+      if (d.meta) state.meta = { ...state.meta, ...d.meta };
+      return true;
+    } catch (_) { return false; }
+  }
+
+  function clearLiveCache() {
+    try { localStorage.removeItem(STORAGE.LIVE_CACHE); } catch (_) { }
+  }
+
   function loadSavedSession() {
     try { const su = localStorage.getItem(STORAGE.USERS); state.users = su ? JSON.parse(su) : [...Logic.DEFAULT_USERS]; } catch (_) { state.users = [...Logic.DEFAULT_USERS]; }
     state.currentUser = null;
-    try { const uStr = localStorage.getItem(STORAGE.AUTH_USER); if (uStr) { const p = JSON.parse(uStr); if (p && p.username && p.displayName) state.currentUser = p; } } catch (_) { }
+    try { const u = JSON.parse(localStorage.getItem(STORAGE.AUTH_USER) || 'null'); if (u && u.username && u.displayName) state.currentUser = u; } catch (_) { }
     updateUserSessionUI();
   }
 
-  /**
-   * สลับหน้าต่างย่อยบน Full-Screen Auth Gate (เข้าสู่ระบบ / สมัครสมาชิกใหม่)
-   */
   function switchAuthTab(mode) {
     const isReg = mode === 'register';
     if ($('tabBtnAuthLogin')) { $('tabBtnAuthLogin').classList.toggle('active', !isReg); $('tabBtnAuthLogin').setAttribute('aria-selected', isReg ? 'false' : 'true'); }
@@ -116,30 +105,24 @@
     if ($('registerErrorMsg')) $('registerErrorMsg').style.display = 'none';
   }
 
-  /**
-   * อัปเดตการแสดงผลตามสิทธิ์ของผู้ใช้งาน (ADMIN vs STAFF)
-   * หากยังไม่ได้เข้าสู่ระบบจะแสดงหน้า Auth Gate แบบเต็มจอ ป้องกันการเห็นข้อมูล
-   */
   function updateUserSessionUI() {
     const isAuth = Boolean(state.currentUser && state.currentUser.username);
     if ($('authGateScreen')) $('authGateScreen').style.display = isAuth ? 'none' : 'flex';
     if ($('appShell')) $('appShell').style.display = isAuth ? 'block' : 'none';
     const authBadge = $('authModeBadge');
     if (authBadge) { authBadge.className = state.isLive ? 'mode-badge live' : 'mode-badge demo'; authBadge.textContent = state.isLive ? 'Sheets' : 'Demo'; }
-    const nameEl = $('currentUserName'), roleEl = $('currentUserRole');
-    if (nameEl) nameEl.textContent = isAuth ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
+    if ($('currentUserName')) $('currentUserName').textContent = isAuth ? state.currentUser.displayName : 'ยังไม่ได้เข้าสู่ระบบ';
+    const roleEl = $('currentUserRole');
     if (roleEl) { const r = isAuth && state.currentUser.role === 'ADMIN' ? 'ADMIN' : 'STAFF'; roleEl.textContent = r; roleEl.className = `badge-role ${r.toLowerCase()}`; }
     const isAdmin = Boolean(isAuth && state.currentUser.role === 'ADMIN');
     if ($('userManagementSection')) $('userManagementSection').style.opacity = isAdmin ? '1' : '0.85';
     if ($('btnOpenAddUserModal')) $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
   }
 
-  /**
-   * ออกจากระบบ ล้างค่า Session และปิดโมดอลทั้งหมด
-   */
   function handleLogout() {
     state.currentUser = null;
     try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) { }
+    clearLiveCache();
     ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal'].forEach(closeModal);
     if ($('loginUsername')) $('loginUsername').value = '';
     if ($('loginPassword')) $('loginPassword').value = '';
@@ -147,19 +130,11 @@
   }
 
   // ==========================================================================
-  // 5. OPTIMISTIC UI SYNCHRONIZATION ENGINE & AUTH HANDLERS
+  // OPTIMISTIC UI ENGINE & BACKGROUND TASK COORDINATOR
   // ==========================================================================
-  /**
-   * pendingIds: เก็บ ID ของรายการที่อยู่ระหว่างส่งข้อมูลไปเซิร์ฟเวอร์
-   * ใช้ป้องกันการกดบันทึกหรือเปลี่ยนสถานะซ้ำ (Idempotency Guard)
-   */
   const pendingIds = new Set();
   let bgTaskCount = 0;
 
-  /**
-   * จัดการไฟสถานะและการแสดงผลว่าระบบกำลังซิงก์ข้อมูลอยู่เบื้องหลังหรือไม่
-   * @param {boolean} active - เพิ่ม (+1) หรือลด (-1) จำนวนงานเบื้องหลัง
-   */
   function setBgSync(active) {
     bgTaskCount = Math.max(0, bgTaskCount + (active ? 1 : -1));
     const btn = $('btnSyncNow'), lbl = $('syncBtnLabel');
@@ -167,10 +142,17 @@
     if (lbl) lbl.textContent = bgTaskCount > 0 ? 'กำลังบันทึก...' : 'ซิงก์';
   }
 
-  /**
-   * ถ่ายโอนข้อมูลก้อนใหญ่จากเซิร์ฟเวอร์ (Sync Bundle) เข้าสู่ Local State
-   * รองรับข้อมูลนัดหมาย, ประวัติการเลื่อน, บัญชีผู้ใช้, และเมตาดาต้า
-   */
+  function runBgTask(trackId, apiPromiseFactory, onSuccess, onError) {
+    if (trackId) pendingIds.add(trackId);
+    setBgSync(true);
+    apiPromiseFactory()
+      .then(res => { if (onSuccess) onSuccess(res); saveLiveCache(); })
+      .catch(err => { if (onError) onError(err); })
+      .finally(() => { if (trackId) pendingIds.delete(trackId); setBgSync(false); });
+  }
+
+  const aptVisualSig = a => a ? `${a.id}|${a.title}|${Logic.normalizeStatus(a.status)}|${a.appointmentDate}|${a.appointmentTime}|${a.location}|${a.contactPerson}|${a.notes}|${a.remindDaysBefore}|${a.remindHoursBefore}|${a.rescheduleCount}|${a.notifiedDayForSlot}|${a.notifiedHourForSlot}|${a.createdBy}|${a.statusChangedBy}|${a.statusReason}|${a.updatedBy}` : '';
+
   function applySyncBundle(d) {
     if (!d) return;
     if (Array.isArray(d.appointments)) state.appointments = d.appointments;
@@ -178,13 +160,20 @@
     if (Array.isArray(d.users) && d.users.length) state.users = d.users;
     else if (!state.users || !state.users.length) state.users = [...Logic.DEFAULT_USERS];
     if (d.meta) state.meta = { ...state.meta, ...d.meta };
+    saveLiveCache();
   }
 
-  /**
-   * การเข้าสู่ระบบแบบรอบเดียว (Single-Roundtrip Auth):
-   * ส่งคำขอ login ไปยัง GAS พร้อมดึง appointments, users, meta กลับมาในรอบเดียว
-   * ช่วยลด Latency การเริ่มต้นใช้งานลงกว่า 50%
-   */
+  async function finishAuthSession(userObj, syncBundle, welcomeMsg) {
+    state.currentUser = userObj;
+    try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj)); } catch (_) { }
+    updateUserSessionUI();
+    if (state.isLive && state.gasUrl) {
+      if (syncBundle) { applySyncBundle(syncBundle); renderAll(); }
+      else { if (loadLiveCache()) renderAll(); await syncWithServer(true); }
+    } else { loadDemoData(); renderAll(); }
+    showToast(welcomeMsg, 'success');
+  }
+
   async function handleLoginSubmit(e) {
     e.preventDefault();
     const un = ($('loginUsername').value || '').trim(), pw = $('loginPassword').value || '', errEl = $('loginErrorMsg'), submitBtn = $('btnSubmitLogin');
@@ -198,21 +187,17 @@
           userObj = res.user; if (Array.isArray(res.appointments)) syncBundle = res;
         } catch (apiErr) {
           if (String(apiErr.message || '').includes('ไม่รู้จัก action')) {
-            const localRes = Logic.authenticateUser(state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
+            const localRes = Logic.authenticateUser(state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
             if (!localRes.ok) throw new Error(localRes.error);
             userObj = localRes.user; showToast('เซิร์ฟเวอร์ GAS เป็นเวอร์ชันเดิม ระบบใช้บัญชีในเครื่องชั่วคราว', 'warn');
           } else throw apiErr;
         }
       } else {
-        const res = Logic.authenticateUser(state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
+        const res = Logic.authenticateUser(state.users.length ? state.users : Logic.DEFAULT_USERS, un, pw);
         if (!res.ok) throw new Error(res.error);
         userObj = res.user;
       }
-      state.currentUser = userObj; localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj));
-      updateUserSessionUI();
-      if (state.isLive && state.gasUrl) { if (syncBundle) { applySyncBundle(syncBundle); renderAll(); } else await syncWithServer(true); }
-      else { loadDemoData(); renderAll(); }
-      showToast(`ยินดีต้อนรับ ${userObj.displayName} เข้าสู่ระบบ`, 'success');
+      await finishAuthSession(userObj, syncBundle, `ยินดีต้อนรับ ${userObj.displayName} เข้าสู่ระบบ`);
     } catch (err) {
       if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; } else showToast(err.message, 'error');
     } finally {
@@ -220,10 +205,6 @@
     }
   }
 
-  /**
-   * สมัครสมาชิกใหม่ (Self-Registration) เป็น STAFF ทันที
-   * เข้ารหัสรหัสผ่านด้วย SHA-256 และส่งไปบันทึกลงชีต Users
-   */
   async function handleRegisterSubmit(e) {
     e.preventDefault();
     const username = ($('regUsername').value || '').trim().toLowerCase(), displayName = Logic.sanitizeNoEmoji($('regDisplayName').value || '');
@@ -243,16 +224,9 @@
           if (res && Array.isArray(res.appointments)) syncBundle = res;
         } catch (_) { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) { } }
       } else { state.users = [...uList, localReg.record]; try { localStorage.setItem(STORAGE.USERS, JSON.stringify(state.users)); } catch (_) { } }
-      if ($('regUsername')) $('regUsername').value = '';
-      if ($('regDisplayName')) $('regDisplayName').value = '';
-      if ($('regPassword')) $('regPassword').value = '';
-      if ($('regConfirmPassword')) $('regConfirmPassword').value = '';
-      state.currentUser = { ...userObj, role: 'STAFF' };
-      localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(state.currentUser));
-      switchAuthTab('login'); updateUserSessionUI();
-      if (state.isLive && state.gasUrl) { if (syncBundle) { applySyncBundle(syncBundle); renderAll(); } else await syncWithServer(true); }
-      else { loadDemoData(); renderAll(); }
-      showToast(`สมัครสมาชิกสำเร็จ ยินดีต้อนรับ ${state.currentUser.displayName} (STAFF)`, 'success');
+      ['regUsername', 'regDisplayName', 'regPassword', 'regConfirmPassword'].forEach(k => { if ($(k)) $(k).value = ''; });
+      switchAuthTab('login');
+      await finishAuthSession({ ...userObj, role: 'STAFF' }, syncBundle, `สมัครสมาชิกสำเร็จ ยินดีต้อนรับ ${displayName || username} (STAFF)`);
     } catch (err) {
       if (errEl) { errEl.textContent = err.message; errEl.style.display = 'block'; } else showToast(err.message, 'error');
     } finally {
@@ -263,7 +237,6 @@
   function initApp() {
     try { const s = localStorage.getItem(STORAGE.THEME); if (s) state.theme = s; } catch (_) { }
     applyTheme(state.theme);
-
     try {
       const c = JSON.parse(localStorage.getItem(STORAGE.CFG) || 'null');
       if (c && c.gasUrl && !c.gasUrl.includes('AKfycwEq') && !c.gasUrl.includes('AdilEhkvSke')) {
@@ -276,22 +249,14 @@
       if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode;
     } catch (_) { }
 
-    loadSavedSession();
-    initMonthSelector();
-    bindEvents();
-
+    loadSavedSession(); initMonthSelector(); bindEvents();
     if (state.currentUser) {
-      if (state.isLive && state.gasUrl) syncWithServer(true);
+      if (state.isLive && state.gasUrl) { if (loadLiveCache()) renderAll(); syncWithServer(true); }
       else { loadDemoData(); renderAll(); }
     } else if (state.isLive && state.gasUrl) {
-      callGasApi('listUsers', {}).then(d => {
-        if (d && Array.isArray(d.users) && d.users.length) state.users = d.users;
-      }).catch(() => { });
-    } else {
-      loadDemoData();
-    }
-    updateClock();
-    setInterval(updateClock, 15000);
+      callGasApi('listUsers', {}).then(d => { if (d && Array.isArray(d.users) && d.users.length) state.users = d.users; }).catch(() => { });
+    } else { loadDemoData(); }
+    updateClock(); setInterval(updateClock, 15000);
   }
 
   function loadDemoData() {
@@ -301,7 +266,6 @@
       state.users = u ? JSON.parse(u) : [...Logic.DEFAULT_USERS];
       if (a) { state.appointments = JSON.parse(a); state.rescheduleLogs = l ? JSON.parse(l) : []; return; }
     } catch (_) { }
-
     state.users = [...Logic.DEFAULT_USERS];
     const now = Logic.getBangkokParts(), tmr = Logic.getBangkokParts(now.epochMs + 86400000), nYr = now.year + 1;
     const seeds = [
@@ -321,19 +285,12 @@
   }
 
   // ==========================================================================
-  // 6. GAS API GATEWAY & DATA SYNCHRONIZATION
+  // GAS API GATEWAY & SYNCHRONIZATION
   // ==========================================================================
-  /**
-   * เรียกใช้งาน Web API ของ Google Apps Script
-   * ส่ง Content-Type: text/plain เพื่อเลี่ยงปัญหา CORS Preflight Options Request
-   * @param {string} action - ชื่อคำสั่ง เช่น list, create, update, delete, login, register
-   * @param {object} payload - พารามิเตอร์ของคำสั่ง
-   */
   async function callGasApi(action, payload) {
     if (!state.gasUrl) throw new Error('ยังไม่ได้ระบุ Web App URL');
     const res = await fetch(state.gasUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action, passcode: state.passcode, currentUser: state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ', ...payload })
     });
     const r = await res.json();
@@ -341,64 +298,63 @@
     return r.data;
   }
 
-  /**
-   * ดึงข้อมูลทั้งหมดจาก Google Sheets มาซิงก์เข้าสู่หน่วยความจำของเบราว์เซอร์
-   * @param {boolean} silent - หากเป็น true จะไม่แสดง Toast แจ้งเตือนความสำเร็จ
-   */
   async function syncWithServer(silent = false) {
     if (!state.isLive || !state.gasUrl) { renderAll(); return; }
     const btn = $('btnSyncNow'), lbl = $('syncBtnLabel');
     try {
       if (btn) btn.classList.add('is-syncing'); if (lbl) lbl.textContent = 'กำลังซิงก์...';
       const d = await callGasApi('list', {});
-      applySyncBundle(d);
-      renderAll();
+      applySyncBundle(d); renderAll();
       if (!silent) showToast('ซิงก์ข้อมูลล่าสุดสำเร็จ', 'success');
     } catch (e) { showToast('ซิงก์ไม่สำเร็จ: ' + e.message, 'error'); }
     finally { if (btn) btn.classList.toggle('is-syncing', bgTaskCount > 0); if (lbl) lbl.textContent = bgTaskCount > 0 ? 'กำลังบันทึก...' : 'ซิงก์'; }
   }
 
   // ==========================================================================
-  // 7. UI RENDERING PIPELINE
+  // LAZY ACTIVE-TAB RENDERING PIPELINE
   // ==========================================================================
-  /**
-   * คำสั่งหลักสำหรับสั่ง Render หน้าจอทั้งหมดให้สอดคล้องกับ State ล่าสุด
-   */
-  function renderAll() {
-    renderHeader(); renderListTab(); renderCalendarTab(); renderYearTab(); renderSettingsTab(); updateUserSessionUI();
+  function renderActiveTab() {
+    renderHeader(); updateUserSessionUI();
+    if (state.activeTab === 'tabMonth') renderCalendarTab();
+    else if (state.activeTab === 'tabYear') renderYearTab();
+    else if (state.activeTab === 'tabSettings') renderSettingsTab();
+    else renderListTab();
   }
+  const renderAll = () => renderActiveTab();
 
-  /**
-   * อัปเดตนาฬิกาแสดงเวลาจริงในเขตเวลา Asia/Bangkok บนแถบ Header
-   */
   function updateClock() {
     const b = Logic.getBangkokParts();
     if ($('bangkokClockDisplay')) $('bangkokClockDisplay').textContent = `เวลา (BKK): ${Logic.formatThaiDateDisplay(b.dateStr, false)} ${b.timeStr} น.`;
   }
 
-  /**
-   * อัปเดตส่วนหัวของระบบ: สถานะการเชื่อมต่อ (Sheets vs Demo), โควตาข้อความ LINE และรอบ Trigger
-   */
   function renderHeader() {
     const bd = $('connectionModeBadge'), ts = $('triggerStatusText');
     if (state.isLive) {
-      bd.className = 'mode-badge live'; bd.textContent = 'Sheets';
+      if (bd) { bd.className = 'mode-badge live'; bd.textContent = 'Sheets'; }
       const lr = state.meta.LAST_TRIGGER_RUN_AT;
-      ts.textContent = lr ? `Trigger: รันเมื่อ ${Math.max(0, Math.round((Logic.getBangkokParts().epochMs - Logic.getBangkokParts(lr).epochMs) / 60000))} นาทีที่แล้ว` : 'Trigger: พร้อมทำงาน';
+      if (ts) {
+        ts.className = lr ? 'meta-status is-live' : 'meta-status';
+        if (lr) {
+          const mins = Math.max(0, Math.round((Logic.getBangkokParts().epochMs - Logic.getBangkokParts(lr).epochMs) / 60000));
+          ts.textContent = mins < 1 ? 'Trigger: เพิ่งทำงาน' : (mins < 60 ? `Trigger: ${mins} นาทีที่แล้ว` : `Trigger: ${Math.floor(mins / 60)} ชม. ที่แล้ว`);
+        } else ts.textContent = 'Trigger: พร้อมทำงาน';
+      }
     } else {
-      bd.className = 'mode-badge demo'; bd.textContent = 'Demo'; ts.textContent = 'Trigger: โหมดจำลองในเครื่อง';
+      if (bd) { bd.className = 'mode-badge demo'; bd.textContent = 'Demo'; }
+      if (ts) { ts.className = 'meta-status is-demo'; ts.textContent = 'Trigger: โหมดจำลอง'; }
     }
-    const lim = +state.meta.CACHED_QUOTA_LIMIT || 300, used = +state.meta.CACHED_QUOTA_USED || 0;
-    const pct = lim > 0 ? Math.min(100, Math.round((used / lim) * 100)) : 0;
-    $('quotaTextLabel').textContent = `โควตา LINE: ${used} / ${lim} (${pct}%)`;
-    const f = $('quotaProgressFill'); f.style.width = `${pct}%`;
-    f.className = 'quota-progress-fill' + (pct >= 90 ? ' danger' : pct >= 80 ? ' warn' : '');
+    const lim = +state.meta.CACHED_QUOTA_LIMIT || 300, used = +state.meta.CACHED_QUOTA_USED || 0, pct = lim > 0 ? Math.min(100, Math.round((used / lim) * 100)) : 0;
+    if ($('quotaTextLabel')) $('quotaTextLabel').textContent = `โควตา LINE: ${used}/${lim} (${pct}%)`;
+    const f = $('quotaProgressFill');
+    if (f) { f.style.width = `${pct}%`; f.className = 'quota-progress-fill' + (pct >= 90 ? ' danger' : pct >= 80 ? ' warn' : ''); }
+    if ($('navBadgeActiveCount')) {
+      let activeCnt = 0;
+      for (const a of state.appointments) if (a && !a.deletedAt && Logic.normalizeStatus(a.status) === Logic.STATUS.CONFIRMED) activeCnt++;
+      $('navBadgeActiveCount').textContent = activeCnt;
+    }
   }
 
-  const getStatusClass = s => {
-    const st = Logic.normalizeStatus(s);
-    return st === Logic.STATUS.COMPLETED ? 'status-completed' : (st === Logic.STATUS.CANCELLED ? 'status-cancelled' : 'status-confirmed');
-  };
+  const getStatusClass = s => { const st = Logic.normalizeStatus(s); return st === Logic.STATUS.COMPLETED ? 'status-completed' : (st === Logic.STATUS.CANCELLED ? 'status-cancelled' : 'status-confirmed'); };
 
   function getRelDate(a, nowBkk, od) {
     if (od) return { text: 'เลยกำหนด', cls: 'rel-overdue' };
@@ -407,46 +363,33 @@
     return d === 0 ? { text: 'วันนี้', cls: 'rel-today' } : (d === 1 ? { text: 'พรุ่งนี้', cls: 'rel-today' } : { text: d > 0 ? `อีก ${d} วัน` : 'ผ่านมาแล้ว', cls: '' });
   }
 
-  function renderCardHtml(a) {
-    const nowBkk = Logic.getBangkokParts(), od = Logic.isOverdue(a, nowBkk.isoStr), st = Logic.normalizeStatus(a.status), cls = getStatusClass(st), rel = getRelDate(a, nowBkk, od);
+  function renderCardHtml(a, cachedNowBkk) {
+    const nowBkk = cachedNowBkk || Logic.getBangkokParts(), od = Logic.isOverdue(a, nowBkk.isoStr), st = Logic.normalizeStatus(a.status), cls = getStatusClass(st), rel = getRelDate(a, nowBkk, od);
     let dayNum = '-', monthYr = 'ไม่ระบุวัน';
-    if (a.appointmentDate) {
-      const [y, m, d] = a.appointmentDate.split('-').map(Number);
-      if (y && m && d) { dayNum = String(d); monthYr = `${Logic.THAI_MONTHS_SHORT[m - 1]} ${y + 543}`; }
-    }
+    if (a.appointmentDate) { const [y, m, d] = a.appointmentDate.split('-').map(Number); if (y && m && d) { dayNum = String(d); monthYr = `${Logic.THAI_MONTHS_SHORT[m - 1]} ${y + 543}`; } }
     const badges = [];
     if (od) badges.push('<span class="badge-overdue">เลยกำหนดเวลา</span>');
     if (a.appointmentDate && a.notifiedDayForSlot === a.appointmentDate) badges.push('<span class="badge-info">แจ้งเตือนรายวันแล้ว</span>');
     if (a.appointmentDate && a.appointmentTime && a.notifiedHourForSlot === `${a.appointmentDate}T${a.appointmentTime}`) badges.push('<span class="badge-info">แจ้งเตือนรายชั่วโมงแล้ว</span>');
     if (+a.rescheduleCount > 0) badges.push(`<span class="badge-info">เลื่อนนัด ${+a.rescheduleCount} ครั้ง</span>`);
-    const isConf = st === Logic.STATUS.CONFIRMED;
-
-    const creatorName = escapeHtml(a.createdBy || a.updatedBy || '-');
-    const attributionHtml = [`<span class="attribution-tag">${ICO.user}<span>ผู้สร้าง: <strong>${creatorName}</strong></span></span>`];
-    if (st === Logic.STATUS.COMPLETED && a.statusChangedBy) {
-      attributionHtml.push(`<span class="attribution-tag completed">${ICO.check}<span>เสร็จสิ้นโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong></span></span>`);
-    } else if (st === Logic.STATUS.CANCELLED && a.statusChangedBy) {
-      attributionHtml.push(`<span class="attribution-tag cancelled"><span>ยกเลิกโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong>${a.statusReason ? ` (${escapeHtml(a.statusReason)})` : ''}</span></span>`);
-    } else if (a.updatedBy && a.updatedBy !== (a.createdBy || a.updatedBy)) {
-      attributionHtml.push(`<span class="attribution-tag">${ICO.edit}<span>แก้ไขล่าสุดโดย: <strong>${escapeHtml(a.updatedBy)}</strong></span></span>`);
-    }
+    const isConf = st === Logic.STATUS.CONFIRMED, creatorName = escapeHtml(a.createdBy || a.updatedBy || '-');
+    const attrHtml = [`<span class="attribution-tag">${ICO.user}<span>ผู้สร้าง: <strong>${creatorName}</strong></span></span>`];
+    if (st === Logic.STATUS.COMPLETED && a.statusChangedBy) attrHtml.push(`<span class="attribution-tag completed">${ICO.check}<span>เสร็จสิ้นโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong></span></span>`);
+    else if (st === Logic.STATUS.CANCELLED && a.statusChangedBy) attrHtml.push(`<span class="attribution-tag cancelled"><span>ยกเลิกโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong>${a.statusReason ? ` (${escapeHtml(a.statusReason)})` : ''}</span></span>`);
+    else if (a.updatedBy && a.updatedBy !== (a.createdBy || a.updatedBy)) attrHtml.push(`<span class="attribution-tag">${ICO.edit}<span>แก้ไขล่าสุดโดย: <strong>${escapeHtml(a.updatedBy)}</strong></span></span>`);
 
     return `
-      <article class="apt-card-slim ${cls}">
-        <div class="apt-date-block">
-          <span class="apt-rel-badge ${rel.cls}">${escapeHtml(rel.text)}</span>
-          <div><div class="apt-day-num">${escapeHtml(dayNum)}</div><div class="apt-month-yr">${escapeHtml(monthYr)}</div></div>
-          <div class="apt-time-pill">${ICO.clock}<span>${escapeHtml(a.appointmentTime || '-')} น.</span></div>
-        </div>
+      <article class="apt-card-slim ${cls}${od ? ' is-overdue' : ''}">
+        <div class="apt-date-block"><span class="apt-rel-badge ${rel.cls}">${escapeHtml(rel.text)}</span><div><div class="apt-day-num">${escapeHtml(dayNum)}</div><div class="apt-month-yr">${escapeHtml(monthYr)}</div></div><div class="apt-time-pill">${ICO.clock}<span>${escapeHtml(a.appointmentTime || '-')} น.</span></div></div>
         <div class="apt-main-col">
-          <div class="apt-badges-row"><span class="apt-id-code">${escapeHtml(a.id)}</span><span class="status-badge ${cls}">${escapeHtml(st)}</span>${badges.join(' ')}</div>
+          <div class="apt-badges-row"><span class="status-badge ${cls}">${escapeHtml(st)}</span><span class="apt-id-code">${escapeHtml(a.id)}</span>${badges.join(' ')}</div>
           <h4 class="apt-slim-title">${escapeHtml(a.title)}</h4>
           <div class="apt-slim-meta">
             <span class="apt-meta-chip">${ICO.user}<span>ผู้นัดพบ: <strong>${escapeHtml(a.contactPerson || '-')}</strong></span></span>
             <span class="apt-meta-chip">${ICO.pin}<span>สถานที่: <strong>${escapeHtml(a.location || '-')}</strong></span></span>
             <span class="apt-meta-chip">${ICO.bell}<span>เตือน ${+a.remindDaysBefore}ว. / ${+a.remindHoursBefore}ชม.</span></span>
           </div>
-          <div class="apt-attribution-row">${attributionHtml.join(' ')}</div>
+          <div class="apt-attribution-row">${attrHtml.join(' ')}</div>
           ${a.notes ? `<div class="apt-notes-bar">หมายเหตุ: ${escapeHtml(a.notes)}</div>` : ''}
         </div>
         <div class="apt-slim-actions">
@@ -502,7 +445,29 @@
     });
     filtered.sort((a, b) => (Logic.buildAppointmentSlot(a) || '9999').localeCompare(Logic.buildAppointmentSlot(b) || '9999'));
     if ($('listResultSummary')) $('listResultSummary').textContent = `แสดงรายการนัดหมาย ${filtered.length} รายการ (จากทั้งหมด ${all.length} รายการ)`;
-    $('appointmentsListContainer').innerHTML = filtered.length ? filtered.map(renderCardHtml).join('') : '<div class="empty-state">ไม่พบรายการนัดหมายตามเงื่อนไขที่เลือก</div>';
+    const listEl = $('appointmentsListContainer');
+    if (!filtered.length) { listEl.innerHTML = '<div class="empty-state">ไม่พบรายการนัดหมายตามเงื่อนไขที่เลือก</div>'; return; }
+
+    const groups = {
+      OVERDUE: { label: 'งานเลยกำหนดเวลา', cls: 'group-overdue', items: [] },
+      TODAY: { label: `นัดหมายวันนี้ (${Logic.formatThaiDateDisplay(nowBkk.dateStr, false)})`, cls: 'group-today', items: [] },
+      TOMORROW: { label: `นัดหมายพรุ่งนี้ (${Logic.formatThaiDateDisplay(tmrStr, false)})`, cls: 'group-tomorrow', items: [] },
+      UPCOMING: { label: 'นัดหมายที่กำลังจะมาถึง', cls: 'group-upcoming', items: [] },
+      HISTORY: { label: 'ดำเนินการแล้ว / ประวัติย้อนหลัง', cls: 'group-history', items: [] }
+    };
+    filtered.forEach(a => {
+      const aSt = Logic.normalizeStatus(a.status);
+      if (Logic.isOverdue(a, nowBkk.isoStr)) groups.OVERDUE.items.push(a);
+      else if (a.appointmentDate === nowBkk.dateStr) groups.TODAY.items.push(a);
+      else if (a.appointmentDate === tmrStr) groups.TOMORROW.items.push(a);
+      else if (aSt === Logic.STATUS.CONFIRMED && (!a.appointmentDate || a.appointmentDate > tmrStr)) groups.UPCOMING.items.push(a);
+      else groups.HISTORY.items.push(a);
+    });
+    listEl.innerHTML = ['OVERDUE', 'TODAY', 'TOMORROW', 'UPCOMING', 'HISTORY'].map(k => groups[k]).filter(g => g.items.length > 0).map(g => `
+      <div class="queue-group-section">
+        <div class="queue-group-header ${g.cls}"><div class="queue-group-title-wrap"><span class="queue-group-dot"></span><span class="queue-group-title">${escapeHtml(g.label)}</span></div><span class="queue-group-count">${g.items.length} รายการ</span></div>
+        <div class="queue-group-items">${g.items.map(a => renderCardHtml(a, nowBkk)).join('')}</div>
+      </div>`).join('');
   }
 
   function initMonthSelector() {
@@ -512,11 +477,10 @@
   }
 
   function renderCalendarTab() {
-    const y = state.calYear, m = state.calMonth, mData = Logic.queryByMonth(state.appointments, y, m, { nowIso: Logic.getBangkokParts().isoStr });
+    const nowBkk = Logic.getBangkokParts(), y = state.calYear, m = state.calMonth, mData = Logic.queryByMonth(state.appointments, y, m, { nowIso: nowBkk.isoStr });
     $('calendarMonthTitle').textContent = `${mData.monthNameThai} พ.ศ. ${mData.buddhistYear}`;
     $('calSelectMonth').value = String(m); $('calInputYear').value = String(mData.buddhistYear);
-
-    const startDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(), maxDay = Logic.getDaysInMonth(y, m), todayStr = Logic.getBangkokParts().dateStr;
+    const startDow = new Date(Date.UTC(y, m - 1, 1)).getUTCDay(), maxDay = Logic.getDaysInMonth(y, m), todayStr = nowBkk.dateStr;
     const cells = Array.from({ length: startDow }, () => '<div class="cal-cell empty"></div>');
     for (let d = 1; d <= maxDay; d++) {
       const dtStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`, itms = mData.items.filter(a => a.appointmentDate === dtStr);
@@ -525,16 +489,16 @@
       cells.push(`<div class="cal-cell ${dtStr === todayStr ? 'today' : ''} ${dtStr === state.calSelectedDate ? 'selected' : ''}" data-date="${dtStr}"><div class="cal-cell-head"><span class="cal-date-num">${d}</span><button type="button" class="btn-cell-add" data-add-date="${dtStr}">+</button></div>${pills}${more}</div>`);
     }
     $('calendarGridContainer').innerHTML = ['อา.', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.', 'ส.'].map(d => `<div class="cal-day-header">${d}</div>`).join('') + cells.join('');
-
     const showItems = state.calSelectedDate ? mData.items.filter(a => a.appointmentDate === state.calSelectedDate) : mData.items;
     if ($('agendaEyebrow')) $('agendaEyebrow').textContent = state.calSelectedDate ? 'วันที่เลือกในปฏิทิน' : `ภาพรวมประจำเดือน (${mData.stats.total} งาน)`;
     if ($('btnShowAllMonthApts')) $('btnShowAllMonthApts').style.display = state.calSelectedDate ? 'inline-flex' : 'none';
     $('monthlyListHeader').textContent = state.calSelectedDate ? `${Logic.formatThaiDateDisplay(state.calSelectedDate, false)} (${showItems.length} งาน)` : `นัดหมายเดือน${mData.monthNameThai} (${showItems.length} งาน)`;
-    $('monthlyAppointmentsList').innerHTML = showItems.length ? showItems.map(renderCardHtml).join('') : '<div class="empty-state">ไม่มีรายการนัดหมายในวันที่เลือก กดปุ่ม "+ นัดวันนี้" ด้านบนเพื่อสร้างนัดใหม่</div>';
+    $('monthlyAppointmentsList').innerHTML = showItems.length ? showItems.map(a => renderCardHtml(a, nowBkk)).join('') : '<div class="empty-state">ไม่มีรายการนัดหมายในวันที่เลือก กดปุ่ม "+ นัดวันนี้" ด้านบนเพื่อสร้างนัดใหม่</div>';
   }
 
   function renderYearTab() {
-    const curY = Logic.getBangkokParts().year, multi = Logic.queryMultiYearOverview(state.appointments, Math.min(curY, state.overviewYear), Math.max(curY + 3, state.overviewYear + 1), { nowIso: Logic.getBangkokParts().isoStr });
+    const nowBkk = Logic.getBangkokParts(), curY = nowBkk.year;
+    const multi = Logic.queryMultiYearOverview(state.appointments, Math.min(curY, state.overviewYear), Math.max(curY + 3, state.overviewYear + 1), { nowIso: nowBkk.isoStr });
     $('multiYearCardsContainer').innerHTML = multi.years.map(yr => `
       <div class="year-summary-card ${yr.ceYear === state.overviewYear ? 'active' : ''}" data-year="${yr.ceYear}">
         <div style="display:flex;justify-content:space-between;align-items:center;"><strong style="font-size:15px;">พ.ศ. ${yr.buddhistYear}</strong><span class="badge-info">ค.ศ. ${yr.ceYear}</span></div>
@@ -542,7 +506,7 @@
         <div class="month-mini-bar"><div style="width:${yr.stats.total ? yr.stats.completionRate : 0}%;background:#10b981;"></div></div>
       </div>`).join('');
 
-    const selYr = Logic.queryByYear(state.appointments, state.overviewYear, { nowIso: Logic.getBangkokParts().isoStr }), s = selYr.stats;
+    const selYr = Logic.queryByYear(state.appointments, state.overviewYear, { nowIso: nowBkk.isoStr }), s = selYr.stats;
     $('selectedYearHeader').textContent = `สรุปสถิติตลอดทั้งปี พ.ศ. ${selYr.buddhistYear} (ค.ศ. ${selYr.ceYear})`;
     const b = (t, v, sub, col) => `<div class="stat-box"${col ? ` style="border-left:4px solid ${col};"` : ''}><span class="stat-box-title">${t}</span><span class="stat-box-val">${v}</span><span class="stat-box-sub">${sub}</span></div>`;
     $('yearEndSummaryCards').innerHTML = b('งานนัดหมายทั้งหมด', s.total, 'รายการสะสมทั้งปี') + b('นัดหมายแล้ว (รอดำเนินการ)', s.active, 'รอถึงกำหนดนัดหมาย', 'var(--st-conf-border)') + b('สิ้นสุดการนัดหมาย', s.completed, `อัตราความสำเร็จ ${s.completionRate}%`, 'var(--st-comp-border)') + b('ยกเลิกการนัดหมาย', s.cancelled, `อัตราการยกเลิก ${s.cancellationRate}%`, 'var(--st-canc-border)') + b('การเลื่อนนัดสะสม', s.rescheduleTotal, 'ครั้งที่มีการเลื่อนวัน/เวลา');
@@ -551,24 +515,15 @@
     if (uPerfGrid) {
       const uStats = Logic.calculateUserStats(selYr.items);
       uPerfGrid.innerHTML = !uStats.length ? '<div class="empty-state">ยังไม่มีข้อมูลสถิติผู้ใช้งานในปีนี้</div>' : uStats.map(u => `
-        <div class="user-stat-card">
-          <div class="user-stat-header"><span>${escapeHtml(u.user)}</span><span class="badge-info">สร้างนัด ${u.createdTotal} งาน</span></div>
-          <div class="user-stat-counts">
-            <span style="color:var(--st-comp-text);">กดเสร็จสิ้น: <strong>${u.completedTotal}</strong></span>
-            <span style="color:var(--st-canc-text);">กดยกเลิก: <strong>${u.cancelledTotal}</strong></span>
-            <span style="color:var(--st-conf-text);">รอดำเนินการ: <strong>${u.activeTotal}</strong></span>
-          </div>
-        </div>`).join('');
+        <div class="user-stat-card"><div class="user-stat-header"><span>${escapeHtml(u.user)}</span><span class="badge-info">สร้างนัด ${u.createdTotal} งาน</span></div><div class="user-stat-counts"><span style="color:var(--st-comp-text);">กดเสร็จสิ้น: <strong>${u.completedTotal}</strong></span><span style="color:var(--st-canc-text);">กดยกเลิก: <strong>${u.cancelledTotal}</strong></span><span style="color:var(--st-conf-text);">รอดำเนินการ: <strong>${u.activeTotal}</strong></span></div></div>`).join('');
     }
-
     $('yearMonthsGrid').innerHTML = selYr.months.map(m => {
       const tot = m.stats.total || 0, pComp = tot ? Math.round((m.stats.completed / tot) * 100) : 0, pConf = tot ? Math.round((m.stats.active / tot) * 100) : 0, pCanc = tot ? Math.max(0, 100 - pComp - pConf) : 0;
-      const itms = !m.items.length ? '<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">ไม่มีรายการนัดหมาย</div>' : m.items.map(a => `
-        <div class="btn-edit-apt" data-id="${escapeHtml(a.id)}" style="cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border);border-radius:6px;border-left:3px solid var(--primary);font-size:11.5px;">
-          <div style="font-weight:600;color:var(--text-main);">${a.appointmentDate.slice(8, 10)} ${m.monthShortThai} ${a.appointmentTime || ''} - ${escapeHtml(a.title)}</div>
-          <div style="color:var(--text-secondary);font-size:11px;">${escapeHtml(a.contactPerson || '-')} | ผู้สร้าง: ${escapeHtml(a.createdBy || a.updatedBy || '-')}</div>
-        </div>`).join('');
-      return `<div class="month-box"><div class="month-box-header"><span>${m.monthNameThai}</span><div style="display:flex;align-items:center;gap:6px;"><span class="badge-info">รวม ${m.stats.total}</span><button type="button" class="btn btn-outline btn-sm btn-jump-cal-month" data-year="${selYr.ceYear}" data-month="${m.month}" style="padding:2px 7px;font-size:11px;">ดูปฏิทิน</button></div></div><div class="month-mini-bar"><div style="width:${pComp}%;background:#10b981;"></div><div style="width:${pConf}%;background:#6366f1;"></div><div style="width:${pCanc}%;background:#f43f5e;"></div></div><div style="display:flex;flex-direction:column;gap:5px;">${itms}</div></div>`;
+      const itms = !m.items.length ? '<div style="font-size:12px;color:var(--text-muted);padding:6px 0;">ไม่มีรายการนัดหมาย</div>' : m.items.map(a => {
+        const aSt = Logic.normalizeStatus(a.status), stCol = aSt === Logic.STATUS.COMPLETED ? 'var(--st-comp-border)' : (aSt === Logic.STATUS.CANCELLED ? 'var(--st-canc-border)' : 'var(--st-conf-border)');
+        return `<div class="btn-edit-apt" data-id="${escapeHtml(a.id)}" style="cursor:pointer;padding:6px 8px;background:var(--bg-surface);border:1px solid var(--border);border-radius:6px;border-left:3px solid ${stCol};font-size:11.5px;"><div style="font-weight:600;color:var(--text-main);">${a.appointmentDate.slice(8, 10)} ${m.monthShortThai} ${a.appointmentTime || ''} - ${escapeHtml(a.title)}</div><div style="color:var(--text-secondary);font-size:11px;">${escapeHtml(a.contactPerson || '-')} | ผู้สร้าง: ${escapeHtml(a.createdBy || a.updatedBy || '-')}</div></div>`;
+      }).join('');
+      return `<div class="month-box"><div class="month-box-header"><span>${m.monthNameThai}</span><div style="display:flex;align-items:center;gap:6px;"><span class="badge-info">รวม ${m.stats.total}</span><button type="button" class="btn btn-outline btn-sm btn-jump-cal-month" data-year="${selYr.ceYear}" data-month="${m.month}" style="padding:2px 7px;font-size:11px;">ดูปฏิทิน</button></div></div><div class="month-mini-bar"><div style="width:${pComp}%;background:var(--st-comp-border);"></div><div style="width:${pConf}%;background:var(--st-conf-border);"></div><div style="width:${pCanc}%;background:var(--st-canc-border);"></div></div><div style="display:flex;flex-direction:column;gap:5px;">${itms}</div></div>`;
     }).join('');
   }
 
@@ -580,64 +535,34 @@
 
     const uTableBody = $('userTableBody');
     if (uTableBody) {
-      const isAdmin = Boolean(state.currentUser && state.currentUser.role === 'ADMIN');
-      const curUn = state.currentUser ? state.currentUser.username : '';
-      const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-      uTableBody.innerHTML = uList.map(u => {
+      const isAdmin = Boolean(state.currentUser && state.currentUser.role === 'ADMIN'), curUn = state.currentUser ? state.currentUser.username : '';
+      uTableBody.innerHTML = (state.users && state.users.length ? state.users : Logic.DEFAULT_USERS).map(u => {
         const canToggle = isAdmin && u.username !== 'admin' && u.username !== curUn;
-        return `
-        <tr>
-          <td><span class="apt-id-code">${escapeHtml(u.userId || '-')}</span></td>
-          <td><strong>${escapeHtml(u.username)}</strong></td>
-          <td>${escapeHtml(u.displayName || '-')}</td>
-          <td><span class="badge-role ${(u.role || 'STAFF').toLowerCase()}">${escapeHtml(u.role || 'STAFF')}</span></td>
-          <td><span class="status-badge ${u.isActive !== false ? 'status-completed' : 'status-cancelled'}">${u.isActive !== false ? 'ใช้งาน' : 'ระงับ'}</span></td>
-          <td style="color:var(--text-muted);font-size:12px;">${escapeHtml(u.lastLoginAt ? Logic.formatThaiDateDisplay(u.lastLoginAt.slice(0, 10), false) + ' ' + u.lastLoginAt.slice(11, 16) : 'ยังไม่เคยเข้าใช้')}</td>
-          <td>
-            ${isAdmin ? `<button type="button" class="btn btn-soft btn-sm btn-edit-user" data-uid="${escapeHtml(u.userId)}">แก้ไข</button>` : '<span class="hint-text">เฉพาะ ADMIN</span>'}
-            ${canToggle ? `<button type="button" class="btn btn-danger-ghost btn-sm btn-toggle-user" data-uid="${escapeHtml(u.userId)}" data-active="${u.isActive !== false ? 'true' : 'false'}">${u.isActive !== false ? 'ระงับ' : 'เปิดใช้'}</button>` : ''}
-          </td>
-        </tr>`;
+        return `<tr><td><span class="apt-id-code">${escapeHtml(u.userId || '-')}</span></td><td><strong>${escapeHtml(u.username)}</strong></td><td>${escapeHtml(u.displayName || '-')}</td><td><span class="badge-role ${(u.role || 'STAFF').toLowerCase()}">${escapeHtml(u.role || 'STAFF')}</span></td><td><span class="status-badge ${u.isActive !== false ? 'status-completed' : 'status-cancelled'}">${u.isActive !== false ? 'ใช้งาน' : 'ระงับ'}</span></td><td style="color:var(--text-muted);font-size:12px;">${escapeHtml(u.lastLoginAt ? Logic.formatThaiDateDisplay(u.lastLoginAt.slice(0, 10), false) + ' ' + u.lastLoginAt.slice(11, 16) : 'ยังไม่เคยเข้าใช้')}</td><td>${isAdmin ? `<button type="button" class="btn btn-soft btn-sm btn-edit-user" data-uid="${escapeHtml(u.userId)}">แก้ไข</button>` : '<span class="hint-text">เฉพาะ ADMIN</span>'}${canToggle ? `<button type="button" class="btn btn-danger-ghost btn-sm btn-toggle-user" data-uid="${escapeHtml(u.userId)}" data-active="${u.isActive !== false ? 'true' : 'false'}">${u.isActive !== false ? 'ระงับ' : 'เปิดใช้'}</button>` : ''}</td></tr>`;
       }).join('');
     }
-
     const tb = $('rescheduleLogsTableBody');
     if (!state.rescheduleLogs.length) { tb.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);padding:18px;">ยังไม่มีประวัติการเลื่อนนัดหรือแก้ไขข้อมูล</td></tr>'; return; }
-    tb.innerHTML = state.rescheduleLogs.slice(0, 40).map(l => `
-      <tr><td>${escapeHtml(l.changedAt)}</td><td><span class="apt-id-code">${escapeHtml(l.appointmentId)}</span></td><td>${escapeHtml(l.changedBy)}</td><td><span class="badge-info">${escapeHtml(FIELD_LABELS[l.fieldChanged] || l.fieldChanged)}</span></td><td style="color:var(--text-muted);">${escapeHtml(l.oldValue || '-')}</td><td><strong>${escapeHtml(l.newValue || '-')}</strong></td><td>${escapeHtml(l.reason || '-')}</td></tr>
-    `).join('');
+    tb.innerHTML = state.rescheduleLogs.slice(0, 40).map(l => `<tr><td>${escapeHtml(l.changedAt)}</td><td><span class="apt-id-code">${escapeHtml(l.appointmentId)}</span></td><td>${escapeHtml(l.changedBy)}</td><td><span class="badge-info">${escapeHtml(FIELD_LABELS[l.fieldChanged] || l.fieldChanged)}</span></td><td style="color:var(--text-muted);">${escapeHtml(l.oldValue || '-')}</td><td><strong>${escapeHtml(l.newValue || '-')}</strong></td><td>${escapeHtml(l.reason || '-')}</td></tr>`).join('');
   }
 
   function renderPatchNotes() {
     const c = $('patchNotesContainer'); if (!c) return;
-    c.innerHTML = PatchNotes.map(p => `
-      <div class="patch-card"><div class="patch-card-head"><span>เวอร์ชัน ${escapeHtml(p.version)}</span><span class="hint-text">${escapeHtml(p.date)}</span></div><div class="patch-card-desc">${escapeHtml(p.title)}</div><ul>${(p.changes || []).map(ch => `<li>${escapeHtml(ch)}</li>`).join('')}</ul></div>
-    `).join('');
+    c.innerHTML = PatchNotes.map(p => `<div class="patch-card"><div class="patch-card-head"><span>เวอร์ชัน ${escapeHtml(p.version)}</span><span class="hint-text">${escapeHtml(p.date)}</span></div><div class="patch-card-desc">${escapeHtml(p.title)}</div><ul>${(p.changes || []).map(ch => `<li>${escapeHtml(ch)}</li>`).join('')}</ul></div>`).join('');
   }
 
   // ==========================================================================
-  // 8. APPOINTMENT MUTATIONS & OPTIMISTIC CONCURRENCY ENGINE
+  // APPOINTMENT MUTATIONS & USER ADMINISTRATION
   // ==========================================================================
-  /**
-   * ตรวจสอบเวลานัดหมายชนกัน (Time-Slot Conflict Detection)
-   * หากมีนัดหมายอื่นในวันและเวลาเดียวกันจะแสดงแถบแจ้งเตือนสีส้มบนโมดอลทันที
-   */
   function checkConflictOnForm() {
-    const d = $('formDate').value, t = $('formTime').value, curId = $('formAptId').value, banner = $('conflictWarningBanner');
-    if (!banner) return;
-    const conflicts = Logic.findTimeConflicts(state.appointments, d, t, curId);
-    if (conflicts.length > 0) {
-      banner.textContent = `แจ้งเตือน: มีนัดหมายอื่นในวันและเวลานี้แล้ว (${conflicts.length} งาน: ${conflicts.map(c => c.title).join(', ')})`;
-      banner.style.display = 'block';
-    } else {
-      banner.style.display = 'none';
-    }
+    const banner = $('conflictWarningBanner'); if (!banner) return;
+    const conflicts = Logic.findTimeConflicts(state.appointments, $('formDate').value, $('formTime').value, $('formAptId').value);
+    if (conflicts.length > 0) { banner.textContent = `แจ้งเตือน: มีนัดหมายอื่นในวันและเวลานี้แล้ว (${conflicts.length} งาน: ${conflicts.map(c => c.title).join(', ')})`; banner.style.display = 'block'; }
+    else banner.style.display = 'none';
   }
 
-  /**
-   * Helper สำหรับเติมข้อมูลลงในฟอร์มนัดหมาย
-   * ยุบการกำหนดค่าระหว่างหน้าต่างสร้างนัดและแก้ไขนัดเข้าสู่ฟังก์ชันเดียว
-   */
+  function updateDateThaiPreview() { const v = $('formDate').value; $('formDateThaiPreview').textContent = v ? Logic.formatThaiDateDisplay(v, true) : 'ยังไม่ระบุวันที่'; }
+
   function fillAptForm(f) {
     $('formAptId').value = f.id || ''; $('formExpectedUpdatedAt').value = f.updatedAt || '';
     $('formTitle').value = f.title || ''; $('formStatus').value = f.status || Logic.STATUS.CONFIRMED;
@@ -649,19 +574,12 @@
     updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
   }
 
-  /**
-   * เปิดหน้าต่างสร้างนัดหมายใหม่
-   * @param {string} [prefillDate] - วันที่เลือกจากช่องปฏิทิน (ถ้ามี) ในรูปแบบ YYYY-MM-DD
-   */
   function openCreateModal(prefillDate) {
     $('modalTitle').textContent = 'สร้างนัดหมายใหม่';
     if ($('formNotifyLine')) $('formNotifyLine').checked = true;
     if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนนัดหมายใหม่เข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = $('btnDeleteApt').style.display = 'none';
-    if ($('formCreatedByPill')) {
-      $('formCreatedByPill').textContent = `ผู้สร้างนัดหมาย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
-      $('formCreatedByPill').style.display = 'inline-block';
-    }
+    if ($('formCreatedByPill')) { $('formCreatedByPill').textContent = `ผู้สร้างนัดหมาย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`; $('formCreatedByPill').style.display = 'inline-block'; }
     fillAptForm({ date: typeof prefillDate === 'string' && prefillDate ? prefillDate : Logic.getBangkokParts().dateStr });
   }
 
@@ -671,18 +589,10 @@
     if ($('formNotifyLine')) $('formNotifyLine').checked = false;
     if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนการแก้ไขนัดหมายเข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = 'block'; $('btnDeleteApt').style.display = 'inline-flex';
-    if ($('formCreatedByPill')) {
-      $('formCreatedByPill').textContent = `ผู้สร้างนัดหมายเดิม: ${a.createdBy || a.updatedBy || '-'} | แก้ไขโดย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`;
-      $('formCreatedByPill').style.display = 'inline-block';
-    }
+    if ($('formCreatedByPill')) { $('formCreatedByPill').textContent = `ผู้สร้างนัดหมายเดิม: ${a.createdBy || a.updatedBy || '-'} | แก้ไขโดย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`; $('formCreatedByPill').style.display = 'inline-block'; }
     fillAptForm({ id: a.id, updatedAt: a.updatedAt, title: a.title, status: Logic.normalizeStatus(a.status), contactPerson: a.contactPerson, date: a.appointmentDate, time: a.appointmentTime, location: a.location, remindDays: a.remindDaysBefore, remindHours: a.remindHoursBefore, notes: a.notes });
   }
 
-  function updateDateThaiPreview() {
-    const v = $('formDate').value; $('formDateThaiPreview').textContent = v ? Logic.formatThaiDateDisplay(v, true) : 'ยังไม่ระบุวันที่';
-  }
-
-  // Optimistic Form Submit (Instant UI update + Background GAS reconciliation & Snapshot Rollback)
   async function handleFormSubmit(e) {
     e.preventDefault();
     const id = $('formAptId').value.trim(), exp = $('formExpectedUpdatedAt').value.trim();
@@ -696,9 +606,7 @@
       notes: Logic.sanitizeNoEmoji($('formNotes').value), updatedBy: curUserName
     };
     const reason = Logic.sanitizeNoEmoji($('formRescheduleReason').value), notifyLine = $('formNotifyLine') ? Boolean($('formNotifyLine').checked) : !id;
-    if (!id) payload.createdBy = curUserName;
-    else { payload.statusChangedBy = curUserName; if (reason) payload.statusReason = reason; }
-
+    if (!id) payload.createdBy = curUserName; else { payload.statusChangedBy = curUserName; if (reason) payload.statusReason = reason; }
     const v = Logic.validateAppointmentInput(payload);
     if (!v.valid) { showToast(v.errors.join(' | '), 'error'); return; }
 
@@ -706,199 +614,116 @@
     try {
       const now = Logic.getBangkokParts().isoStr;
       let savedApt = null;
-      if (!id) {
-        savedApt = Logic.createAppointmentRecord(payload, state.appointments, now);
-        state.appointments.push(savedApt);
-      } else {
+      if (!id) { savedApt = Logic.createAppointmentRecord(payload, state.appointments, now); state.appointments.push(savedApt); }
+      else {
         const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
         if (idx === -1) throw new Error('ไม่พบรายการนัดหมาย');
         const r = Logic.updateAppointmentRecord(state.appointments[idx], payload, { nowIso: now, expectedUpdatedAt: exp, reason });
         state.appointments[idx] = savedApt = r.record;
         if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
       }
-      if (!state.isLive && notifyLine && savedApt && $('botSimOutput')) {
-        $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(savedApt, Boolean(id), { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
-      }
+      if (!state.isLive && notifyLine && savedApt && $('botSimOutput')) $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(savedApt, Boolean(id), { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
       if (!state.isLive) saveDemoData();
-      closeModal('appointmentModal');
-      renderAll();
+      closeModal('appointmentModal'); renderActiveTab();
       showToast(id ? 'บันทึกการแก้ไขนัดหมายเรียบร้อยแล้ว' : 'สร้างนัดหมายใหม่เรียบร้อยแล้ว', 'success');
 
       if (state.isLive) {
-        const tempId = savedApt.id;
-        pendingIds.add(tempId);
-        setBgSync(true);
-        const apiPromise = id
-          ? callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine })
-          : callGasApi('create', { payload, notifyLine });
-        apiPromise
-          .then(res => {
-            if (res && res.appointment) {
-              const curIdx = state.appointments.findIndex(x => x.id === tempId);
-              if (curIdx !== -1) state.appointments[curIdx] = res.appointment;
-              else state.appointments.push(res.appointment);
-            }
-            if (res && res.meta) state.meta = { ...state.meta, ...res.meta };
-            renderAll();
-          })
-          .catch(err => {
-            state.appointments = prevApts;
-            state.rescheduleLogs = prevLogs;
-            renderAll();
-            showToast('บันทึกไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
-            if (err.code === 'CONCURRENCY_CONFLICT') syncWithServer(true);
-          })
-          .finally(() => {
-            pendingIds.delete(tempId);
-            setBgSync(false);
-          });
+        const tempId = savedApt.id, optSig = aptVisualSig(savedApt);
+        runBgTask(tempId, () => id ? callGasApi('update', { id, payload, expectedUpdatedAt: exp, reason, notifyLine }) : callGasApi('create', { payload, notifyLine }), res => {
+          let needRedraw = false;
+          if (res && res.appointment) {
+            const curIdx = state.appointments.findIndex(x => x.id === tempId);
+            if (curIdx !== -1) state.appointments[curIdx] = res.appointment; else state.appointments.push(res.appointment);
+            if (aptVisualSig(res.appointment) !== optSig) needRedraw = true;
+          }
+          if (res && res.meta) state.meta = { ...state.meta, ...res.meta };
+          if (needRedraw) renderActiveTab(); else renderHeader();
+        }, err => {
+          state.appointments = prevApts; state.rescheduleLogs = prevLogs; renderActiveTab();
+          showToast('บันทึกไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
+          if (err.code === 'CONCURRENCY_CONFLICT') syncWithServer(true);
+        });
       }
-    } catch (err) {
-      state.appointments = prevApts;
-      state.rescheduleLogs = prevLogs;
-      showToast(err.message, 'error');
-    }
+    } catch (err) { state.appointments = prevApts; state.rescheduleLogs = prevLogs; showToast(err.message, 'error'); }
   }
 
-  // Unified Status Mutation Handler (Optimistic UI + Background GAS reconciliation)
   async function mutateAptStatus(id, newStatus, reason, extra) {
     if (pendingIds.has(id)) { showToast('รายการนี้กำลังซิงก์ข้อมูลอยู่ กรุณารอสักครู่', 'info'); return false; }
     const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
     if (idx === -1) return false;
-    const prevApt = { ...state.appointments[idx] }, prevLogs = [...state.rescheduleLogs];
-    const curUser = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
+    const prevApt = { ...state.appointments[idx] }, prevLogs = [...state.rescheduleLogs], curUser = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
     const notifyLine = (extra && extra.notifyLine !== undefined) ? extra.notifyLine : (String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE');
-    const patch = {
-      status: newStatus, updatedBy: curUser,
-      statusChangedBy: newStatus === Logic.STATUS.CONFIRMED ? '' : curUser,
-      statusReason: newStatus === Logic.STATUS.CONFIRMED ? '' : (extra && extra.statusReason ? Logic.sanitizeNoEmoji(extra.statusReason) : (reason || ''))
-    };
+    const patch = { status: newStatus, updatedBy: curUser, statusChangedBy: newStatus === Logic.STATUS.CONFIRMED ? '' : curUser, statusReason: newStatus === Logic.STATUS.CONFIRMED ? '' : (extra && extra.statusReason ? Logic.sanitizeNoEmoji(extra.statusReason) : (reason || '')) };
 
     try {
       const r = Logic.updateAppointmentRecord(prevApt, patch, { nowIso: Logic.getBangkokParts().isoStr, expectedUpdatedAt: prevApt.updatedAt, reason: reason || newStatus });
       state.appointments[idx] = r.record;
       if (r.logs.length) state.rescheduleLogs = [...r.logs, ...state.rescheduleLogs];
-      if (!state.isLive && notifyLine && $('botSimOutput')) {
-        $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
-      }
+      if (!state.isLive && notifyLine && $('botSimOutput')) $('botSimOutput').textContent = Logic.formatInstantAppointmentMessage(r.record, true, { privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE' });
       if (!state.isLive) saveDemoData();
-      renderAll();
+      renderActiveTab();
 
       if (state.isLive) {
-        pendingIds.add(id);
-        setBgSync(true);
-        callGasApi('update', { id, payload: patch, expectedUpdatedAt: prevApt.updatedAt, notifyLine, reason: reason || newStatus })
-          .then(res => {
-            if (res && res.appointment) {
-              const curIdx = state.appointments.findIndex(x => x.id === id);
-              if (curIdx !== -1) state.appointments[curIdx] = res.appointment;
-            }
-            if (res && res.meta) state.meta = { ...state.meta, ...res.meta };
-            renderAll();
-          })
-          .catch(err => {
+        const optSig = aptVisualSig(r.record);
+        runBgTask(id, () => callGasApi('update', { id, payload: patch, expectedUpdatedAt: prevApt.updatedAt, notifyLine, reason: reason || newStatus }), res => {
+          let needRedraw = false;
+          if (res && res.appointment) {
             const curIdx = state.appointments.findIndex(x => x.id === id);
-            if (curIdx !== -1) state.appointments[curIdx] = prevApt;
-            state.rescheduleLogs = prevLogs;
-            renderAll();
-            showToast('เปลี่ยนสถานะไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
-            if (err.code === 'CONCURRENCY_CONFLICT') syncWithServer(true);
-          })
-          .finally(() => {
-            pendingIds.delete(id);
-            setBgSync(false);
-          });
+            if (curIdx !== -1) state.appointments[curIdx] = res.appointment;
+            if (aptVisualSig(res.appointment) !== optSig) needRedraw = true;
+          }
+          if (res && res.meta) state.meta = { ...state.meta, ...res.meta };
+          if (needRedraw) renderActiveTab(); else renderHeader();
+        }, err => {
+          const curIdx = state.appointments.findIndex(x => x.id === id);
+          if (curIdx !== -1) state.appointments[curIdx] = prevApt;
+          state.rescheduleLogs = prevLogs; renderActiveTab();
+          showToast('เปลี่ยนสถานะไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
+          if (err.code === 'CONCURRENCY_CONFLICT') syncWithServer(true);
+        });
       }
       return true;
-    } catch (err) {
-      state.appointments[idx] = prevApt;
-      state.rescheduleLogs = prevLogs;
-      showToast(err.message, 'error');
-      return false;
-    }
+    } catch (err) { state.appointments[idx] = prevApt; state.rescheduleLogs = prevLogs; showToast(err.message, 'error'); return false; }
   }
 
-  async function handleQuickComplete(id) {
-    const ok = await mutateAptStatus(id, Logic.STATUS.COMPLETED, 'เสร็จสิ้นการนัดหมาย');
-    if (ok) showToast(`บันทึก [${id}] สิ้นสุดการนัดหมายแล้ว`, 'success');
-  }
-
+  async function handleQuickComplete(id) { if (await mutateAptStatus(id, Logic.STATUS.COMPLETED, 'เสร็จสิ้นการนัดหมาย')) showToast(`บันทึก [${id}] สิ้นสุดการนัดหมายแล้ว`, 'success'); }
   function openCancelModal(id) {
     const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a) return;
-    $('cancelAptId').value = a.id;
-    $('cancelAptSummary').textContent = `[${a.id}] ${a.title} (ผู้สร้าง: ${a.createdBy || a.updatedBy || '-'})`;
-    $('cancelReasonInput').value = '';
-    if ($('cancelNotifyLine')) $('cancelNotifyLine').checked = true;
-    openModal('cancelModal');
+    $('cancelAptId').value = a.id; $('cancelAptSummary').textContent = `[${a.id}] ${a.title} (ผู้สร้าง: ${a.createdBy || a.updatedBy || '-'})`;
+    $('cancelReasonInput').value = ''; if ($('cancelNotifyLine')) $('cancelNotifyLine').checked = true; openModal('cancelModal');
   }
-
   async function handleCancelSubmit(e) {
     e.preventDefault();
-    const id = $('cancelAptId').value.trim(), reason = Logic.sanitizeNoEmoji($('cancelReasonInput').value);
-    const notifyLine = $('cancelNotifyLine') ? $('cancelNotifyLine').checked : true;
-    const ok = await mutateAptStatus(id, Logic.STATUS.CANCELLED, reason || 'ยกเลิกการนัดหมาย', { statusReason: reason, notifyLine });
-    if (ok) { closeModal('cancelModal'); showToast(`ยกเลิกนัดหมาย [${id}] เรียบร้อยแล้ว`, 'warn'); }
+    const id = $('cancelAptId').value.trim(), reason = Logic.sanitizeNoEmoji($('cancelReasonInput').value), notifyLine = $('cancelNotifyLine') ? $('cancelNotifyLine').checked : true;
+    if (await mutateAptStatus(id, Logic.STATUS.CANCELLED, reason || 'ยกเลิกการนัดหมาย', { statusReason: reason, notifyLine })) { closeModal('cancelModal'); showToast(`ยกเลิกนัดหมาย [${id}] เรียบร้อยแล้ว`, 'warn'); }
   }
-
-  async function handleQuickReopen(id) {
-    const ok = await mutateAptStatus(id, Logic.STATUS.CONFIRMED, 'คืนสถานะนัดหมาย', { notifyLine: true });
-    if (ok) showToast(`คืนสถานะ [${id}] เป็น "นัดหมายแล้ว" เรียบร้อย`, 'success');
-  }
+  async function handleQuickReopen(id) { if (await mutateAptStatus(id, Logic.STATUS.CONFIRMED, 'คืนสถานะนัดหมาย', { notifyLine: true })) showToast(`คืนสถานะ [${id}] เป็น "นัดหมายแล้ว" เรียบร้อย`, 'success'); }
 
   async function handleDelete() {
     const id = $('formAptId').value.trim(); if (!id || !confirm(`ยืนยันการลบนัดหมาย [${id}] หรือไม่?`)) return;
     if (pendingIds.has(id)) { showToast('รายการนี้กำลังซิงก์ข้อมูลอยู่ กรุณารอสักครู่', 'info'); return; }
-    const user = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
-    const idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
+    const user = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ', idx = state.appointments.findIndex(x => x.id === id && !x.deletedAt);
     if (idx === -1) return;
-
-    const prevApts = state.appointments.map(a => ({ ...a })), prevLogs = [...state.rescheduleLogs];
-    const removed = state.appointments[idx];
+    const prevApts = state.appointments.map(a => ({ ...a })), prevLogs = [...state.rescheduleLogs], removed = state.appointments[idx];
     state.appointments.splice(idx, 1);
-    state.rescheduleLogs.unshift({
-      logId: `LOG-${Date.now()}-DEL`, appointmentId: id, changedAt: Logic.getBangkokParts().isoStr,
-      changedBy: user, fieldChanged: 'DELETED', oldValue: removed.title, newValue: 'ลบนัดหมาย', reason: 'ลบออกจากระบบ'
-    });
+    state.rescheduleLogs.unshift({ logId: `LOG-${Date.now()}-DEL`, appointmentId: id, changedAt: Logic.getBangkokParts().isoStr, changedBy: user, fieldChanged: 'DELETED', oldValue: removed.title, newValue: 'ลบนัดหมาย', reason: 'ลบออกจากระบบ' });
     if (!state.isLive) saveDemoData();
-    closeModal('appointmentModal');
-    renderAll();
-    showToast(`ลบนัดหมาย [${id}] เรียบร้อยแล้ว`, 'warn');
-
+    closeModal('appointmentModal'); renderActiveTab(); showToast(`ลบนัดหมาย [${id}] เรียบร้อยแล้ว`, 'warn');
     if (state.isLive) {
-      pendingIds.add(id);
-      setBgSync(true);
-      callGasApi('delete', { id, updatedBy: user })
-        .catch(err => {
-          state.appointments = prevApts;
-          state.rescheduleLogs = prevLogs;
-          renderAll();
-          showToast('ลบนัดหมายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
-        })
-        .finally(() => {
-          pendingIds.delete(id);
-          setBgSync(false);
-        });
+      runBgTask(id, () => callGasApi('delete', { id, updatedBy: user }), null, err => {
+        state.appointments = prevApts; state.rescheduleLogs = prevLogs; renderActiveTab();
+        showToast('ลบนัดหมายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
+      });
     }
   }
 
-  // ==========================================================================
-  // 9. USER ADMINISTRATION (ADMIN ONLY)
-  // ==========================================================================
-  /**
-   * เปิดหน้าต่างจัดการข้อมูลสมาชิก (เพิ่มใหม่ / แก้ไขชื่อ, รหัสผ่าน, สิทธิ์)
-   * สงวนสิทธิ์เฉพาะผู้ใช้ระดับ ADMIN เท่านั้น
-   */
   function openUserModal(userId) {
-    if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
-    }
+    if (!state.currentUser || state.currentUser.role !== 'ADMIN') { showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return; }
     state.editingUserId = userId || null;
     $('userModalTitle').textContent = userId ? 'แก้ไขข้อมูลสมาชิก' : 'เพิ่มสมาชิกใหม่';
-    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-    const u = userId ? uList.find(x => x.userId === userId) : null;
+    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, u = userId ? uList.find(x => x.userId === userId) : null;
     $('formUsername').value = u ? u.username : ''; $('formUsername').disabled = Boolean(u);
-    $('formDisplayName').value = u ? (u.displayName || u.username) : '';
-    $('formUserPassword').value = ''; $('formUserRole').value = u ? (u.role || 'STAFF') : 'STAFF';
+    $('formDisplayName').value = u ? (u.displayName || u.username) : ''; $('formUserPassword').value = ''; $('formUserRole').value = u ? (u.role || 'STAFF') : 'STAFF';
     $('formUserPasswordReqStar').style.display = u ? 'none' : 'inline';
     $('formUserPasswordHint').textContent = u ? 'เว้นว่างไว้หากไม่ต้องการเปลี่ยนรหัสผ่าน' : 'กำหนดรหัสผ่านสำหรับเข้าสู่ระบบ';
     openModal('userModal');
@@ -906,31 +731,20 @@
 
   async function handleUserFormSubmit(e) {
     e.preventDefault();
-    if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
-    }
-    const un = ($('formUsername').value || '').trim().toLowerCase(), disp = Logic.sanitizeNoEmoji($('formDisplayName').value);
-    const pw = $('formUserPassword').value || '', role = $('formUserRole').value;
-    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS;
-    const existingU = state.editingUserId ? uList.find(x => x.userId === state.editingUserId) : null;
+    if (!state.currentUser || state.currentUser.role !== 'ADMIN') { showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return; }
+    const un = ($('formUsername').value || '').trim().toLowerCase(), disp = Logic.sanitizeNoEmoji($('formDisplayName').value), pw = $('formUserPassword').value || '', role = $('formUserRole').value;
+    const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, existingU = state.editingUserId ? uList.find(x => x.userId === state.editingUserId) : null;
     const payload = { userId: state.editingUserId || undefined, isNew: !state.editingUserId, username: un, displayName: disp, role, isActive: existingU ? existingU.isActive !== false : true };
     if (pw) payload.password = pw;
-
     try {
-      const v = Logic.validateUserInput(payload, !state.editingUserId);
-      if (!v.valid) throw new Error(v.errors.join(' | '));
+      const v = Logic.validateUserInput(payload, !state.editingUserId); if (!v.valid) throw new Error(v.errors.join(' | '));
       if (!state.editingUserId && uList.some(x => x.username.toLowerCase() === un)) throw new Error('ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น');
-
-      const prevUsers = (state.users || []).map(u => ({ ...u }));
-      const s = v.sanitized;
+      const prevUsers = (state.users || []).map(u => ({ ...u })), s = v.sanitized;
       if (state.editingUserId) {
         const idx = state.users.findIndex(x => x.userId === state.editingUserId);
         if (idx !== -1) { state.users[idx].displayName = s.displayName; state.users[idx].role = s.role; if (s.passwordHash) state.users[idx].passwordHash = s.passwordHash; }
       } else {
-        const maxNum = (state.users || []).reduce((m, x) => {
-          const n = x.userId && x.userId.startsWith('USR-') ? parseInt(x.userId.slice(4), 10) : 0;
-          return !isNaN(n) && n > m ? n : m;
-        }, 0);
+        const maxNum = (state.users || []).reduce((m, x) => { const n = x.userId && x.userId.startsWith('USR-') ? parseInt(x.userId.slice(4), 10) : 0; return !isNaN(n) && n > m ? n : m; }, 0);
         state.users.push({ userId: `USR-${String(maxNum + 1).padStart(3, '0')}`, username: s.username, displayName: s.displayName, role: s.role, passwordHash: s.passwordHash, isActive: true, createdAt: Logic.getBangkokParts().isoStr });
       }
       if (state.editingUserId && state.currentUser && state.currentUser.userId === state.editingUserId) {
@@ -939,105 +753,60 @@
         updateUserSessionUI();
       }
       if (!state.isLive) saveDemoData();
-      closeModal('userModal');
-      renderAll();
-      showToast('บันทึกข้อมูลสมาชิกเรียบร้อยแล้ว', 'success');
-
+      closeModal('userModal'); renderActiveTab(); showToast('บันทึกข้อมูลสมาชิกเรียบร้อยแล้ว', 'success');
       if (state.isLive) {
-        setBgSync(true);
-        callGasApi('saveUser', { userPayload: payload })
-          .then(res => {
-            if (res && res.user) {
-              const idx = state.users.findIndex(x => x.userId === res.user.userId || x.username === res.user.username);
-              if (idx !== -1) state.users[idx] = { ...state.users[idx], ...res.user };
-              else state.users.push(res.user);
-              renderAll();
-            }
-          })
-          .catch(err => {
-            state.users = prevUsers;
-            renderAll();
-            showToast('บันทึกสมาชิกไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
-          })
-          .finally(() => setBgSync(false));
+        runBgTask(null, () => callGasApi('saveUser', { userPayload: payload }), res => {
+          if (res && res.user) {
+            const idx = state.users.findIndex(x => x.userId === res.user.userId || x.username === res.user.username);
+            if (idx !== -1) state.users[idx] = { ...state.users[idx], ...res.user }; else state.users.push(res.user);
+            renderActiveTab();
+          }
+        }, err => { state.users = prevUsers; renderActiveTab(); showToast('บันทึกสมาชิกไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error'); });
       }
     } catch (err) { showToast(err.message, 'error'); }
   }
 
   async function handleToggleUserStatus(userId, curActive) {
-    if (!state.currentUser || state.currentUser.role !== 'ADMIN') {
-      showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return;
-    }
+    if (!state.currentUser || state.currentUser.role !== 'ADMIN') { showToast('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่สามารถจัดการสมาชิกได้', 'error'); return; }
     const uList = state.users && state.users.length ? state.users : Logic.DEFAULT_USERS, u = uList.find(x => x.userId === userId);
-    if (u && (u.username === 'admin' || (state.currentUser && u.username === state.currentUser.username))) {
-      showToast('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลักหรือบัญชีที่กำลังใช้งานอยู่ได้', 'error'); return;
-    }
-    const targetStatus = !curActive;
-    const idx = state.users.findIndex(x => x.userId === userId);
-    if (idx === -1) return;
+    if (u && (u.username === 'admin' || (state.currentUser && u.username === state.currentUser.username))) { showToast('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลักหรือบัญชีที่กำลังใช้งานอยู่ได้', 'error'); return; }
+    const targetStatus = !curActive, idx = state.users.findIndex(x => x.userId === userId); if (idx === -1) return;
     state.users[idx].isActive = targetStatus;
     if (!state.isLive) saveDemoData();
-    renderAll();
-    showToast(`ปรับสถานะผู้ใช้งานเป็น ${targetStatus ? 'เปิดใช้งาน' : 'ระงับการใช้งาน'} แล้ว`, 'info');
-
+    renderActiveTab(); showToast(`ปรับสถานะผู้ใช้งานเป็น ${targetStatus ? 'เปิดใช้งาน' : 'ระงับการใช้งาน'} แล้ว`, 'info');
     if (state.isLive) {
-      setBgSync(true);
-      callGasApi('saveUser', { userPayload: { userId, username: u ? u.username : undefined, isActive: targetStatus } })
-        .catch(err => {
-          const curIdx = state.users.findIndex(x => x.userId === userId);
-          if (curIdx !== -1) state.users[curIdx].isActive = curActive;
-          renderAll();
-          showToast('ปรับสถานะไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
-        })
-        .finally(() => setBgSync(false));
+      runBgTask(null, () => callGasApi('saveUser', { userPayload: { userId, username: u ? u.username : undefined, isActive: targetStatus } }), null, err => {
+        const curIdx = state.users.findIndex(x => x.userId === userId);
+        if (curIdx !== -1) state.users[curIdx].isActive = curActive;
+        renderActiveTab(); showToast('ปรับสถานะไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error');
+      });
     }
   }
 
   // ==========================================================================
-  // 10. EVENT BINDINGS & LIFECYCLE INITIALIZATION
+  // EVENT BINDINGS & LIFECYCLE
   // ==========================================================================
-  /**
-   * ผูก Event Listeners ทั้งหมดของหน้าเว็บแอปพลิเคชัน
-   * จัดกลุ่มตาม: แท็บ, ปุ่มธีม, ระบบล็อกอิน, โมดอลผู้ใช้, โมดอลยกเลิก,
-   * โมดอลนัดหมาย, ตัวกรองข้อมูล, ปฏิทินรายเดือน, ภาพรวมรายปี, และแผงตั้งค่า
-   */
   function bindEvents() {
     document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.addEventListener('click', () => switchTab(b.getAttribute('data-tab'))));
     on('btnToggleTheme', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
     on('btnToggleThemeAuth', 'click', () => applyTheme(state.theme === 'dark' ? 'light' : 'dark'));
+    on('btnLogout', 'click', handleLogout); on('loginForm', 'submit', handleLoginSubmit); on('registerForm', 'submit', handleRegisterSubmit);
+    on('tabBtnAuthLogin', 'click', () => switchAuthTab('login')); on('tabBtnAuthRegister', 'click', () => switchAuthTab('register'));
+    on('btnSwitchToRegister', 'click', () => switchAuthTab('register')); on('btnSwitchToLogin', 'click', () => switchAuthTab('login'));
 
-    on('btnLogout', 'click', handleLogout);
-    on('loginForm', 'submit', handleLoginSubmit);
-    on('registerForm', 'submit', handleRegisterSubmit);
-    on('tabBtnAuthLogin', 'click', () => switchAuthTab('login'));
-    on('tabBtnAuthRegister', 'click', () => switchAuthTab('register'));
-    on('btnSwitchToRegister', 'click', () => switchAuthTab('register'));
-    on('btnSwitchToLogin', 'click', () => switchAuthTab('login'));
-
-    on('btnOpenAddUserModal', 'click', () => openUserModal(null));
-    on('btnCloseUserModalTop', 'click', () => closeModal('userModal'));
-    on('btnCancelUserModal', 'click', () => closeModal('userModal'));
-    on('userForm', 'submit', handleUserFormSubmit);
-
-    on('btnCloseCancelModalTop', 'click', () => closeModal('cancelModal'));
-    on('btnDismissCancelModal', 'click', () => closeModal('cancelModal'));
+    on('btnOpenAddUserModal', 'click', () => openUserModal(null)); on('btnCloseUserModalTop', 'click', () => closeModal('userModal'));
+    on('btnCancelUserModal', 'click', () => closeModal('userModal')); on('userForm', 'submit', handleUserFormSubmit);
+    on('btnCloseCancelModalTop', 'click', () => closeModal('cancelModal')); on('btnDismissCancelModal', 'click', () => closeModal('cancelModal'));
     on('cancelForm', 'submit', handleCancelSubmit);
 
-    on('btnOpenCreateModal', 'click', () => openCreateModal());
-    on('btnMobileFabCreate', 'click', () => openCreateModal());
+    on('btnOpenCreateModal', 'click', () => openCreateModal()); on('btnMobileFabCreate', 'click', () => openCreateModal());
     on('btnAddAptOnSelectedDate', 'click', () => openCreateModal(state.calSelectedDate || `${state.calYear}-${String(state.calMonth).padStart(2, '0')}-01`));
     on('btnShowAllMonthApts', 'click', () => { state.calSelectedDate = ''; renderCalendarTab(); });
-    on('btnCloseModalTop', 'click', () => closeModal('appointmentModal'));
-    on('btnCancelModal', 'click', () => closeModal('appointmentModal'));
-    on('formDate', 'change', () => { updateDateThaiPreview(); checkConflictOnForm(); });
-    on('formTime', 'change', checkConflictOnForm);
-    on('appointmentForm', 'submit', handleFormSubmit);
-    on('btnDeleteApt', 'click', handleDelete);
-    on('btnSyncNow', 'click', () => syncWithServer(false));
+    on('btnCloseModalTop', 'click', () => closeModal('appointmentModal')); on('btnCancelModal', 'click', () => closeModal('appointmentModal'));
+    on('formDate', 'change', () => { updateDateThaiPreview(); checkConflictOnForm(); }); on('formTime', 'change', checkConflictOnForm);
+    on('appointmentForm', 'submit', handleFormSubmit); on('btnDeleteApt', 'click', handleDelete); on('btnSyncNow', 'click', () => syncWithServer(false));
 
-    document.querySelectorAll('.time-chip').forEach(c => c.addEventListener('click', () => {
-      if ($('formTime')) { $('formTime').value = c.getAttribute('data-time') || ''; checkConflictOnForm(); }
-    }));
+    document.querySelectorAll('.time-chip').forEach(c => c.addEventListener('click', () => { if ($('formTime')) { $('formTime').value = c.getAttribute('data-time') || ''; checkConflictOnForm(); } }));
     document.querySelectorAll('.range-chip').forEach(c => c.addEventListener('click', () => {
       state.quickRange = c.getAttribute('data-range') || 'ALL';
       document.querySelectorAll('.range-chip').forEach(x => x.classList.toggle('active', x === c));
@@ -1046,11 +815,8 @@
     }));
 
     on('btnOpenPatchNotesModal', 'click', () => { renderPatchNotes(); openModal('patchNotesModal'); });
-    on('btnClosePatchNotesModalTop', 'click', () => closeModal('patchNotesModal'));
-    on('btnClosePatchNotesModal', 'click', () => closeModal('patchNotesModal'));
-    on('btnOpenGuideModal', 'click', () => openModal('guideModal'));
-    on('btnCloseGuideModalTop', 'click', () => closeModal('guideModal'));
-    on('btnCloseGuideModal', 'click', () => closeModal('guideModal'));
+    on('btnClosePatchNotesModalTop', 'click', () => closeModal('patchNotesModal')); on('btnClosePatchNotesModal', 'click', () => closeModal('patchNotesModal'));
+    on('btnOpenGuideModal', 'click', () => openModal('guideModal')); on('btnCloseGuideModalTop', 'click', () => closeModal('guideModal')); on('btnCloseGuideModal', 'click', () => closeModal('guideModal'));
 
     const setTeamConn = async () => {
       state.gasUrl = DEFAULT_GAS_URL; state.passcode = DEFAULT_PASSCODE; state.isLive = true;
@@ -1058,16 +824,12 @@
       localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: true }));
       closeModal('guideModal'); await syncWithServer(false);
     };
-    on('btnQuickConnectFromGuide', 'click', setTeamConn);
-    on('btnResetDefaultConn', 'click', setTeamConn);
+    on('btnQuickConnectFromGuide', 'click', setTeamConn); on('btnResetDefaultConn', 'click', setTeamConn);
 
-    on('filterSearch', 'input', renderListTab);
-    on('filterStatus', 'change', renderListTab);
-    on('filterUser', 'change', renderListTab);
-    on('filterDate', 'change', () => {
-      if ($('filterDate').value) { state.quickRange = 'ALL'; document.querySelectorAll('.range-chip').forEach(c => c.classList.toggle('active', c.getAttribute('data-range') === 'ALL')); }
-      renderListTab();
-    });
+    let searchRaf = 0;
+    on('filterSearch', 'input', () => { cancelAnimationFrame(searchRaf); searchRaf = requestAnimationFrame(renderListTab); });
+    on('filterStatus', 'change', renderListTab); on('filterUser', 'change', renderListTab);
+    on('filterDate', 'change', () => { if ($('filterDate').value) { state.quickRange = 'ALL'; document.querySelectorAll('.range-chip').forEach(c => c.classList.toggle('active', c.getAttribute('data-range') === 'ALL')); } renderListTab(); });
     on('btnClearFilters', 'click', () => {
       $('filterSearch').value = $('filterStatus').value = $('filterDate').value = '';
       if ($('filterUser')) $('filterUser').value = '';
@@ -1077,48 +839,42 @@
     document.querySelectorAll('.stat-pill').forEach(p => p.addEventListener('click', () => { $('filterStatus').value = p.getAttribute('data-filter-status') || ''; renderListTab(); }));
 
     document.addEventListener('click', e => {
-      const addCell = e.target.closest('.btn-cell-add');
+      const t = e.target, addCell = t.closest('.btn-cell-add');
       if (addCell) { e.stopPropagation(); const dt = addCell.getAttribute('data-add-date'); state.calSelectedDate = dt || ''; renderCalendarTab(); openCreateModal(dt); return; }
-      const jumpM = e.target.closest('.btn-jump-cal-month');
-      if (jumpM) { state.calYear = +jumpM.getAttribute('data-year'); state.calMonth = +jumpM.getAttribute('data-month'); state.calSelectedDate = ''; renderCalendarTab(); switchTab('tabMonth'); return; }
-      const edit = e.target.closest('.btn-edit-apt'); if (edit) { openEditModal(edit.getAttribute('data-id')); return; }
-      const comp = e.target.closest('.btn-quick-complete'); if (comp) { handleQuickComplete(comp.getAttribute('data-id')); return; }
-      const canc = e.target.closest('.btn-open-cancel-modal'); if (canc) { openCancelModal(canc.getAttribute('data-id')); return; }
-      const reopen = e.target.closest('.btn-quick-reopen'); if (reopen) { handleQuickReopen(reopen.getAttribute('data-id')); return; }
-      const editU = e.target.closest('.btn-edit-user'); if (editU) { openUserModal(editU.getAttribute('data-uid')); return; }
-      const toggleU = e.target.closest('.btn-toggle-user'); if (toggleU) { handleToggleUserStatus(toggleU.getAttribute('data-uid'), toggleU.getAttribute('data-active') === 'true'); return; }
-      const cell = e.target.closest('.cal-cell:not(.empty)'); if (cell) { const d = cell.getAttribute('data-date'); state.calSelectedDate = state.calSelectedDate === d ? '' : d; renderCalendarTab(); return; }
-      const yc = e.target.closest('.year-summary-card'); if (yc) { state.overviewYear = +yc.getAttribute('data-year'); $('yearOverviewInput').value = String(state.overviewYear + 543); renderYearTab(); return; }
-      const qc = e.target.closest('.btn-quick-cmd'); if (qc) { $('botSimInput').value = qc.getAttribute('data-cmd'); runBotSim(); }
+      const jumpM = t.closest('.btn-jump-cal-month'); if (jumpM) { state.calYear = +jumpM.getAttribute('data-year'); state.calMonth = +jumpM.getAttribute('data-month'); state.calSelectedDate = ''; switchTab('tabMonth'); return; }
+      const edit = t.closest('.btn-edit-apt'); if (edit) { openEditModal(edit.getAttribute('data-id')); return; }
+      const comp = t.closest('.btn-quick-complete'); if (comp) { handleQuickComplete(comp.getAttribute('data-id')); return; }
+      const canc = t.closest('.btn-open-cancel-modal'); if (canc) { openCancelModal(canc.getAttribute('data-id')); return; }
+      const reopen = t.closest('.btn-quick-reopen'); if (reopen) { handleQuickReopen(reopen.getAttribute('data-id')); return; }
+      const editU = t.closest('.btn-edit-user'); if (editU) { openUserModal(editU.getAttribute('data-uid')); return; }
+      const toggleU = t.closest('.btn-toggle-user'); if (toggleU) { handleToggleUserStatus(toggleU.getAttribute('data-uid'), toggleU.getAttribute('data-active') === 'true'); return; }
+      const cell = t.closest('.cal-cell:not(.empty)'); if (cell) { const d = cell.getAttribute('data-date'); state.calSelectedDate = state.calSelectedDate === d ? '' : d; renderCalendarTab(); return; }
+      const yc = t.closest('.year-summary-card'); if (yc) { state.overviewYear = +yc.getAttribute('data-year'); $('yearOverviewInput').value = String(state.overviewYear + 543); renderYearTab(); return; }
+      const qc = t.closest('.btn-quick-cmd'); if (qc) { $('botSimInput').value = qc.getAttribute('data-cmd'); runBotSim(); }
     });
 
     on('btnPrevMonth', 'click', () => { state.calSelectedDate = ''; if (--state.calMonth < 1) { state.calMonth = 12; state.calYear--; } renderCalendarTab(); });
     on('btnNextMonth', 'click', () => { state.calSelectedDate = ''; if (++state.calMonth > 12) { state.calMonth = 1; state.calYear++; } renderCalendarTab(); });
     on('btnCurrentMonth', 'click', () => { const now = Logic.getBangkokParts(); state.calYear = now.year; state.calMonth = now.month; state.calSelectedDate = now.dateStr; renderCalendarTab(); });
-    on('btnJumpMonth', 'click', () => {
-      const y = Logic.normalizeYearToCE($('calInputYear').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; }
-      state.calMonth = +$('calSelectMonth').value; state.calYear = y; state.calSelectedDate = ''; renderCalendarTab();
-    });
-    on('btnJumpYearOverview', 'click', () => {
-      const y = Logic.normalizeYearToCE($('yearOverviewInput').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; }
-      state.overviewYear = y; renderYearTab();
-    });
+    on('btnJumpMonth', 'click', () => { const y = Logic.normalizeYearToCE($('calInputYear').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; } state.calMonth = +$('calSelectMonth').value; state.calYear = y; state.calSelectedDate = ''; renderCalendarTab(); });
+    on('btnJumpYearOverview', 'click', () => { const y = Logic.normalizeYearToCE($('yearOverviewInput').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; } state.overviewYear = y; renderYearTab(); });
 
     on('btnSaveConnection', 'click', async () => {
       const u = ($('cfgGasUrl').value || '').trim(), p = $('cfgPasscode').value || '';
       if (!u) { showToast('กรุณาระบุ Web App URL', 'error'); return; }
-      state.gasUrl = u; state.passcode = p; state.isLive = true;
+      state.gasUrl = u; state.passcode = p; state.isLive = true; clearLiveCache();
       localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: u, passcode: p, isLive: true }));
       await syncWithServer(false);
     });
     on('btnSwitchLocalDemo', 'click', () => {
-      state.isLive = false; localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: false }));
+      state.isLive = false; clearLiveCache();
+      localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: false }));
       loadDemoData(); renderAll(); showToast('สลับเป็นโหมดจำลองข้อมูลในเครื่อง (Demo) แล้ว', 'warn');
     });
     on('btnSavePolicy', 'click', () => {
       const prevMeta = { ...state.meta }, m = { DAILY_DIGEST_HOUR: String(+$('cfgDigestHour').value || 8), ENABLE_LINE_BOT_QUERY: $('cfgEnableBotQuery').checked ? 'TRUE' : 'FALSE', PRIVACY_MASK_CONTACT: $('cfgPrivacyMask').checked ? 'TRUE' : 'FALSE', NOTIFY_ON_STATUS_CHANGE: $('cfgNotifyStatusChange') && $('cfgNotifyStatusChange').checked ? 'TRUE' : 'FALSE' };
-      state.meta = { ...state.meta, ...m }; renderAll(); showToast(state.isLive ? 'บันทึกนโยบายเรียบร้อยแล้ว' : 'บันทึกนโยบายเรียบร้อยแล้ว (Demo)', 'success');
-      if (state.isLive) { setBgSync(true); callGasApi('updateMeta', { meta: m }).catch(err => { state.meta = prevMeta; renderAll(); showToast('บันทึกนโยบายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error'); }).finally(() => setBgSync(false)); }
+      state.meta = { ...state.meta, ...m }; renderActiveTab(); showToast(state.isLive ? 'บันทึกนโยบายเรียบร้อยแล้ว' : 'บันทึกนโยบายเรียบร้อยแล้ว (Demo)', 'success');
+      if (state.isLive) runBgTask(null, () => callGasApi('updateMeta', { meta: m }), null, err => { state.meta = prevMeta; renderActiveTab(); showToast('บันทึกนโยบายไม่สำเร็จ ระบบคืนค่าเดิมแล้ว: ' + err.message, 'error'); });
     });
 
     const handleTriggerSetup = async (mode, desc) => {
@@ -1155,8 +911,7 @@
     const res = Logic.parseAndExecuteLineCommand(txt, state.appointments, Logic.getBangkokParts().isoStr, {
       enableLineBotQuery: String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE',
       privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE',
-      quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300,
-      quotaUsed: +state.meta.CACHED_QUOTA_USED || 0
+      quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0
     });
     $('botSimOutput').textContent = res === null ? '[บอทเงียบ]\nเนื่องจากข้อความไม่ได้ขึ้นต้นด้วยคำว่า "คิว"' : res;
   }

@@ -7,6 +7,30 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.1',
+      date: '14/11/2569',
+      title: 'Low-Latency Optimization & Codebase Compaction: ลดดีเลย์ทุกคำสั่งทั้งหน้าเว็บและ LINE Bot ด้วย Request/Edge/Profile Cache, Smart Trigger Skip, Parallel Quota API และลดความยาวโค้ดทั้งโปรเจกต์',
+      changes: [
+        'Backend Caching (gas/Code.gs): เพิ่ม Request-Level Sheet Cache (_dataCache) และ Properties Cache (_propsCache) ลดการอ่านชีตและ ScriptProperties ซ้ำซ้อนภายในคำขอเดียว เหลืออ่านเพียง 1 ครั้งต่อตาราง',
+        'LINE Bot Zero-Lag Profile & Parallel API: แคชชื่อโปรไฟล์ผู้ใช้ LINE (LN_U_*, อายุ 6 ชม.) ใน CacheService ลด HTTP call เมื่อกดปุ่ม Postback ซ้ำ และใช้ UrlFetchApp.fetchAll ดึงโควตา Consumption + Limit แบบขนานพร้อมกัน',
+        'Smart Trigger Sync Fast-Skip: ตรวจสอบเงื่อนไขเวลานัดและรายการใน ONEOFF_TRIGGERS_JSON ก่อนเรียก ScriptApp.getProjectTriggers() รวมถึงอัปเดตคอลัมน์ Slot และยอดโควตาใน Notification Engine แบบรวบรวมรอบเดียว',
+        'Frontend Instant Startup & Lazy Rendering (app.js): เพิ่ม Live Startup Cache (CAL_LIVE_CACHE_V2) แสดงผลทันทีเมื่อเปิดแอปหรือรีเฟรช พร้อมระบบ Lazy Active-Tab Render (renderActiveTab) วาดเฉพาะแท็บที่เปิดอยู่, rAF search debounce และ shared runBgTask helper',
+        'Codebase Compaction: กระชับโค้ดทุกไฟล์หลัก (gas/Code.gs, app.js, logic.js, style.css, index.html, tests.js) ลดขนาดและความยาวลงชัดเจน โดยคงฟีเจอร์ครบ 100% API Contract 43 คีย์ และผ่านชุดทดสอบ 24/24 ครบถ้วน'
+      ]
+    },
+    {
+      version: '2.6.0',
+      date: '14/11/2569',
+      title: 'Executive Indigo-Slate UI & Unified LINE Flex Reminders: ปรับธีมสีเว็บแอป แยกสีแบรนด์/สถานะ จัดระเบียบแถบ Header + โควตาบนมือถือ และรวมป็อปอัพ LINE ทุกจุดเป็น Flex Card',
+      changes: [
+        'เปลี่ยนธีมสีหลักเป็น Executive Indigo-Slate (#4f46e5) แยกสีแบรนด์ออกจากสีสถานะ "นัดหมายแล้ว" (#0284c7), "สิ้นสุดการนัดหมาย" (#10b981 / #059669), "ยกเลิกนัดหมาย" (#f43f5e / #dc2626) และงานเลยกำหนด (#ef4444) ชัดเจน',
+        'จัดระเบียบ Top Header และแถบ LINE Quota & Auto-Trigger Telemetry บนมือถือให้แสดงผล 2 แถวและ 1 บรรทัดกระชับ ไม่ซ้อนเบียดหรือตัดคำ พร้อมแถบสีโควตาแบบ Traffic-Light (เขียว 0-79%, เหลือง 80-89%, แดง 90%+)',
+        'จัดระเบียบแท็บคิวงานใหม่: KPI Summary 5 ใบแบบ 1+2+2 บนมือถือ, แถบช่วงเวลาเลื่อนแนวนอนบนจอเล็ก, จัดกลุ่มรายการตามลำดับความสำคัญ (OVERDUE, TODAY, TOMORROW, UPCOMING, HISTORY) และกรอบเน้นรายการเลยกำหนดเวลา',
+        'อัปเกรดระบบแจ้งเตือนอัตโนมัติ (Hourly Reminder และ Daily Digest 08:00) จากข้อความธรรมดาเป็น LINE Flex Message แบบการ์ดเดียวหรือ Carousel (สูงสุด 10 บับเบิล ประหยัดโควตาส่งเพียง 1 ครั้งต่อรอบ) พร้อมปุ่ม "เสร็จสิ้น" / "ยกเลิก" บนการ์ดเตือนทันที',
+        'ปรับปรุงการ์ดแจ้งเตือน LINE ทุกแบบให้ใช้โทนสีและโครงสร้างเดียวกันทั้งหมด: เพิ่มแถบพื้นหลังหัวการ์ดสีตามสถานะในป็อปอัพสร้าง/อัปเดต/คืนสถานะ, ปรับปุ่มยกเลิกเป็นสีแดงทึบ, เพิ่มวันที่+ป้ายสถานะ+แถบสีด้านซ้ายในการ์ดคิวงาน และสร้าง Flex Card โควตา LINE แบบ Traffic-Light พร้อมหลอดความจุ'
+      ]
+    },
+    {
       version: '2.5.3',
       date: '12/11/2569',
       title: 'Full LINE Flex Redesign: การ์ดยืนยันผลเสร็จสิ้น (กรอบเขียว), ยกเลิกนัด (กรอบแดง), การ์ดเตือนทำรายการซ้ำ (กรอบส้ม), และ Flex Message ครอบคลุมทุกคำสั่งของบอท',
