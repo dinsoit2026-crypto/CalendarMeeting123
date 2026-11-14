@@ -1,6 +1,6 @@
-# Calendar & Appointment Management System (v2.6.2)
+# Calendar & Appointment Management System (v2.6.3)
 
-ระบบบริหารจัดการคิวนัดหมายและแจ้งเตือนผ่าน LINE สำหรับทีมงาน ธีม Executive Indigo-Slate พร้อมสถาปัตยกรรม Low-Latency, หน้าเริ่มต้น "ปฏิทินเดือน" พร้อมระบบสิทธิ์ STAFF ดูเฉพาะปฏิทินเดือน, ระบบปักหมุดแผนที่และแนบรูปภาพแบบ Optional, ปุ่มคำสั่ง LINE Bot แบบสั้นและ Flex Message แนวทางเดียวกันครบทุกจุด, Optimistic UI (< 20ms) และ Responsive UI สำหรับมือถือและคอมพิวเตอร์
+ระบบบริหารจัดการคิวนัดหมายและแจ้งเตือนผ่าน LINE สำหรับทีมงาน ธีม Executive Indigo-Slate พร้อมสถาปัตยกรรม Low-Latency, หน้าเริ่มต้น "ปฏิทินเดือน" พร้อมระบบสิทธิ์ STAFF ดูเฉพาะปฏิทินเดือน, ระบบส่งออกรายงาน Excel (CSV) และพิมพ์ใบสรุปงาน PDF (A4), ระบบปักหมุดแผนที่และแนบรูปภาพแบบ Optional, ปุ่มคำสั่ง LINE Bot แบบสั้นและ Flex Message แนวทางเดียวกันครบทุกจุด, Optimistic UI (< 20ms) และ Responsive UI สำหรับมือถือและคอมพิวเตอร์
 
 ## คุณสมบัติเด่น (Features)
 - บันทึกคิวนัดหมายงานประจำวัน เลื่อนวัน/เวลา สถานที่ และบุคคลที่นัดพบ
@@ -30,18 +30,18 @@
 - ปรับขนาด UI ให้อ่านง่าย ชัดเจน พร้อมโหมดมืด (Dark Mode โทน Deep Navy)
 
 ## โครงสร้างโปรเจกต์
-- `index.html` - หน้าเว็บแอปพลิเคชัน (Web UI v2.6.2)
-- `style.css` - สไตล์การแสดงผลแบบ Modern SaaS ธีม Executive Indigo-Slate & Traffic-Light Semantics (v2.6.2)
-- `app.js` - ตัวควบคุมหน้าเว็บ, Staff Calendar-Only Guard, Map Pin / Image Compression และ Optimistic UI (v2.6.2)
-- `logic.js` - ฟังก์ชันคำนวณวันเวลา (Asia/Bangkok), ตรวจสอบความถูกต้อง, ระบบแจ้งเตือน, SHA-256 Hash, ตรวจสอบคิวชนกัน และสรุปสถิติ (v2.6.2)
+- `index.html` - หน้าเว็บแอปพลิเคชัน (Web UI v2.6.3)
+- `style.css` - สไตล์การแสดงผลแบบ Modern SaaS ธีม Executive Indigo-Slate, Traffic-Light Semantics & A4 Print Report (v2.6.3)
+- `app.js` - ตัวควบคุมหน้าเว็บ, CSV/Print Report Engine, Staff Calendar-Only Guard, Map Pin / Image Compression และ Optimistic UI (v2.6.3)
+- `logic.js` - ฟังก์ชันคำนวณวันเวลา (Asia/Bangkok), ตรวจสอบความถูกต้อง, ระบบแจ้งเตือน, SHA-256 Hash, ตรวจสอบคิวชนกัน และสรุปสถิติ (v2.6.3)
 - `patchnotes.js` / `CHANGELOG.md` - บันทึกประวัติการพัฒนาและฟีเจอร์แต่ละเวอร์ชัน
 - `tests.js` / `tests.html` - ชุดทดสอบอัตโนมัติ 13 Suites (ครอบคลุม API Contract, DOM Audit, Zero-Emoji, Low-Latency Cache และ Flex Audit)
 - `SETUP_GUIDE.md` - คู่มือการติดตั้งระบบ LINE Messaging API และ Google Sheets
-- `gas/Code.gs` - โค้ดฝั่งเซิร์ฟเวอร์ Google Apps Script (v2.6.2)
+- `gas/Code.gs` - โค้ดฝั่งเซิร์ฟเวอร์ Google Apps Script (v2.6.3)
 - `gas/appsscript.json` - ค่าคอนฟิกโปรเจกต์ Apps Script (Asia/Bangkok, V8 Runtime)
 
 ## ประวัติการปรับปรุงระบบ (Patch Notes)
-ดูรายละเอียดการพัฒนาทั้งหมดในแต่ละเวอร์ชันได้ที่ [CHANGELOG.md](file:///c:/Calendar/CHANGELOG.md) หรือคลิกป้ายเวอร์ชัน `v2.6.2` บนแถบด้านบนของหน้าเว็บแอปพลิเคชัน
+ดูรายละเอียดการพัฒนาทั้งหมดในแต่ละเวอร์ชันได้ที่ [CHANGELOG.md](file:///c:/Calendar/CHANGELOG.md) หรือคลิกป้ายเวอร์ชัน `v2.6.3` บนแถบด้านบนของหน้าเว็บแอปพลิเคชัน
 
 ## นโยบายระบบ (System Policy)
 - Zero-Emoji Policy: ไม่อนุญาตให้ใช้อิโมจิในทุกส่วนของระบบ (โค้ด, ข้อความในระบบ, ข้อความใน LINE และเนื้อหาหน้าเว็บ ยกเว้นไอคอนปุ่มสลับธีมพระอาทิตย์/พระจันทร์ตามคำอนุญาตพิเศษ)

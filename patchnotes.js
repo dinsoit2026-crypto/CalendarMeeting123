@@ -7,6 +7,16 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.3',
+      date: '14/11/2569',
+      title: 'Excel CSV Export (UTF-8 BOM) & Executive A4 Print / PDF Report Across Calendar, Queue & Yearly Overview',
+      changes: [
+        'ส่งออกตารางนัดหมายเป็นไฟล์ Excel (CSV UTF-8 BOM): เพิ่มปุ่มส่งออกไฟล์ .csv ในหน้าปฏิทินเดือน (btnExportMonthCsv), หน้าคิวงานตามตัวกรองปัจจุบัน (btnExportListCsv) และหน้าภาพรวมรายปี (btnExportYearCsv) พร้อมรหัส UTF-8 BOM (\\uFEFF) เปิดใน Microsoft Excel ภาษาไทยไม่เพี้ยน 100% และป้องกัน CSV Formula Injection',
+        'พิมพ์ใบสรุปตารางงาน / บันทึกเป็น PDF (A4 Print Report Sheet): เพิ่มปุ่ม "พิมพ์ / PDF" ทั้ง 3 มุมมอง (btnPrintMonth, btnPrintList, btnPrintYear) สร้างตารางรายงานทางการลง #printReportSheet พร้อมส่วนหัวเอกสาร สรุปยอด KPI (ทั้งหมด/นัดหมายแล้ว/เสร็จสิ้น/ยกเลิก) และกฎ @media print ใน style.css ซ่อนเมนูเว็บทั้งหมดเพื่อพิมพ์ลงกระดาษ A4 อย่างสะอาดตา',
+        'Unified Filter Engine (getFilteredListAppointments): รวมศูนย์ตรรกะการกรองและเรียงลำดับคิวงานให้หน้าแสดงผลและระบบส่งออกรายงานดึงข้อมูลชุดเดียวกันตรงกัน 100% รองรับการใช้งานทั้งสิทธิ์ ADMIN และ STAFF (สำหรับหน้าปฏิทินเดือน)'
+      ]
+    },
+    {
       version: '2.6.2',
       date: '14/11/2569',
       title: 'Short Bot Commands, All-Primary Help Flex, 0-Default Quick Reminder Chips, Staff Calendar-Only Role & Optional Map Pin / Image Attachment',

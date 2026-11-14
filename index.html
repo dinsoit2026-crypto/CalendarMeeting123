@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบนัดคิวทำงาน v2.6.2</title>
+  <title>ระบบนัดคิวทำงาน v2.6.3</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
@@ -65,7 +65,7 @@
           <div class="brand-title-line">
             <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
             <div class="brand-badges-group">
-              <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.6.2</button>
+              <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.6.3</button>
               <span id="connectionModeBadge" class="mode-badge demo">Demo</span>
             </div>
           </div>
@@ -144,6 +144,8 @@
               <div><span class="agenda-eyebrow" id="agendaEyebrow">ตารางนัดหมาย</span><h3 id="monthlyListHeader">รายการนัดหมายในเดือน</h3></div>
               <div class="agenda-header-actions">
                 <button type="button" id="btnShowAllMonthApts" class="btn btn-outline btn-sm" style="display: none;">ดูทั้งเดือน</button>
+                <button type="button" id="btnExportMonthCsv" class="btn btn-outline btn-sm" title="ส่งออกรายการในปฏิทินเป็นไฟล์ Excel (CSV)"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>CSV</span></button>
+                <button type="button" id="btnPrintMonth" class="btn btn-outline btn-sm" title="พิมพ์ใบสรุปตารางงานหรือบันทึกเป็น PDF"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg><span>พิมพ์ / PDF</span></button>
                 <button type="button" id="btnAddAptOnSelectedDate" class="btn btn-primary btn-sm"><svg viewBox="0 0 24 24" width="14" height="14" style="stroke-width:2.5;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg><span>นัดวันนี้</span></button>
               </div>
             </div>
@@ -182,7 +184,13 @@
         </div>
       </div>
 
-      <div class="list-section-header"><span id="listResultSummary" class="list-result-count">รายการนัดหมาย</span></div>
+      <div class="list-section-header">
+        <span id="listResultSummary" class="list-result-count">รายการนัดหมาย</span>
+        <div class="export-actions-group">
+          <button type="button" id="btnExportListCsv" class="btn btn-outline btn-sm" title="ส่งออกรายการคิวงานที่กรองอยู่เป็นไฟล์ Excel (CSV)"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>ส่งออก Excel (CSV)</span></button>
+          <button type="button" id="btnPrintList" class="btn btn-outline btn-sm" title="พิมพ์ใบสรุปรายการคิวงานหรือบันทึกเป็น PDF"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg><span>พิมพ์ / บันทึก PDF</span></button>
+        </div>
+      </div>
       <div id="appointmentsListContainer" class="appointments-list"></div>
     </section>
 
@@ -190,7 +198,11 @@
     <section id="tabYear" class="tab-panel">
       <div class="year-top-bar">
         <div><h2 class="section-heading">ภาพรวมสถิติและผลงานรายปี</h2><p class="section-subheading">คลิกเลือกการ์ดปีด้านล่างเพื่อดูสรุปอัตราความสำเร็จ ตาราง 12 เดือน และสรุปผลงานตามผู้ใช้งาน</p></div>
-        <div class="cal-jump-group"><label for="yearOverviewInput">เลือกปี:</label><input type="number" id="yearOverviewInput" placeholder="พ.ศ./ค.ศ."><button type="button" id="btnJumpYearOverview" class="btn btn-primary btn-sm">แสดงสถิติ</button></div>
+        <div class="cal-jump-group">
+          <label for="yearOverviewInput">เลือกปี:</label><input type="number" id="yearOverviewInput" placeholder="พ.ศ./ค.ศ."><button type="button" id="btnJumpYearOverview" class="btn btn-primary btn-sm">แสดงสถิติ</button>
+          <button type="button" id="btnExportYearCsv" class="btn btn-outline btn-sm" title="ส่งออกข้อมูลนัดหมายตลอดทั้งปีเป็นไฟล์ Excel (CSV)"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg><span>CSV รายปี</span></button>
+          <button type="button" id="btnPrintYear" class="btn btn-outline btn-sm" title="พิมพ์รายงานสรุปประจำปีหรือบันทึกเป็น PDF"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg><span>พิมพ์สรุปปี</span></button>
+        </div>
       </div>
       <div id="multiYearCardsContainer" class="year-cards-strip"></div>
       <div class="panel-card" id="yearEndStatsPanel"><div class="panel-card-head"><h3 id="selectedYearHeader">สรุปสถิติตลอดทั้งปี</h3></div><div id="yearEndSummaryCards" class="year-stats-grid"></div></div>
@@ -461,7 +473,7 @@
   <div id="guideModal" class="modal-backdrop" role="dialog" aria-modal="true">
     <div class="modal-dialog modal-dialog-wide">
       <div class="modal-header">
-        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></div><h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.2</h2></div>
+        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></div><h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.3</h2></div>
         <button type="button" id="btnCloseGuideModalTop" class="btn-close">&times;</button>
       </div>
       <div class="modal-body guide-content">
@@ -541,6 +553,9 @@
       <div class="modal-footer"><a href="tests.html" target="_blank" class="btn btn-outline btn-sm" style="margin-right: auto;">ชุดทดสอบระบบ (tests.html)</a><button type="button" id="btnClosePatchNotesModal" class="btn btn-outline">ปิด</button></div>
     </div>
   </div>
+
+  <!-- DEDICATED PRINT REPORT SHEET (Visible only during @media print) -->
+  <section id="printReportSheet" class="print-report-sheet" aria-hidden="true"></section>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
   <script src="patchnotes.js"></script><script src="logic.js"></script><script src="app.js"></script>

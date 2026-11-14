@@ -1,8 +1,8 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.2)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.3)
  * Zero-Emoji Policy | Request-Level Sheet & Props Cache | Parallel LINE API & Smart Trigger Skip
  */
-var API_VER = '2.6.2';
+var API_VER = '2.6.3';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt', 'mapUrl', 'imageUrl'];

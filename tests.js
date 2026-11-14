@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.2)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.3)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -167,9 +167,9 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.2 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 12, 'ต้องมีประวัติอย่างน้อย 12 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.3 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 13, 'ต้องมีประวัติอย่างน้อย 13 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -277,10 +277,10 @@
       ['_metaCache', '_dataCache', '_propsCache', 'needsTriggerSync', 'fetchAll', 'LN_U_'].forEach(sym => assert(codeGs.includes(sym), `Code.gs ต้องมี ${sym}`));
     });
 
-    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Staff Role Guard, Map Pin และ Image Compress ครบถ้วน', () => {
+    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Staff Role Guard, Map/Image และ CSV/Print Report ครบถ้วน', () => {
       const appJs = readF('app.js');
       new vm.Script(appJs, { filename: 'app.js' });
-      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
+      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile', 'exportAppointmentsToCsv', 'printAppointmentsReport', 'buildCsvContent'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
     });
 
     runTest('13. GAS Guard Audit', 'LINE Flex Message และ Postback Action ทำงานถูกต้องและปราศจากอิโมจิ', () => {

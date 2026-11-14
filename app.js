@@ -1,6 +1,6 @@
 /**
- * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.2)
- * Zero-Emoji Policy | Staff Calendar-Only View | Optional Map Pin & Image | Quick Reminder Chips
+ * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.3)
+ * Zero-Emoji Policy | Staff Calendar-Only View | Optional Map Pin & Image | CSV Export & Print/PDF Report
  */
 (function () {
   'use strict';
@@ -451,27 +451,8 @@
 
     const kw = ($('filterSearch').value || '').trim().toLowerCase(), st = $('filterStatus').value, dt = $('filterDate').value, uFilter = userSel ? userSel.value : '';
     document.querySelectorAll('.stat-pill').forEach(p => p.classList.toggle('active-stat', (p.getAttribute('data-filter-status') || '') === st));
-    const tmrStr = Logic.getBangkokParts(nowBkk.epochMs + 86400000).dateStr, curMonthPfx = `${nowBkk.year}-${String(nowBkk.month).padStart(2, '0')}-`;
-    const myName = state.currentUser ? state.currentUser.displayName : '';
-
-    const filtered = all.filter(a => {
-      const aSt = Logic.normalizeStatus(a.status);
-      if (st === 'ACTIVE_ONLY' && aSt !== Logic.STATUS.CONFIRMED) return false;
-      if (st === 'OVERDUE' && !Logic.isOverdue(a, nowBkk.isoStr)) return false;
-      if (st && st !== 'ACTIVE_ONLY' && st !== 'OVERDUE' && aSt !== st) return false;
-      if (dt && a.appointmentDate !== dt) return false;
-      if (uFilter === 'MY_APTS' && (a.createdBy || a.updatedBy) !== myName) return false;
-      if (uFilter && uFilter !== 'MY_APTS' && (a.createdBy || a.updatedBy) !== uFilter) return false;
-      if (!dt && state.quickRange !== 'ALL') {
-        if (state.quickRange === 'UPCOMING' && !(aSt === Logic.STATUS.CONFIRMED && a.appointmentDate >= nowBkk.dateStr)) return false;
-        if (state.quickRange === 'TODAY' && a.appointmentDate !== nowBkk.dateStr) return false;
-        if (state.quickRange === 'TOMORROW' && a.appointmentDate !== tmrStr) return false;
-        if (state.quickRange === 'NEXT7') { const d = Logic.daysBetweenDates(nowBkk.dateStr, a.appointmentDate); if (d === null || d < 0 || d > 7) return false; }
-        if (state.quickRange === 'MONTH' && (!a.appointmentDate || !a.appointmentDate.startsWith(curMonthPfx))) return false;
-      }
-      return !kw || `${a.id} ${a.title} ${a.location} ${a.contactPerson} ${a.createdBy || ''} ${a.statusChangedBy || ''} ${aSt} ${a.notes}`.toLowerCase().includes(kw);
-    });
-    filtered.sort((a, b) => (Logic.buildAppointmentSlot(a) || '9999').localeCompare(Logic.buildAppointmentSlot(b) || '9999'));
+    const tmrStr = Logic.getBangkokParts(nowBkk.epochMs + 86400000).dateStr;
+    const filtered = getFilteredListAppointments(nowBkk, all, { kw, st, dt, uFilter, tmrStr });
     if ($('listResultSummary')) $('listResultSummary').textContent = `แสดงรายการนัดหมาย ${filtered.length} รายการ (จากทั้งหมด ${all.length} รายการ)`;
     const listEl = $('appointmentsListContainer');
     if (!filtered.length) { listEl.innerHTML = '<div class="empty-state">ไม่พบรายการนัดหมายตามเงื่อนไขที่เลือก</div>'; return; }
@@ -496,6 +477,145 @@
         <div class="queue-group-header ${g.cls}"><div class="queue-group-title-wrap"><span class="queue-group-dot"></span><span class="queue-group-title">${escapeHtml(g.label)}</span></div><span class="queue-group-count">${g.items.length} รายการ</span></div>
         <div class="queue-group-items">${g.items.map(a => renderCardHtml(a, nowBkk)).join('')}</div>
       </div>`).join('');
+  }
+
+  function getFilteredListAppointments(nowBkk, allList, pre) {
+    const bkk = nowBkk || Logic.getBangkokParts(), all = allList || state.appointments.filter(a => a && !a.deletedAt);
+    const kw = pre ? pre.kw : (($('filterSearch') ? $('filterSearch').value : '') || '').trim().toLowerCase();
+    const st = pre ? pre.st : ($('filterStatus') ? $('filterStatus').value : '');
+    const dt = pre ? pre.dt : ($('filterDate') ? $('filterDate').value : '');
+    const uFilter = pre ? pre.uFilter : ($('filterUser') ? $('filterUser').value : '');
+    const tmrStr = pre ? pre.tmrStr : Logic.getBangkokParts(bkk.epochMs + 86400000).dateStr;
+    const curMonthPfx = `${bkk.year}-${String(bkk.month).padStart(2, '0')}-`, myName = state.currentUser ? state.currentUser.displayName : '';
+    const filtered = all.filter(a => {
+      const aSt = Logic.normalizeStatus(a.status);
+      if (st === 'ACTIVE_ONLY' && aSt !== Logic.STATUS.CONFIRMED) return false;
+      if (st === 'OVERDUE' && !Logic.isOverdue(a, bkk.isoStr)) return false;
+      if (st && st !== 'ACTIVE_ONLY' && st !== 'OVERDUE' && aSt !== st) return false;
+      if (dt && a.appointmentDate !== dt) return false;
+      if (uFilter === 'MY_APTS' && (a.createdBy || a.updatedBy) !== myName) return false;
+      if (uFilter && uFilter !== 'MY_APTS' && (a.createdBy || a.updatedBy) !== uFilter) return false;
+      if (!dt && state.quickRange !== 'ALL') {
+        if (state.quickRange === 'UPCOMING' && !(aSt === Logic.STATUS.CONFIRMED && a.appointmentDate >= bkk.dateStr)) return false;
+        if (state.quickRange === 'TODAY' && a.appointmentDate !== bkk.dateStr) return false;
+        if (state.quickRange === 'TOMORROW' && a.appointmentDate !== tmrStr) return false;
+        if (state.quickRange === 'NEXT7') { const d = Logic.daysBetweenDates(bkk.dateStr, a.appointmentDate); if (d === null || d < 0 || d > 7) return false; }
+        if (state.quickRange === 'MONTH' && (!a.appointmentDate || !a.appointmentDate.startsWith(curMonthPfx))) return false;
+      }
+      return !kw || `${a.id} ${a.title} ${a.location} ${a.contactPerson} ${a.createdBy || ''} ${a.statusChangedBy || ''} ${aSt} ${a.notes}`.toLowerCase().includes(kw);
+    });
+    return filtered.sort((a, b) => (Logic.buildAppointmentSlot(a) || '9999').localeCompare(Logic.buildAppointmentSlot(b) || '9999'));
+  }
+
+  function csvEscapeCell(val) {
+    let s = Logic.sanitizeNoEmoji(val == null ? '' : String(val));
+    if (/^[=+\-@]/.test(s)) s = "'" + s;
+    if (/[",\r\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  }
+
+  function buildCsvContent(items) {
+    const headers = ['รหัสนัดหมาย', 'วันที่นัด (พ.ศ.)', 'วันที่ (YYYY-MM-DD)', 'เวลา', 'หัวข้อนัดหมาย', 'ผู้นัดพบ', 'สถานที่', 'สถานะ', 'ผู้สร้างนัด', 'ผู้เปลี่ยนสถานะล่าสุด', 'สาเหตุ/การเลื่อนนัด', 'ลิงก์แผนที่', 'หมายเหตุ'];
+    const rows = [headers.map(csvEscapeCell).join(',')];
+    (items || []).forEach(a => {
+      const st = Logic.normalizeStatus(a.status);
+      const reasonTxt = a.statusReason || (+a.rescheduleCount > 0 ? `เลื่อนนัด ${+a.rescheduleCount} ครั้ง` : '');
+      rows.push([
+        a.id || '', Logic.formatThaiDateDisplay(a.appointmentDate, false), a.appointmentDate || '', (a.appointmentTime || '') + (a.appointmentTime ? ' น.' : ''),
+        a.title || '', a.contactPerson || '', a.location || '', st, a.createdBy || a.updatedBy || '', a.statusChangedBy || '',
+        reasonTxt, normalizeMapUrl(a.mapUrl || ''), a.notes || ''
+      ].map(csvEscapeCell).join(','));
+    });
+    return '\uFEFF' + rows.join('\r\n');
+  }
+
+  function exportAppointmentsToCsv(ctx) {
+    if (!ctx || !ctx.items || !ctx.items.length) { showToast('ไม่มีรายการนัดหมายสำหรับส่งออกในมุมมองนี้', 'warn'); return ''; }
+    const csv = buildCsvContent(ctx.items), fname = `${ctx.filePrefix || 'appointments'}_${Logic.getBangkokParts().dateStr}.csv`;
+    try {
+      if (typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }), url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url; link.setAttribute('download', fname); link.style.display = 'none';
+        if (document.body && typeof document.body.appendChild === 'function') document.body.appendChild(link);
+        link.click();
+        if (typeof link.remove === 'function') link.remove();
+        setTimeout(() => { try { URL.revokeObjectURL(url); } catch (_) { } }, 1500);
+      }
+    } catch (_) { }
+    showToast(`ส่งออกไฟล์ CSV เรียบร้อยแล้ว (${ctx.items.length} รายการ)`, 'success');
+    return csv;
+  }
+
+  function printAppointmentsReport(ctx) {
+    if (!ctx || !ctx.items || !ctx.items.length) { showToast('ไม่มีรายการนัดหมายสำหรับพิมพ์รายงานในมุมมองนี้', 'warn'); return false; }
+    const sheet = $('printReportSheet'); if (!sheet) return false;
+    const nowBkk = Logic.getBangkokParts(), items = ctx.items;
+    let cConf = 0, cComp = 0, cCanc = 0;
+    items.forEach(a => {
+      const st = Logic.normalizeStatus(a.status);
+      if (st === Logic.STATUS.CONFIRMED) cConf++; else if (st === Logic.STATUS.COMPLETED) cComp++; else if (st === Logic.STATUS.CANCELLED) cCanc++;
+    });
+    const rowsHtml = items.map((a, idx) => {
+      const st = Logic.normalizeStatus(a.status);
+      const subNote = [a.notes ? `หมายเหตุ: ${a.notes}` : '', a.statusReason ? `สาเหตุ: ${a.statusReason}` : ''].filter(Boolean).join(' | ');
+      const actor = st === Logic.STATUS.COMPLETED && a.statusChangedBy ? `เสร็จสิ้นโดย: ${a.statusChangedBy}` : (st === Logic.STATUS.CANCELLED && a.statusChangedBy ? `ยกเลิกโดย: ${a.statusChangedBy}` : `ผู้สร้าง: ${a.createdBy || a.updatedBy || '-'}`);
+      return `<tr>
+        <td style="text-align:center;width:34px;">${idx + 1}</td>
+        <td style="white-space:nowrap;font-weight:600;">${escapeHtml(a.id || '-')}</td>
+        <td style="white-space:nowrap;"><div><strong>${escapeHtml(Logic.formatThaiDateDisplay(a.appointmentDate, false))}</strong></div><div style="color:#475569;">เวลา ${escapeHtml(a.appointmentTime || '-')} น.</div></td>
+        <td><div style="font-weight:700;">${escapeHtml(a.title || '-')}</div>${subNote ? `<div style="font-size:10px;color:#475569;margin-top:2px;">${escapeHtml(subNote)}</div>` : ''}</td>
+        <td>${escapeHtml(a.contactPerson || '-')}</td>
+        <td>${escapeHtml(a.location || '-')}</td>
+        <td><div><span class="print-st-pill">${escapeHtml(st)}</span></div><div style="font-size:10px;color:#475569;margin-top:2px;">${escapeHtml(actor)}</div></td>
+      </tr>`;
+    }).join('');
+    const printer = state.currentUser ? `${state.currentUser.displayName} (${state.currentUser.role || 'STAFF'})` : 'ผู้ใช้งานระบบ';
+    sheet.innerHTML = `
+      <div class="print-doc-header">
+        <div>
+          <h1 class="print-doc-title">${escapeHtml(ctx.title || 'ใบสรุปตารางนัดหมาย')}</h1>
+          <p class="print-doc-sub">${escapeHtml(ctx.subtitle || 'ระบบบริหารตารางนัดหมายทีม')}</p>
+        </div>
+        <div class="print-doc-meta">
+          <div>วันที่พิมพ์: ${escapeHtml(Logic.formatThaiDateDisplay(nowBkk.dateStr, false))} เวลา ${escapeHtml(nowBkk.timeStr)} น.</div>
+          <div>ผู้ออกรายงาน: ${escapeHtml(printer)}</div>
+        </div>
+      </div>
+      <div class="print-kpi-row">
+        <div class="print-kpi-box"><span class="print-kpi-label">รายการนัดหมายทั้งหมด</span><span class="print-kpi-val">${items.length} งาน</span></div>
+        <div class="print-kpi-box"><span class="print-kpi-label">นัดหมายแล้ว (รอดำเนินการ)</span><span class="print-kpi-val">${cConf} งาน</span></div>
+        <div class="print-kpi-box"><span class="print-kpi-label">สิ้นสุดการนัดหมาย</span><span class="print-kpi-val">${cComp} งาน</span></div>
+        <div class="print-kpi-box"><span class="print-kpi-label">ยกเลิกการนัดหมาย</span><span class="print-kpi-val">${cCanc} งาน</span></div>
+      </div>
+      <table class="print-table">
+        <thead><tr><th>#</th><th>รหัสนัด</th><th>วัน-เวลานัด</th><th>หัวข้อนัดหมาย / รายละเอียด</th><th>ผู้นัดพบ</th><th>สถานที่</th><th>สถานะ / ผู้รับผิดชอบ</th></tr></thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div class="print-footer-sign">
+        <span>เอกสารออกโดยระบบนัดคิวทำงานอัตโนมัติ (v${escapeHtml(Logic.API_VERSION)})</span>
+        <span>จำนวนรวมทั้งสิ้น ${items.length} รายการ</span>
+      </div>`;
+    if (typeof window.print === 'function') window.print();
+    return true;
+  }
+
+  function getMonthExportContext() {
+    const mData = Logic.queryByMonth(state.appointments, state.calYear, state.calMonth, { nowIso: Logic.getBangkokParts().isoStr });
+    const items = state.calSelectedDate ? mData.items.filter(a => a.appointmentDate === state.calSelectedDate) : mData.items;
+    const title = state.calSelectedDate ? `ใบสรุปตารางนัดหมายประจำวันที่ ${Logic.formatThaiDateDisplay(state.calSelectedDate, true)}` : `ใบสรุปตารางนัดหมายประจำเดือน ${mData.monthNameThai} พ.ศ. ${mData.buddhistYear}`;
+    return { items, title, subtitle: `มุมมองปฏิทินเดือน (${items.length} รายการ)`, filePrefix: state.calSelectedDate ? `ตารางนัด_${state.calSelectedDate}` : `ตารางนัดเดือน_${mData.ceYear}_${String(state.calMonth).padStart(2, '0')}` };
+  }
+
+  function getListExportContext() {
+    const items = getFilteredListAppointments();
+    const rangeMap = { ALL: 'ทั้งหมด', UPCOMING: 'กำลังจะมาถึง', TODAY: 'วันนี้', TOMORROW: 'พรุ่งนี้', NEXT7: '7 วันข้างหน้า', MONTH: 'เดือนนี้' };
+    return { items, title: 'ใบสรุปรายการคิวงานนัดหมาย', subtitle: `ช่วงเวลา: ${rangeMap[state.quickRange] || 'ทั้งหมด'} | จำนวนที่พบ ${items.length} รายการ`, filePrefix: 'รายการคิวงาน' };
+  }
+
+  function getYearExportContext() {
+    const selYr = Logic.queryByYear(state.appointments, state.overviewYear, { nowIso: Logic.getBangkokParts().isoStr });
+    return { items: selYr.items, title: `รายงานสรุปตารางนัดหมายประจำปี พ.ศ. ${selYr.buddhistYear} (ค.ศ. ${selYr.ceYear})`, subtitle: `อัตราความสำเร็จ ${selYr.stats.completionRate}% | เลื่อนนัดสะสม ${selYr.stats.rescheduleTotal} ครั้ง`, filePrefix: `สรุปนัดหมายรายปี_${selYr.buddhistYear}` };
   }
 
   function initMonthSelector() {
@@ -1092,6 +1212,12 @@
     on('btnCurrentMonth', 'click', () => { const now = Logic.getBangkokParts(); state.calYear = now.year; state.calMonth = now.month; state.calSelectedDate = now.dateStr; renderCalendarTab(); });
     on('btnJumpMonth', 'click', () => { const y = Logic.normalizeYearToCE($('calInputYear').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; } state.calMonth = +$('calSelectMonth').value; state.calYear = y; state.calSelectedDate = ''; renderCalendarTab(); });
     on('btnJumpYearOverview', 'click', () => { const y = Logic.normalizeYearToCE($('yearOverviewInput').value); if (!y) { showToast('ระบุปีไม่ถูกต้อง', 'error'); return; } state.overviewYear = y; renderYearTab(); });
+    on('btnExportMonthCsv', 'click', () => exportAppointmentsToCsv(getMonthExportContext()));
+    on('btnPrintMonth', 'click', () => printAppointmentsReport(getMonthExportContext()));
+    on('btnExportListCsv', 'click', () => exportAppointmentsToCsv(getListExportContext()));
+    on('btnPrintList', 'click', () => printAppointmentsReport(getListExportContext()));
+    on('btnExportYearCsv', 'click', () => exportAppointmentsToCsv(getYearExportContext()));
+    on('btnPrintYear', 'click', () => printAppointmentsReport(getYearExportContext()));
 
     on('btnSaveConnection', 'click', async () => {
       const u = ($('cfgGasUrl').value || '').trim(), p = $('cfgPasscode').value || '';

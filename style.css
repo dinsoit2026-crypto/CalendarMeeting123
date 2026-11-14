@@ -1,6 +1,6 @@
 /**
- * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.2)
- * Zero-Emoji Policy Compliant | Compact & Responsive
+ * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.3)
+ * Zero-Emoji Policy Compliant | Compact & Responsive | Print Report A4 Layout
  */
 :root {
   --bg-body: #f5f7fb;
@@ -506,4 +506,29 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   .app-header .brand-title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; }
   .quota-progress-track { width: 34px; } .quota-progress-wrap { font-size: 10.5px; padding: 2px 7px; }
   .meta-status { font-size: 10.5px; } .user-session-name { max-width: 120px; }
+}
+
+.export-actions-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.agenda-header-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.print-report-sheet { display: none; }
+
+@media print {
+  @page { size: A4 portrait; margin: 12mm 10mm; }
+  html, body { background: #ffffff !important; color: #0f172a !important; font-size: 11.5px !important; margin: 0 !important; padding: 0 !important; }
+  .toast-container, .auth-gate-screen, .app-shell, .modal-backdrop { display: none !important; }
+  .print-report-sheet { display: block !important; width: 100%; color: #0f172a; font-family: "Noto Sans Thai", "Inter", sans-serif; }
+  .print-doc-header { border-bottom: 2px solid #1e293b; padding-bottom: 10px; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+  .print-doc-title { font-size: 17px; font-weight: 700; color: #0f172a; margin: 0 0 3px 0; }
+  .print-doc-sub { font-size: 12px; color: #475569; margin: 0; }
+  .print-doc-meta { text-align: right; font-size: 10.5px; color: #475569; line-height: 1.45; }
+  .print-kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 12px; }
+  .print-kpi-box { border: 1px solid #cbd5e1; border-radius: 6px; padding: 7px 10px; background: #f8fafc; }
+  .print-kpi-label { font-size: 10.5px; color: #475569; display: block; }
+  .print-kpi-val { font-size: 15px; font-weight: 700; color: #0f172a; }
+  .print-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .print-table th, .print-table td { border: 1px solid #cbd5e1; padding: 6px 8px; text-align: left; vertical-align: top; }
+  .print-table th { background: #f1f5f9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-weight: 700; color: #0f172a; }
+  .print-table tr { page-break-inside: avoid; }
+  .print-st-pill { display: inline-block; font-weight: 700; font-size: 10px; padding: 1px 6px; border-radius: 4px; border: 1px solid #94a3b8; }
+  .print-footer-sign { margin-top: 16px; padding-top: 8px; border-top: 1px dashed #cbd5e1; display: flex; justify-content: space-between; font-size: 10.5px; color: #64748b; }
 }
