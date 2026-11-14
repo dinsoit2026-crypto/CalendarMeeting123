@@ -3,10 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบนัดคิวทำงาน v2.6.1</title>
+  <title>ระบบนัดคิวทำงาน v2.6.2</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+Thai:wght@400;500;600;700&family=Prompt:wght@500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -64,7 +65,7 @@
           <div class="brand-title-line">
             <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
             <div class="brand-badges-group">
-              <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.6.1</button>
+              <button type="button" class="version-badge" id="btnOpenPatchNotesModal" title="ดูประวัติการอัปเดต">v2.6.2</button>
               <span id="connectionModeBadge" class="mode-badge demo">Demo</span>
             </div>
           </div>
@@ -73,8 +74,8 @@
       </div>
 
       <nav class="nav-tabs-bar" aria-label="เมนูหลัก">
-        <button type="button" class="tab-btn active" data-tab="tabList"><svg viewBox="0 0 24 24" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>คิวงาน</span><span id="navBadgeActiveCount" class="nav-tab-count">0</span></button>
-        <button type="button" class="tab-btn" data-tab="tabMonth"><svg viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg><span>ปฏิทินเดือน</span></button>
+        <button type="button" class="tab-btn active" data-tab="tabMonth"><svg viewBox="0 0 24 24" width="16" height="16"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg><span>ปฏิทินเดือน</span></button>
+        <button type="button" class="tab-btn" data-tab="tabList"><svg viewBox="0 0 24 24" width="16" height="16"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>คิวงาน</span><span id="navBadgeActiveCount" class="nav-tab-count">0</span></button>
         <button type="button" class="tab-btn" data-tab="tabYear"><svg viewBox="0 0 24 24" width="16" height="16"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>ภาพรวมรายปี</span></button>
         <button type="button" class="tab-btn" data-tab="tabSettings"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span>ตั้งค่า / บอท</span></button>
       </nav>
@@ -113,41 +114,8 @@
   </header>
 
   <main class="main-container">
-    <!-- TAB 1: คิวงาน -->
-    <section id="tabList" class="tab-panel active">
-      <div class="stat-pills" id="statPillsContainer">
-        <div class="stat-pill stat-all active-stat" data-filter-status=""><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></div><div class="stat-pill-text"><span>งานทั้งหมด</span><strong id="statTotal">0</strong></div></div>
-        <div class="stat-pill stat-confirmed" data-filter-status="นัดหมายแล้ว"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div><div class="stat-pill-text"><span>นัดหมายแล้ว</span><strong id="statConfirmed">0</strong></div></div>
-        <div class="stat-pill stat-completed" data-filter-status="สิ้นสุดการนัดหมาย"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div><div class="stat-pill-text"><span>สิ้นสุดแล้ว</span><strong id="statCompleted">0</strong></div></div>
-        <div class="stat-pill stat-cancelled" data-filter-status="ยกเลิกการนัดหมาย"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg></div><div class="stat-pill-text"><span>ยกเลิกนัด</span><strong id="statCancelled">0</strong></div></div>
-        <div class="stat-pill stat-overdue" data-filter-status="OVERDUE"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></div><div class="stat-pill-text"><span>เลยกำหนด</span><strong id="statOverdue">0</strong></div></div>
-      </div>
-
-      <div class="filter-panel">
-        <div class="quick-range-bar" id="quickRangeBar">
-          <span class="quick-range-label">ช่วงเวลา:</span>
-          <button type="button" class="range-chip active" data-range="ALL">ทั้งหมด</button>
-          <button type="button" class="range-chip" data-range="UPCOMING">กำลังจะมาถึง</button>
-          <button type="button" class="range-chip" data-range="TODAY">วันนี้</button>
-          <button type="button" class="range-chip" data-range="TOMORROW">พรุ่งนี้</button>
-          <button type="button" class="range-chip" data-range="NEXT7">7 วันข้างหน้า</button>
-          <button type="button" class="range-chip" data-range="MONTH">เดือนนี้</button>
-        </div>
-        <div class="filter-toolbar">
-          <div class="search-input-wrap"><svg class="search-icon" viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><input type="search" id="filterSearch" class="input-search" placeholder="ค้นหาหัวข้องาน, ชื่อผู้นัดพบ, สถานที่, ผู้สร้าง, รหัส APT..."></div>
-          <select id="filterStatus" class="select-filter"><option value="">ทุกสถานะ</option><option value="ACTIVE_ONLY">เฉพาะงานรอดำเนินการ</option><option value="นัดหมายแล้ว">นัดหมายแล้ว</option><option value="สิ้นสุดการนัดหมาย">สิ้นสุดการนัดหมาย</option><option value="ยกเลิกการนัดหมาย">ยกเลิกการนัดหมาย</option><option value="OVERDUE">งานเลยกำหนด</option></select>
-          <select id="filterUser" class="select-filter"><option value="">สมาชิกทุกคน</option><option value="MY_APTS">เฉพาะงานของฉัน</option></select>
-          <input type="date" id="filterDate" class="input-date">
-          <button type="button" id="btnClearFilters" class="btn btn-outline btn-sm"><svg viewBox="0 0 24 24" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>ล้างตัวกรอง</span></button>
-        </div>
-      </div>
-
-      <div class="list-section-header"><span id="listResultSummary" class="list-result-count">รายการนัดหมาย</span></div>
-      <div id="appointmentsListContainer" class="appointments-list"></div>
-    </section>
-
-    <!-- TAB 2: ปฏิทินเดือน -->
-    <section id="tabMonth" class="tab-panel">
+    <!-- TAB 1 (DEFAULT): ปฏิทินเดือน -->
+    <section id="tabMonth" class="tab-panel active">
       <div class="calendar-controls">
         <div class="cal-nav-group">
           <div class="btn-segmented">
@@ -183,6 +151,39 @@
           </div>
         </aside>
       </div>
+    </section>
+
+    <!-- TAB 2: คิวงาน -->
+    <section id="tabList" class="tab-panel">
+      <div class="stat-pills" id="statPillsContainer">
+        <div class="stat-pill stat-all active-stat" data-filter-status=""><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg></div><div class="stat-pill-text"><span>งานทั้งหมด</span><strong id="statTotal">0</strong></div></div>
+        <div class="stat-pill stat-confirmed" data-filter-status="นัดหมายแล้ว"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg></div><div class="stat-pill-text"><span>นัดหมายแล้ว</span><strong id="statConfirmed">0</strong></div></div>
+        <div class="stat-pill stat-completed" data-filter-status="สิ้นสุดการนัดหมาย"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg></div><div class="stat-pill-text"><span>สิ้นสุดแล้ว</span><strong id="statCompleted">0</strong></div></div>
+        <div class="stat-pill stat-cancelled" data-filter-status="ยกเลิกการนัดหมาย"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg></div><div class="stat-pill-text"><span>ยกเลิกนัด</span><strong id="statCancelled">0</strong></div></div>
+        <div class="stat-pill stat-overdue" data-filter-status="OVERDUE"><div class="stat-pill-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></div><div class="stat-pill-text"><span>เลยกำหนด</span><strong id="statOverdue">0</strong></div></div>
+      </div>
+
+      <div class="filter-panel">
+        <div class="quick-range-bar" id="quickRangeBar">
+          <span class="quick-range-label">ช่วงเวลา:</span>
+          <button type="button" class="range-chip active" data-range="ALL">ทั้งหมด</button>
+          <button type="button" class="range-chip" data-range="UPCOMING">กำลังจะมาถึง</button>
+          <button type="button" class="range-chip" data-range="TODAY">วันนี้</button>
+          <button type="button" class="range-chip" data-range="TOMORROW">พรุ่งนี้</button>
+          <button type="button" class="range-chip" data-range="NEXT7">7 วันข้างหน้า</button>
+          <button type="button" class="range-chip" data-range="MONTH">เดือนนี้</button>
+        </div>
+        <div class="filter-toolbar">
+          <div class="search-input-wrap"><svg class="search-icon" viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg><input type="search" id="filterSearch" class="input-search" placeholder="ค้นหาหัวข้องาน, ชื่อผู้นัดพบ, สถานที่, ผู้สร้าง, รหัส APT..."></div>
+          <select id="filterStatus" class="select-filter"><option value="">ทุกสถานะ</option><option value="ACTIVE_ONLY">เฉพาะงานรอดำเนินการ</option><option value="นัดหมายแล้ว">นัดหมายแล้ว</option><option value="สิ้นสุดการนัดหมาย">สิ้นสุดการนัดหมาย</option><option value="ยกเลิกการนัดหมาย">ยกเลิกการนัดหมาย</option><option value="OVERDUE">งานเลยกำหนด</option></select>
+          <select id="filterUser" class="select-filter"><option value="">สมาชิกทุกคน</option><option value="MY_APTS">เฉพาะงานของฉัน</option></select>
+          <input type="date" id="filterDate" class="input-date">
+          <button type="button" id="btnClearFilters" class="btn btn-outline btn-sm"><svg viewBox="0 0 24 24" width="14" height="14"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>ล้างตัวกรอง</span></button>
+        </div>
+      </div>
+
+      <div class="list-section-header"><span id="listResultSummary" class="list-result-count">รายการนัดหมาย</span></div>
+      <div id="appointmentsListContainer" class="appointments-list"></div>
     </section>
 
     <!-- TAB 3: ภาพรวมท้ายปี & สถิติ -->
@@ -236,7 +237,7 @@
               <div><label for="cfgQuietHours">ช่วงเวลาห้ามรบกวน</label><input type="text" id="cfgQuietHours" value="22:00 - 07:00" readonly></div>
             </div>
             <div class="settings-toggles">
-              <label class="checkbox-card" for="cfgEnableBotQuery"><input type="checkbox" id="cfgEnableBotQuery" checked><div><strong>เปิดใช้งานคำสั่งถามตารางงานในแชท LINE</strong><span class="hint-text">พิมพ์คำสั่งนำหน้า "คิว" เช่น คิวทั้งหมด, คิว วันนี้</span></div></label>
+              <label class="checkbox-card" for="cfgEnableBotQuery"><input type="checkbox" id="cfgEnableBotQuery" checked><div><strong>เปิดใช้งานคำสั่งถามตารางงานในแชท LINE</strong><span class="hint-text">พิมพ์คำสั่งสั้น เช่น ทั้งหมด, วันนี้ หรือขึ้นต้นด้วย "คิว"</span></div></label>
               <label class="checkbox-card" for="cfgPrivacyMask"><input type="checkbox" id="cfgPrivacyMask"><div><strong>ปกปิดชื่อผู้นัดพบบางส่วนในแชท (Privacy Mask)</strong><span class="hint-text">แสดงเฉพาะ 2 ตัวอักษรแรกตามด้วย ***</span></div></label>
               <label class="checkbox-card" for="cfgNotifyStatusChange"><input type="checkbox" id="cfgNotifyStatusChange" checked><div><strong>ส่งแจ้งเตือน LINE เมื่อสิ้นสุดหรือยกเลิกการนัดหมาย</strong><span class="hint-text">ส่งแจ้งเตือนเข้ากลุ่มทันทีเมื่อกดปุ่มเสร็จสิ้นหรือยกเลิก (ใช้โควตาตามจำนวนสมาชิก)</span></div></label>
             </div>
@@ -265,29 +266,29 @@
       <div class="panel-card bot-sim-panel">
         <div class="settings-card-header">
           <div class="settings-card-icon bot-icon"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg></div>
-          <div style="flex: 1;"><h3>ห้องจำลองการสนทนา LINE Bot (ขึ้นต้นด้วย "คิว")</h3><p class="hint-text">คลิกปุ่มคำสั่งด่วนด้านล่าง หรือพิมพ์ข้อความเพื่อทดสอบคำตอบของบอท</p></div>
+          <div style="flex: 1;"><h3>ห้องจำลองการสนทนา LINE Bot (รองรับคำสั่งสั้นและคำสั่งนำหน้า "คิว")</h3><p class="hint-text">คลิกปุ่มคำสั่งด่วนด้านล่าง หรือพิมพ์ข้อความเพื่อทดสอบคำตอบของบอท</p></div>
           <button type="button" id="btnPreviewNotificationPlan" class="btn btn-outline btn-sm"><svg viewBox="0 0 24 24" width="14" height="14"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span>จำลองรอบแจ้งเตือน</span></button>
         </div>
         <div class="quick-cmd-strip">
-          <button type="button" class="btn btn-soft btn-sm btn-quick-cmd" data-cmd="คิวทั้งหมด">คิวทั้งหมด</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว วันนี้">คิว วันนี้</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว พรุ่งนี้">คิว พรุ่งนี้</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว สัปดาห์นี้">คิว สัปดาห์นี้</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ค้างอยู่">คิว ค้างอยู่</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว เดือนนี้">คิว เดือนนี้</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ปีนี้">คิว ปีนี้</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว โควตา">คิว โควตา</button>
-          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="คิว ช่วยเหลือ">คิว ช่วยเหลือ</button>
+          <button type="button" class="btn btn-soft btn-sm btn-quick-cmd" data-cmd="ทั้งหมด">ทั้งหมด</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="วันนี้">วันนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="พรุ่งนี้">พรุ่งนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="สัปดาห์นี้">สัปดาห์นี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="ค้างอยู่">ค้างอยู่</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="เดือนนี้">เดือนนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="ปีนี้">ปีนี้</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="โควตา">โควตา</button>
+          <button type="button" class="btn btn-outline btn-sm btn-quick-cmd" data-cmd="ช่วยเหลือ">ช่วยเหลือ</button>
         </div>
         <div class="chat-simulator-window">
-          <div class="chat-bubble-row user"><div class="chat-bubble user-bubble" id="botSimUserEcho">คิวทั้งหมด</div></div>
+          <div class="chat-bubble-row user"><div class="chat-bubble user-bubble" id="botSimUserEcho">ทั้งหมด</div></div>
           <div class="chat-bubble-row bot">
             <div class="bot-avatar" aria-hidden="true">BOT</div>
             <div class="bot-reply-wrap"><div class="bot-sender-name">ระบบนัดคิวทำงาน (LINE Official)</div><pre id="botSimOutput" class="terminal-output">ผลลัพธ์จากบอทจะแสดงที่นี่...</pre></div>
           </div>
         </div>
         <div class="chat-input-bar">
-          <input type="text" id="botSimInput" value="คิวทั้งหมด" placeholder="พิมพ์คำสั่ง เช่น คิว วันนี้, คิว ค้นหา สมชาย...">
+          <input type="text" id="botSimInput" value="ทั้งหมด" placeholder="พิมพ์คำสั่ง เช่น วันนี้, ค้างอยู่, ค้นหา สมชาย...">
           <button type="button" id="btnRunBotSim" class="btn btn-primary"><svg viewBox="0 0 24 24" width="15" height="15"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg><span>ส่งถามบอท</span></button>
         </div>
       </div>
@@ -300,8 +301,8 @@
   </main>
 
   <nav class="mobile-bottom-nav" aria-label="เมนูมือถือ">
-    <button type="button" class="mobile-nav-btn active" data-tab="tabList"><svg viewBox="0 0 24 24" width="19" height="19"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>คิวงาน</span></button>
-    <button type="button" class="mobile-nav-btn" data-tab="tabMonth"><svg viewBox="0 0 24 24" width="19" height="19"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg><span>ปฏิทิน</span></button>
+    <button type="button" class="mobile-nav-btn active" data-tab="tabMonth"><svg viewBox="0 0 24 24" width="19" height="19"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg><span>ปฏิทิน</span></button>
+    <button type="button" class="mobile-nav-btn" data-tab="tabList"><svg viewBox="0 0 24 24" width="19" height="19"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg><span>คิวงาน</span></button>
     <button type="button" class="mobile-nav-fab" id="btnMobileFabCreate" aria-label="สร้างนัดหมายใหม่"><svg viewBox="0 0 24 24" width="22" height="22" style="stroke-width:2.5;"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg></button>
     <button type="button" class="mobile-nav-btn" data-tab="tabYear"><svg viewBox="0 0 24 24" width="19" height="19"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg><span>รายปี</span></button>
     <button type="button" class="mobile-nav-btn" data-tab="tabSettings"><svg viewBox="0 0 24 24" width="19" height="19"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg><span>ตั้งค่า</span></button>
@@ -336,12 +337,74 @@
               </div>
             </div>
             <div style="margin-top: 10px;"><label for="formLocation">สถานที่นัดพบ / ช่องทางออนไลน์ <span class="req-star">*</span></label><input type="text" id="formLocation" required placeholder="ระบุอาคาร ห้องประชุม หรือลิงก์ประชุมออนไลน์"></div>
+            <div style="margin-top: 10px;">
+              <label for="formMapUrl">ปักหมุดแผนที่ / พิกัดสถานที่ (ไม่บังคับ)</label>
+              <input type="text" id="formMapUrl" placeholder="วางลิงก์ Google Maps หรือพิกัด เช่น 13.7563, 100.5018 หรือกดปุ่มด้านล่าง">
+              <div class="map-tools-bar">
+                <button type="button" id="btnToggleMapPicker" class="btn btn-soft btn-sm"><svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg><span>ปักหมุดบนแผนที่</span></button>
+                <button type="button" id="btnSearchMapFromLoc" class="btn btn-outline btn-sm">ค้นหาจากสถานที่</button>
+                <button type="button" id="btnUseCurrentGps" class="btn btn-outline btn-sm">GPS ปัจจุบัน</button>
+                <button type="button" id="btnClearMapPin" class="btn btn-danger-ghost btn-sm" style="display: none;">ล้างหมุด</button>
+              </div>
+              <div id="mapPickerWrap" class="map-picker-wrap" style="display: none;">
+                <div class="map-search-row">
+                  <input type="text" id="formMapSearchInput" placeholder="ค้นหาชื่อสถานที่, อาคาร, จังหวัด หรือเขต...">
+                  <button type="button" id="btnExecMapSearch" class="btn btn-primary btn-sm">ค้นหา</button>
+                </div>
+                <div id="leafletMapPicker" class="leaflet-map-box"></div>
+                <div id="mapPickerStatus" class="hint-text">คลิกบนแผนที่หรือลากหมุดสีแดงเพื่อเลือกตำแหน่งนัดหมาย</div>
+              </div>
+            </div>
           </div>
           <div class="form-row-2">
-            <div><label for="formRemindDays">แจ้งเตือนล่วงหน้า (วัน)</label><input type="number" id="formRemindDays" min="0" max="365" value="1"></div>
-            <div><label for="formRemindHours">แจ้งเตือนก่อนเวลานัด (ชั่วโมง)</label><input type="number" id="formRemindHours" min="0" max="168" value="1"></div>
+            <div class="remind-control-box">
+              <label for="formRemindDays">แจ้งเตือนล่วงหน้า (วัน)</label>
+              <div class="remind-stepper">
+                <button type="button" class="btn btn-outline btn-sm btn-remind-step" data-step-target="formRemindDays" data-step="-1">-</button>
+                <input type="number" id="formRemindDays" min="0" max="365" value="0">
+                <button type="button" class="btn btn-outline btn-sm btn-remind-step" data-step-target="formRemindDays" data-step="1">+</button>
+              </div>
+              <div class="remind-chips-bar">
+                <button type="button" class="remind-chip active" data-remind-target="formRemindDays" data-val="0">ไม่เตือน (0)</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindDays" data-val="1">1 วัน</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindDays" data-val="2">2 วัน</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindDays" data-val="3">3 วัน</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindDays" data-val="7">7 วัน</button>
+              </div>
+            </div>
+            <div class="remind-control-box">
+              <label for="formRemindHours">แจ้งเตือนก่อนเวลานัด (ชั่วโมง)</label>
+              <div class="remind-stepper">
+                <button type="button" class="btn btn-outline btn-sm btn-remind-step" data-step-target="formRemindHours" data-step="-1">-</button>
+                <input type="number" id="formRemindHours" min="0" max="168" value="0">
+                <button type="button" class="btn btn-outline btn-sm btn-remind-step" data-step-target="formRemindHours" data-step="1">+</button>
+              </div>
+              <div class="remind-chips-bar">
+                <button type="button" class="remind-chip active" data-remind-target="formRemindHours" data-val="0">ไม่เตือน (0)</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="1">1 ชม.</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="2">2 ชม.</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="3">3 ชม.</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="6">6 ชม.</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="12">12 ชม.</button>
+                <button type="button" class="remind-chip" data-remind-target="formRemindHours" data-val="24">24 ชม.</button>
+              </div>
+            </div>
           </div>
           <div><label for="formNotes">หมายเหตุ / รายละเอียดเพิ่มเติม</label><textarea id="formNotes" rows="2" placeholder="ระบุเอกสารที่ต้องเตรียม หรือข้อมูลเพิ่มเติม (ถ้ามี)"></textarea></div>
+          <div class="img-upload-box">
+            <label for="formImageUrlInput">แนบรูปภาพเพิ่มเติม (ไม่บังคับ - ย่อขนาดอัตโนมัติสำหรับ Google Sheets)</label>
+            <input type="file" id="formImageFile" accept="image/*" style="display: none;">
+            <input type="hidden" id="formImageData">
+            <div class="img-upload-row">
+              <button type="button" id="btnTriggerImageUpload" class="btn btn-soft btn-sm"><svg viewBox="0 0 24 24" width="14" height="14"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg><span>เลือกรูปภาพแนบ</span></button>
+              <input type="text" id="formImageUrlInput" placeholder="หรือวางลิงก์รูปภาพ https://...">
+              <button type="button" id="btnClearImage" class="btn btn-danger-ghost btn-sm" style="display: none;">ลบรูปภาพ</button>
+            </div>
+            <div id="formImagePreviewWrap" class="img-preview-box" style="display: none;">
+              <img id="formImagePreview" alt="ตัวอย่างรูปภาพแนบ">
+              <span id="formImageSizeInfo" class="hint-text"></span>
+            </div>
+          </div>
           <div id="rescheduleReasonGroup" class="reason-highlight-box" style="display: none;"><label for="formRescheduleReason">สาเหตุการเลื่อนนัด / แก้ไขข้อมูล</label><input type="text" id="formRescheduleReason" placeholder="ระบุเหตุผลเพื่อบันทึกในประวัติการเลื่อนนัด"></div>
           <div class="notify-line-box">
             <label class="checkbox-label" for="formNotifyLine"><input type="checkbox" id="formNotifyLine" checked><span id="formNotifyLineLabel">ส่งแจ้งเตือนนัดหมายเข้ากลุ่ม LINE ทันที</span></label>
@@ -398,17 +461,17 @@
   <div id="guideModal" class="modal-backdrop" role="dialog" aria-modal="true">
     <div class="modal-dialog modal-dialog-wide">
       <div class="modal-header">
-        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></div><h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.1</h2></div>
+        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg></div><h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.2</h2></div>
         <button type="button" id="btnCloseGuideModalTop" class="btn-close">&times;</button>
       </div>
       <div class="modal-body guide-content">
         <div class="guide-section">
-          <h4>1. การเข้าสู่ระบบและการแยกผู้ใช้งานรายบุคคล (User Attribution)</h4>
+          <h4>1. การเข้าสู่ระบบและการแยกสิทธิ์ผู้ใช้งาน (ADMIN / STAFF)</h4>
           <p>ระบบบันทึกชัดเจนว่า <strong>ใครเป็นคนสร้างนัด</strong>, <strong>ใครเป็นคนกดยกเลิก/เสร็จสิ้น</strong> และ <strong>ใครแก้ไขล่าสุด</strong>:</p>
           <ul class="guide-list">
             <li><strong>บัญชีเริ่มต้น:</strong> <code>admin</code> (รหัสผ่าน <code>admin</code>), <code>somchai</code> (รหัสผ่าน <code>1234</code>), <code>wipada</code> (รหัสผ่าน <code>1234</code>)</li>
+            <li><strong>สิทธิ์การใช้งาน:</strong> สมาชิกระดับ <code>STAFF</code> สามารถดูและจัดการนัดหมายได้เฉพาะหน้า <strong>"ปฏิทินเดือน"</strong> ส่วนระดับ <code>ADMIN</code> เข้าถึงได้ครบทุกหน้าและจัดการสมาชิกได้</li>
             <li><strong>การสลับผู้ใช้:</strong> คลิกปุ่ม <em>"ออกจากระบบ"</em> ที่แถบบัญชีด้านบนเพื่อสลับผู้ใช้งานหรือสมัครสมาชิกใหม่</li>
-            <li><strong>การกรองงานตามผู้สร้าง:</strong> ในแท็บคิวงาน สามารถเลือกดู <em>"เฉพาะงานของฉัน"</em> หรือเลือกดูตามชื่อสมาชิกได้</li>
           </ul>
         </div>
         <div class="guide-section">
@@ -419,18 +482,51 @@
         <div class="guide-section">
           <h4>3. คำสั่งถามตารางงานผ่านแชทกลุ่ม LINE (ฟรี ไม่เสียโควตา)</h4>
           <div class="guide-cmd-grid">
-            <div class="guide-cmd-item"><code>คิวทั้งหมด</code><span>แสดงนัดหมายที่กำลังจะมาถึงทั้งหมด</span></div>
-            <div class="guide-cmd-item"><code>คิว วันนี้</code><span>ดูนัดหมายเฉพาะวันนี้</span></div>
-            <div class="guide-cmd-item"><code>คิว พรุ่งนี้</code><span>ดูนัดหมายวันพรุ่งนี้</span></div>
-            <div class="guide-cmd-item"><code>คิว สัปดาห์นี้</code><span>ดูนัดหมายใน 7 วันข้างหน้า</span></div>
-            <div class="guide-cmd-item"><code>คิว เดือนนี้</code><span>สรุปตารางงานประจำเดือนนี้</span></div>
-            <div class="guide-cmd-item"><code>คิว ปีนี้</code><span>ดูสรุปสถิติผลงานตลอดทั้งปี</span></div>
-            <div class="guide-cmd-item"><code>คิว ค้นหา ชื่อ</code><span>ค้นหางานตามชื่อคน, สถานที่ หรือผู้สร้าง</span></div>
-            <div class="guide-cmd-item"><code>คิว ช่วยเหลือ</code><span>ดูรายการคำสั่งทั้งหมดของบอท</span></div>
+            <div class="guide-cmd-item"><code>ทั้งหมด</code><span>แสดงนัดหมายที่กำลังจะมาถึงทั้งหมด</span></div>
+            <div class="guide-cmd-item"><code>วันนี้</code><span>ดูนัดหมายเฉพาะวันนี้</span></div>
+            <div class="guide-cmd-item"><code>พรุ่งนี้</code><span>ดูนัดหมายวันพรุ่งนี้</span></div>
+            <div class="guide-cmd-item"><code>สัปดาห์นี้</code><span>ดูนัดหมายใน 7 วันข้างหน้า</span></div>
+            <div class="guide-cmd-item"><code>เดือนนี้</code><span>สรุปตารางงานประจำเดือนนี้</span></div>
+            <div class="guide-cmd-item"><code>ปีนี้</code><span>ดูสรุปสถิติผลงานตลอดทั้งปี</span></div>
+            <div class="guide-cmd-item"><code>ค้นหา ชื่อ</code><span>ค้นหางานตามชื่อคน, สถานที่ หรือผู้สร้าง</span></div>
+            <div class="guide-cmd-item"><code>ช่วยเหลือ</code><span>ดูรายการคำสั่งทั้งหมดของบอท</span></div>
           </div>
         </div>
       </div>
       <div class="modal-footer"><button type="button" id="btnCloseGuideModal" class="btn btn-primary">เข้าใจแล้ว ปิดหน้าต่างนี้</button></div>
+    </div>
+  </div>
+
+  <!-- MODAL: Map Preview -->
+  <div id="mapPreviewModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-dialog-wide">
+      <div class="modal-header">
+        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg></div><h2 id="mapPreviewTitle">ตำแหน่งแผนที่นัดหมาย</h2></div>
+        <button type="button" id="btnCloseMapPreviewModalTop" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div id="mapPreviewLocation" class="creator-info-pill">-</div>
+        <div id="mapPreviewContainer" class="map-preview-frame"></div>
+      </div>
+      <div class="modal-footer">
+        <a id="btnOpenExternalMap" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-primary">เปิดนำทางใน Google Maps</a>
+        <button type="button" id="btnCloseMapPreviewModal" class="btn btn-outline">ปิด</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Image Preview -->
+  <div id="imagePreviewModal" class="modal-backdrop" role="dialog" aria-modal="true">
+    <div class="modal-dialog modal-dialog-wide">
+      <div class="modal-header">
+        <div class="modal-header-title"><div class="modal-icon-badge"><svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg></div><h2 id="imagePreviewTitle">รูปภาพประกอบนัดหมาย</h2></div>
+        <button type="button" id="btnCloseImagePreviewModalTop" class="btn-close">&times;</button>
+      </div>
+      <div class="modal-body"><div class="lightbox-img-wrap"><img id="imagePreviewFull" alt="รูปภาพประกอบนัดหมาย"></div></div>
+      <div class="modal-footer">
+        <a id="btnOpenExternalImage" href="#" target="_blank" rel="noopener noreferrer" class="btn btn-outline btn-sm" style="margin-right: auto;">เปิดรูปขนาดเต็ม</a>
+        <button type="button" id="btnCloseImagePreviewModal" class="btn btn-primary">ปิด</button>
+      </div>
     </div>
   </div>
 
@@ -446,6 +542,7 @@
     </div>
   </div>
 
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
   <script src="patchnotes.js"></script><script src="logic.js"></script><script src="app.js"></script>
 </body>
 </html>

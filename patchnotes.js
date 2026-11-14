@@ -7,6 +7,18 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.2',
+      date: '14/11/2569',
+      title: 'Short Bot Commands, All-Primary Help Flex, 0-Default Quick Reminder Chips, Staff Calendar-Only Role & Optional Map Pin / Image Attachment',
+      changes: [
+        'LINE Bot Help Flex & Short Commands (gas/Code.gs, logic.js): ปรับปุ่มคำสั่งลัดทั้ง 6 ปุ่มใน buildHelpFlex_ เป็น style: primary สีชัดเจนครบทุกปุ่ม ตัดคำว่า "คิว" ออกจากปุ่มและคำสั่ง (เช่น วันนี้, พรุ่งนี้, ค้างอยู่, ทั้งหมด, ปีนี้, โควตา, ค้นหา) โดยยังคงรองรับคำสั่งขึ้นต้นด้วย "คิว ..." แบบเดิม และไม่ตอบแทรกบทสนทนาทั่วไป',
+        'Default Reminder = 0 & Quick Preset Chips (index.html, app.js, logic.js, gas/Code.gs): ตั้งค่าเริ่มต้นการแจ้งเตือนล่วงหน้า (วัน และ ชั่วโมง) เป็น 0 พร้อมเพิ่มปุ่มชิปเลือกด่วน (0, 1, 2, 3, 7 วัน และ 0, 1, 2, 3, 6, 12, 24 ชม.) รวมถึงปุ่ม - / + Stepper ให้กดง่ายทั้งบนมือถือและคอมพิวเตอร์',
+        'สลับลำดับเมนูและจำกัดสิทธิ์ STAFF (index.html, app.js): สลับปุ่มแท็บ "ปฏิทินเดือน" ขึ้นมาเป็นหน้าแรกแทนที่ "คิวงาน" ทั้งบน Desktop Header และ Mobile Bottom Nav และกำหนดให้สมาชิกที่มีบทบาท STAFF ดูได้เฉพาะหน้า "ปฏิทินเดือน" เท่านั้น',
+        'ปักหมุดแผนที่ & ปุ่ม "ดูแผนที่" (Optional): เพิ่มระบบปักหมุดบนแผนที่ OpenStreetMap (Leaflet) ค้นหาจากชื่อสถานที่ ดึง GPS หรือวางลิงก์ Google Maps ในฟอร์มสร้างนัดหมาย พร้อมปุ่ม "ดูแผนที่" บนการ์ดนัดหมาย และปุ่ม "ดูแผนที่นำทาง" บนการ์ด LINE Flex (APT_COLS.mapUrl)',
+        'แนบรูปภาพเพิ่มเติม & ปุ่ม "ดูรูปภาพ" (Optional): รองรับการอัปโหลดรูปภาพจากเครื่องหรือวางลิงก์รูปภาพ พร้อมย่อขนาดและบีบอัด JPEG ฝั่งไคลเอนต์ด้วย HTML5 Canvas อัตโนมัติให้อยู่ในขีดจำกัดเซลล์ Google Sheets และปุ่ม "ดูรูปภาพ" เปิดดูขนาดใหญ่ (APT_COLS.imageUrl)'
+      ]
+    },
+    {
       version: '2.6.1',
       date: '14/11/2569',
       title: 'Low-Latency Optimization & Codebase Compaction: ลดดีเลย์ทุกคำสั่งทั้งหน้าเว็บและ LINE Bot ด้วย Request/Edge/Profile Cache, Smart Trigger Skip, Parallel Quota API และลดความยาวโค้ดทั้งโปรเจกต์',

@@ -1,6 +1,6 @@
 /**
- * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.1)
- * Zero-Emoji Policy | Instant Startup Live Cache | Lazy Active-Tab Render | Optimistic Concurrency
+ * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.2)
+ * Zero-Emoji Policy | Staff Calendar-Only View | Optional Map Pin & Image | Quick Reminder Chips
  */
 (function () {
   'use strict';
@@ -23,16 +23,19 @@
     pin: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"></path><circle cx="12" cy="10" r="3"></circle></svg>',
     bell: '<svg viewBox="0 0 24 24" width="14" height="14"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>',
     check: '<svg viewBox="0 0 24 24" width="13" height="13" style="stroke-width:2.5;"><polyline points="20 6 9 17 4 12"></polyline></svg>',
-    edit: '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>'
+    edit: '<svg viewBox="0 0 24 24" width="13" height="13"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>',
+    img: '<svg viewBox="0 0 24 24" width="13" height="13"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>'
   };
 
   const state = {
     isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, currentUser: null, users: [], theme: 'light',
-    activeTab: 'tabList', quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
+    activeTab: 'tabMonth', quickRange: 'ALL', filterUser: '', appointments: [], rescheduleLogs: [],
     meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' },
     calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '',
     overviewYear: Logic.getBangkokParts().year, editingUserId: null
   };
+
+  const isStaffOnlyCalendar = () => Boolean(state.currentUser && state.currentUser.role !== 'ADMIN');
 
   function showToast(msg, type = 'info') {
     const c = $('toastContainer'); if (!c) return;
@@ -51,10 +54,16 @@
     try { localStorage.setItem(STORAGE.THEME, state.theme); } catch (_) { }
   }
 
+  function applyTabClasses(id) {
+    document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === id));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === id));
+  }
+
   function switchTab(id) {
-    state.activeTab = id || 'tabList';
-    document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === state.activeTab));
-    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === state.activeTab));
+    let target = id || 'tabMonth';
+    if (isStaffOnlyCalendar() && target !== 'tabMonth') { target = 'tabMonth'; showToast('สมาชิกระดับ STAFF สามารถเข้าดูได้เฉพาะหน้าปฏิทินเดือน', 'warn'); }
+    state.activeTab = target;
+    applyTabClasses(target);
     renderActiveTab();
   }
 
@@ -117,13 +126,23 @@
     const isAdmin = Boolean(isAuth && state.currentUser.role === 'ADMIN');
     if ($('userManagementSection')) $('userManagementSection').style.opacity = isAdmin ? '1' : '0.85';
     if ($('btnOpenAddUserModal')) $('btnOpenAddUserModal').style.display = isAdmin ? 'inline-flex' : 'none';
+    document.querySelectorAll('.tab-btn, .mobile-nav-btn').forEach(b => {
+      const t = b.getAttribute('data-tab');
+      b.style.display = (!isAdmin && t !== 'tabMonth') ? 'none' : '';
+    });
+    if (isAuth && !isAdmin && state.activeTab !== 'tabMonth') {
+      state.activeTab = 'tabMonth';
+      applyTabClasses('tabMonth');
+    }
   }
 
   function handleLogout() {
     state.currentUser = null;
+    state.activeTab = 'tabMonth';
+    applyTabClasses('tabMonth');
     try { localStorage.removeItem(STORAGE.AUTH_USER); } catch (_) { }
     clearLiveCache();
-    ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal'].forEach(closeModal);
+    ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal', 'mapPreviewModal', 'imagePreviewModal'].forEach(closeModal);
     if ($('loginUsername')) $('loginUsername').value = '';
     if ($('loginPassword')) $('loginPassword').value = '';
     switchAuthTab('login'); updateUserSessionUI(); showToast('ออกจากระบบเรียบร้อยแล้ว', 'info');
@@ -151,7 +170,7 @@
       .finally(() => { if (trackId) pendingIds.delete(trackId); setBgSync(false); });
   }
 
-  const aptVisualSig = a => a ? `${a.id}|${a.title}|${Logic.normalizeStatus(a.status)}|${a.appointmentDate}|${a.appointmentTime}|${a.location}|${a.contactPerson}|${a.notes}|${a.remindDaysBefore}|${a.remindHoursBefore}|${a.rescheduleCount}|${a.notifiedDayForSlot}|${a.notifiedHourForSlot}|${a.createdBy}|${a.statusChangedBy}|${a.statusReason}|${a.updatedBy}` : '';
+  const aptVisualSig = a => a ? `${a.id}|${a.title}|${Logic.normalizeStatus(a.status)}|${a.appointmentDate}|${a.appointmentTime}|${a.location}|${a.contactPerson}|${a.notes}|${a.remindDaysBefore}|${a.remindHoursBefore}|${a.rescheduleCount}|${a.notifiedDayForSlot}|${a.notifiedHourForSlot}|${a.createdBy}|${a.statusChangedBy}|${a.statusReason}|${a.updatedBy}|${a.mapUrl || ''}|${(a.imageUrl || '').length}` : '';
 
   function applySyncBundle(d) {
     if (!d) return;
@@ -165,6 +184,8 @@
 
   async function finishAuthSession(userObj, syncBundle, welcomeMsg) {
     state.currentUser = userObj;
+    state.activeTab = 'tabMonth';
+    applyTabClasses('tabMonth');
     try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj)); } catch (_) { }
     updateUserSessionUI();
     if (state.isLive && state.gasUrl) {
@@ -314,6 +335,7 @@
   // LAZY ACTIVE-TAB RENDERING PIPELINE
   // ==========================================================================
   function renderActiveTab() {
+    if (isStaffOnlyCalendar() && state.activeTab !== 'tabMonth') { state.activeTab = 'tabMonth'; applyTabClasses('tabMonth'); }
     renderHeader(); updateUserSessionUI();
     if (state.activeTab === 'tabMonth') renderCalendarTab();
     else if (state.activeTab === 'tabYear') renderYearTab();
@@ -378,6 +400,8 @@
     else if (st === Logic.STATUS.CANCELLED && a.statusChangedBy) attrHtml.push(`<span class="attribution-tag cancelled"><span>ยกเลิกโดย: <strong>${escapeHtml(a.statusChangedBy)}</strong>${a.statusReason ? ` (${escapeHtml(a.statusReason)})` : ''}</span></span>`);
     else if (a.updatedBy && a.updatedBy !== (a.createdBy || a.updatedBy)) attrHtml.push(`<span class="attribution-tag">${ICO.edit}<span>แก้ไขล่าสุดโดย: <strong>${escapeHtml(a.updatedBy)}</strong></span></span>`);
 
+    const rD = +a.remindDaysBefore || 0, rH = +a.remindHoursBefore || 0;
+    const remTxt = (rD > 0 || rH > 0) ? `เตือน ${rD}ว. / ${rH}ชม.` : 'ปิดเตือนล่วงหน้า';
     return `
       <article class="apt-card-slim ${cls}${od ? ' is-overdue' : ''}">
         <div class="apt-date-block"><span class="apt-rel-badge ${rel.cls}">${escapeHtml(rel.text)}</span><div><div class="apt-day-num">${escapeHtml(dayNum)}</div><div class="apt-month-yr">${escapeHtml(monthYr)}</div></div><div class="apt-time-pill">${ICO.clock}<span>${escapeHtml(a.appointmentTime || '-')} น.</span></div></div>
@@ -387,12 +411,16 @@
           <div class="apt-slim-meta">
             <span class="apt-meta-chip">${ICO.user}<span>ผู้นัดพบ: <strong>${escapeHtml(a.contactPerson || '-')}</strong></span></span>
             <span class="apt-meta-chip">${ICO.pin}<span>สถานที่: <strong>${escapeHtml(a.location || '-')}</strong></span></span>
-            <span class="apt-meta-chip">${ICO.bell}<span>เตือน ${+a.remindDaysBefore}ว. / ${+a.remindHoursBefore}ชม.</span></span>
+            <span class="apt-meta-chip">${ICO.bell}<span>${remTxt}</span></span>
+            ${a.mapUrl ? `<span class="apt-meta-chip map-chip">${ICO.pin}<span>มีแผนที่</span></span>` : ''}
+            ${a.imageUrl ? `<span class="apt-meta-chip img-chip">${ICO.img}<span>มีรูปแนบ</span></span>` : ''}
           </div>
           <div class="apt-attribution-row">${attrHtml.join(' ')}</div>
           ${a.notes ? `<div class="apt-notes-bar">หมายเหตุ: ${escapeHtml(a.notes)}</div>` : ''}
         </div>
         <div class="apt-slim-actions">
+          ${a.mapUrl ? `<button type="button" class="btn btn-outline btn-sm btn-view-map" data-id="${escapeHtml(a.id)}">${ICO.pin}<span>ดูแผนที่</span></button>` : ''}
+          ${a.imageUrl ? `<button type="button" class="btn btn-outline btn-sm btn-view-image" data-id="${escapeHtml(a.id)}">${ICO.img}<span>ดูรูปภาพ</span></button>` : ''}
           ${isConf ? `<button type="button" class="btn btn-success btn-sm btn-quick-complete" data-id="${escapeHtml(a.id)}">${ICO.check}<span>เสร็จสิ้น</span></button>` : ''}
           <button type="button" class="btn btn-soft btn-sm btn-edit-apt" data-id="${escapeHtml(a.id)}">${ICO.edit}<span>แก้ไข/เลื่อน</span></button>
           ${isConf ? `<button type="button" class="btn btn-danger-ghost btn-sm btn-open-cancel-modal" data-id="${escapeHtml(a.id)}">ยกเลิก</button>` : `<button type="button" class="btn btn-outline btn-sm btn-quick-reopen" data-id="${escapeHtml(a.id)}">คืนสถานะนัด</button>`}
@@ -554,6 +582,163 @@
   // ==========================================================================
   // APPOINTMENT MUTATIONS & USER ADMINISTRATION
   // ==========================================================================
+  // ==========================================================================
+  // MAP PINNING, IMAGE COMPRESSION & QUICK REMINDER HELPERS
+  // ==========================================================================
+  let pickerMap = null, pickerMarker = null, previewMap = null;
+
+  function parseCoords(raw) {
+    const s = String(raw || '').trim();
+    const m = s.match(/(?:@|[?&](?:q|ll|destination)=|^\s*)(-?\d{1,2}\.\d{3,})\s*,\s*(-?\d{1,3}\.\d{3,})/) || s.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+    if (!m) return null;
+    const lat = parseFloat(m[1]), lng = parseFloat(m[2]);
+    return (Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) ? { lat, lng } : null;
+  }
+
+  function normalizeMapUrl(raw) {
+    const s = Logic.sanitizeNoEmoji(raw || '').trim();
+    if (!s) return '';
+    if (/^https?:\/\//i.test(s)) return s;
+    const ll = parseCoords(s);
+    return ll ? `https://www.google.com/maps?q=${ll.lat},${ll.lng}` : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(s)}`;
+  }
+
+  function updateMapPinUI() {
+    const val = ($('formMapUrl') ? $('formMapUrl').value : '').trim();
+    if ($('btnClearMapPin')) $('btnClearMapPin').style.display = val ? 'inline-flex' : 'none';
+  }
+
+  function setMapPinCoords(lat, lng, statusTxt) {
+    const latF = Number(lat).toFixed(6), lngF = Number(lng).toFixed(6);
+    if ($('formMapUrl')) $('formMapUrl').value = `https://www.google.com/maps?q=${latF},${lngF}`;
+    if ($('mapPickerStatus')) $('mapPickerStatus').textContent = statusTxt || `ปักหมุดแล้ว: ${latF}, ${lngF}`;
+    updateMapPinUI();
+    if (pickerMap && pickerMarker) {
+      pickerMarker.setLatLng([+latF, +lngF]);
+      pickerMap.setView([+latF, +lngF], Math.max(pickerMap.getZoom(), 15));
+    }
+  }
+
+  function openMapPickerPanel(optCoords) {
+    const wrap = $('mapPickerWrap'); if (!wrap) return;
+    wrap.style.display = 'flex';
+    const c = optCoords || parseCoords($('formMapUrl') ? $('formMapUrl').value : '') || { lat: 13.7563, lng: 100.5018 };
+    const box = $('leafletMapPicker');
+    if (typeof window.L !== 'undefined' && box) {
+      if (!pickerMap) {
+        pickerMap = window.L.map(box).setView([c.lat, c.lng], 14);
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OSM' }).addTo(pickerMap);
+        pickerMarker = window.L.marker([c.lat, c.lng], { draggable: true }).addTo(pickerMap);
+        pickerMap.on('click', ev => setMapPinCoords(ev.latlng.lat, ev.latlng.lng));
+        pickerMarker.on('dragend', () => { const p = pickerMarker.getLatLng(); setMapPinCoords(p.lat, p.lng); });
+      } else setMapPinCoords(c.lat, c.lng);
+      setTimeout(() => { if (pickerMap) pickerMap.invalidateSize(); }, 90);
+    } else if ($('mapPickerStatus')) {
+      $('mapPickerStatus').textContent = 'ไม่สามารถโหลดแผนที่แบบโต้ตอบได้ (สามารถวางลิงก์ Google Maps ในช่องด้านบนได้ทันที)';
+    }
+  }
+
+  async function searchAndPinMap(query) {
+    const q = Logic.sanitizeNoEmoji(query || '').trim();
+    if (!q) { showToast('กรุณาระบุชื่อสถานที่เพื่อค้นหาบนแผนที่', 'warn'); return; }
+    openMapPickerPanel();
+    if ($('mapPickerStatus')) $('mapPickerStatus').textContent = `กำลังค้นหา "${q}"...`;
+    try {
+      const r = await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`);
+      const d = await r.json();
+      if (Array.isArray(d) && d[0]) {
+        setMapPinCoords(d[0].lat, d[0].lon, `พบตำแหน่ง: ${d[0].display_name.slice(0, 70)}`);
+        showToast('ปักหมุดตำแหน่งจากสถานที่สำเร็จ', 'success');
+      } else {
+        if ($('mapPickerStatus')) $('mapPickerStatus').textContent = 'ไม่พบพิกัดอัตโนมัติ ลองค้นหาด้วยชื่อย่าน/จังหวัด หรือคลิกปักหมุดบนแผนที่เอง';
+        showToast('ไม่พบพิกัดของสถานที่นี้ ลองคลิกบนแผนที่เพื่อปักหมุด', 'warn');
+      }
+    } catch (_) {
+      if ($('mapPickerStatus')) $('mapPickerStatus').textContent = 'เชื่อมต่อค้นหาไม่สำเร็จ กรุณาคลิกปักหมุดบนแผนที่หรือวางลิงก์ Google Maps';
+    }
+  }
+
+  function openMapPreviewModal(id) {
+    const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a || !a.mapUrl) return;
+    const extUrl = normalizeMapUrl(a.mapUrl || a.location || '');
+    if ($('mapPreviewTitle')) $('mapPreviewTitle').textContent = `แผนที่นัดหมาย: ${a.title}`;
+    if ($('mapPreviewLocation')) $('mapPreviewLocation').textContent = `สถานที่: ${a.location || '-'}`;
+    if ($('btnOpenExternalMap')) $('btnOpenExternalMap').href = extUrl || 'https://maps.google.com';
+    const box = $('mapPreviewContainer');
+    if (previewMap) { try { previewMap.remove(); } catch (_) { } previewMap = null; }
+    openModal('mapPreviewModal');
+    if (!box) return;
+    box.innerHTML = '';
+    const ll = parseCoords(a.mapUrl);
+    if (ll && typeof window.L !== 'undefined') {
+      setTimeout(() => {
+        try {
+          previewMap = window.L.map(box).setView([ll.lat, ll.lng], 15);
+          window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: 'OSM' }).addTo(previewMap);
+          window.L.marker([ll.lat, ll.lng]).addTo(previewMap).bindPopup(escapeHtml(a.location || a.title || 'จุดนัดพบ')).openPopup();
+          previewMap.invalidateSize();
+        } catch (_) { }
+      }, 60);
+    } else {
+      const q = ll ? `${ll.lat},${ll.lng}` : (a.location || a.mapUrl);
+      box.innerHTML = `<iframe class="map-embed-iframe" loading="lazy" referrerpolicy="no-referrer-when-downgrade" src="https://maps.google.com/maps?q=${encodeURIComponent(q)}&z=15&output=embed"></iframe>`;
+    }
+  }
+
+  function setFormImagePreview(val, infoText) {
+    const v = Logic.sanitizeNoEmoji(val || '').trim();
+    if ($('formImageData')) $('formImageData').value = v;
+    const nextUrlVal = v && !v.startsWith('data:') ? v : '';
+    if ($('formImageUrlInput') && $('formImageUrlInput').value !== nextUrlVal) $('formImageUrlInput').value = nextUrlVal;
+    if ($('formImagePreview')) $('formImagePreview').src = v || '';
+    if ($('formImagePreviewWrap')) $('formImagePreviewWrap').style.display = v ? 'flex' : 'none';
+    if ($('btnClearImage')) $('btnClearImage').style.display = v ? 'inline-flex' : 'none';
+    if ($('formImageSizeInfo')) $('formImageSizeInfo').textContent = infoText || (v ? (v.startsWith('data:') ? `ขนาดข้อมูล: ${Math.max(1, Math.round(v.length / 1024))} KB` : 'ลิงก์รูปภาพภายนอก') : '');
+  }
+
+  function compressImageFile(file) {
+    if (!file || !file.type || !file.type.startsWith('image/')) { showToast('กรุณาเลือกไฟล์รูปภาพเท่านั้น', 'error'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const tryEncode = (maxDim, q) => {
+          let w = img.width, h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w >= h) { h = Math.round(h * maxDim / w); w = maxDim; }
+            else { w = Math.round(w * maxDim / h); h = maxDim; }
+          }
+          const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+          cv.getContext('2d').drawImage(img, 0, 0, w, h);
+          return { url: cv.toDataURL('image/jpeg', q), w, h };
+        };
+        let res = tryEncode(720, 0.72);
+        if (res.url.length > 42000) res = tryEncode(560, 0.56);
+        if (res.url.length > 45000) res = tryEncode(420, 0.45);
+        if (res.url.length > 48000) { showToast('รูปภาพมีขนาดใหญ่เกินไปแม้หลังบีบอัด กรุณาใช้รูปที่เล็กลงหรือวางเป็นลิงก์รูปแทน', 'error'); return; }
+        setFormImagePreview(res.url, `ย่อขนาดอัตโนมัติ ${res.w}x${res.h} (${Math.max(1, Math.round(res.url.length / 1024))} KB)`);
+        showToast('แนบรูปภาพสำเร็จ', 'success');
+      };
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  function openImagePreviewModal(id) {
+    const a = state.appointments.find(x => x.id === id && !x.deletedAt); if (!a || !a.imageUrl) return;
+    if ($('imagePreviewTitle')) $('imagePreviewTitle').textContent = `รูปภาพแนบ: ${a.title}`;
+    if ($('imagePreviewFull')) $('imagePreviewFull').src = a.imageUrl;
+    if ($('btnOpenExternalImage')) $('btnOpenExternalImage').href = a.imageUrl;
+    openModal('imagePreviewModal');
+  }
+
+  function syncRemindChips() {
+    ['formRemindDays', 'formRemindHours'].forEach(id => {
+      const val = String(Math.max(0, parseInt($(`${id}`) ? $(id).value : '0', 10) || 0));
+      document.querySelectorAll(`.remind-chip[data-remind-target="${id}"]`).forEach(c => c.classList.toggle('active', c.getAttribute('data-val') === val));
+    });
+  }
+
   function checkConflictOnForm() {
     const banner = $('conflictWarningBanner'); if (!banner) return;
     const conflicts = Logic.findTimeConflicts(state.appointments, $('formDate').value, $('formTime').value, $('formAptId').value);
@@ -568,9 +753,16 @@
     $('formTitle').value = f.title || ''; $('formStatus').value = f.status || Logic.STATUS.CONFIRMED;
     $('formContactPerson').value = f.contactPerson || ''; $('formDate').value = f.date || '';
     $('formTime').value = f.time || '09:00'; $('formLocation').value = f.location || '';
-    $('formRemindDays').value = String(f.remindDays != null ? f.remindDays : 1);
-    $('formRemindHours').value = String(f.remindHours != null ? f.remindHours : 1);
+    if ($('formMapUrl')) $('formMapUrl').value = f.mapUrl || '';
+    if ($('mapPickerWrap')) $('mapPickerWrap').style.display = 'none';
+    if ($('formMapSearchInput')) $('formMapSearchInput').value = '';
+    updateMapPinUI();
+    $('formRemindDays').value = String(f.remindDays != null && f.remindDays !== '' ? f.remindDays : 0);
+    $('formRemindHours').value = String(f.remindHours != null && f.remindHours !== '' ? f.remindHours : 0);
+    syncRemindChips();
     $('formNotes').value = f.notes || ''; $('formRescheduleReason').value = '';
+    if ($('formImageFile')) $('formImageFile').value = '';
+    setFormImagePreview(f.imageUrl || '');
     updateDateThaiPreview(); checkConflictOnForm(); openModal('appointmentModal');
   }
 
@@ -590,7 +782,7 @@
     if ($('formNotifyLineLabel')) $('formNotifyLineLabel').textContent = 'ส่งแจ้งเตือนการแก้ไขนัดหมายเข้ากลุ่ม LINE ทันที';
     $('rescheduleReasonGroup').style.display = 'block'; $('btnDeleteApt').style.display = 'inline-flex';
     if ($('formCreatedByPill')) { $('formCreatedByPill').textContent = `ผู้สร้างนัดหมายเดิม: ${a.createdBy || a.updatedBy || '-'} | แก้ไขโดย: ${state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ'}`; $('formCreatedByPill').style.display = 'inline-block'; }
-    fillAptForm({ id: a.id, updatedAt: a.updatedAt, title: a.title, status: Logic.normalizeStatus(a.status), contactPerson: a.contactPerson, date: a.appointmentDate, time: a.appointmentTime, location: a.location, remindDays: a.remindDaysBefore, remindHours: a.remindHoursBefore, notes: a.notes });
+    fillAptForm({ id: a.id, updatedAt: a.updatedAt, title: a.title, status: Logic.normalizeStatus(a.status), contactPerson: a.contactPerson, date: a.appointmentDate, time: a.appointmentTime, location: a.location, mapUrl: a.mapUrl || '', imageUrl: a.imageUrl || '', remindDays: a.remindDaysBefore, remindHours: a.remindHoursBefore, notes: a.notes });
   }
 
   async function handleFormSubmit(e) {
@@ -598,10 +790,13 @@
     const id = $('formAptId').value.trim(), exp = $('formExpectedUpdatedAt').value.trim();
     if (id && pendingIds.has(id)) { showToast('รายการนี้กำลังซิงก์ข้อมูลอยู่ กรุณารอสักครู่', 'info'); return; }
     const curUserName = state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ';
+    const rawImg = ($('formImageData') && $('formImageData').value) || ($('formImageUrlInput') && $('formImageUrlInput').value) || '';
     const payload = {
       title: Logic.sanitizeNoEmoji($('formTitle').value), status: $('formStatus').value,
       contactPerson: Logic.sanitizeNoEmoji($('formContactPerson').value), appointmentDate: $('formDate').value,
       appointmentTime: $('formTime').value, location: Logic.sanitizeNoEmoji($('formLocation').value),
+      mapUrl: $('formMapUrl') ? normalizeMapUrl($('formMapUrl').value) : '',
+      imageUrl: Logic.sanitizeNoEmoji(rawImg),
       remindDaysBefore: +$('formRemindDays').value, remindHoursBefore: +$('formRemindHours').value,
       notes: Logic.sanitizeNoEmoji($('formNotes').value), updatedBy: curUserName
     };
@@ -817,6 +1012,37 @@
     on('btnOpenPatchNotesModal', 'click', () => { renderPatchNotes(); openModal('patchNotesModal'); });
     on('btnClosePatchNotesModalTop', 'click', () => closeModal('patchNotesModal')); on('btnClosePatchNotesModal', 'click', () => closeModal('patchNotesModal'));
     on('btnOpenGuideModal', 'click', () => openModal('guideModal')); on('btnCloseGuideModalTop', 'click', () => closeModal('guideModal')); on('btnCloseGuideModal', 'click', () => closeModal('guideModal'));
+    on('btnCloseMapPreviewModalTop', 'click', () => closeModal('mapPreviewModal')); on('btnCloseMapPreviewModal', 'click', () => closeModal('mapPreviewModal'));
+    on('btnCloseImagePreviewModalTop', 'click', () => closeModal('imagePreviewModal')); on('btnCloseImagePreviewModal', 'click', () => closeModal('imagePreviewModal'));
+
+    on('formRemindDays', 'input', syncRemindChips); on('formRemindHours', 'input', syncRemindChips);
+    on('formMapUrl', 'input', updateMapPinUI);
+    on('btnToggleMapPicker', 'click', () => {
+      const wrap = $('mapPickerWrap'); if (!wrap) return;
+      if (wrap.style.display === 'none' || !wrap.style.display) openMapPickerPanel();
+      else wrap.style.display = 'none';
+    });
+    on('btnSearchMapFromLoc', 'click', () => searchAndPinMap($('formLocation') ? $('formLocation').value : ''));
+    on('btnExecMapSearch', 'click', () => searchAndPinMap($('formMapSearchInput') ? $('formMapSearchInput').value : ''));
+    on('formMapSearchInput', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); searchAndPinMap($('formMapSearchInput').value); } });
+    on('btnClearMapPin', 'click', () => { if ($('formMapUrl')) $('formMapUrl').value = ''; updateMapPinUI(); if ($('mapPickerWrap')) $('mapPickerWrap').style.display = 'none'; });
+    on('btnUseCurrentGps', 'click', () => {
+      if (!navigator.geolocation) { showToast('อุปกรณ์ไม่รองรับการดึงพิกัด GPS', 'error'); return; }
+      openMapPickerPanel();
+      if ($('mapPickerStatus')) $('mapPickerStatus').textContent = 'กำลังดึงตำแหน่ง GPS ปัจจุบัน...';
+      navigator.geolocation.getCurrentPosition(
+        pos => { setMapPinCoords(pos.coords.latitude, pos.coords.longitude, 'ปักหมุดจากพิกัด GPS ปัจจุบันแล้ว'); showToast('ดึงพิกัด GPS สำเร็จ', 'success'); },
+        () => { showToast('ไม่สามารถเข้าถึงตำแหน่ง GPS ได้ กรุณาอนุญาตสิทธิ์หรือคลิกบนแผนที่', 'warn'); }
+      );
+    });
+    on('btnTriggerImageUpload', 'click', () => { if ($('formImageFile')) $('formImageFile').click(); });
+    on('formImageFile', 'change', e => { const f = e.target.files && e.target.files[0]; if (f) compressImageFile(f); });
+    on('formImageUrlInput', 'input', () => {
+      const u = Logic.sanitizeNoEmoji($('formImageUrlInput').value || '').trim();
+      setFormImagePreview(u, u ? 'ลิงก์รูปภาพภายนอก' : '');
+      if ($('formImageUrlInput') && u) $('formImageUrlInput').value = u;
+    });
+    on('btnClearImage', 'click', () => { if ($('formImageFile')) $('formImageFile').value = ''; setFormImagePreview(''); });
 
     const setTeamConn = async () => {
       state.gasUrl = DEFAULT_GAS_URL; state.passcode = DEFAULT_PASSCODE; state.isLive = true;
@@ -843,6 +1069,14 @@
       if (addCell) { e.stopPropagation(); const dt = addCell.getAttribute('data-add-date'); state.calSelectedDate = dt || ''; renderCalendarTab(); openCreateModal(dt); return; }
       const jumpM = t.closest('.btn-jump-cal-month'); if (jumpM) { state.calYear = +jumpM.getAttribute('data-year'); state.calMonth = +jumpM.getAttribute('data-month'); state.calSelectedDate = ''; switchTab('tabMonth'); return; }
       const edit = t.closest('.btn-edit-apt'); if (edit) { openEditModal(edit.getAttribute('data-id')); return; }
+      const vMap = t.closest('.btn-view-map'); if (vMap) { openMapPreviewModal(vMap.getAttribute('data-id')); return; }
+      const vImg = t.closest('.btn-view-image'); if (vImg) { openImagePreviewModal(vImg.getAttribute('data-id')); return; }
+      const rChip = t.closest('.remind-chip'); if (rChip) { const tid = rChip.getAttribute('data-remind-target'); if ($(tid)) { $(tid).value = rChip.getAttribute('data-val') || '0'; syncRemindChips(); } return; }
+      const rStep = t.closest('.btn-remind-step'); if (rStep) {
+        const tid = rStep.getAttribute('data-step-target'), stp = parseInt(rStep.getAttribute('data-step') || '0', 10);
+        if ($(tid)) { const mx = parseInt($(tid).getAttribute('max') || '365', 10); $(tid).value = String(Math.max(0, Math.min(mx, (parseInt($(tid).value || '0', 10) || 0) + stp))); syncRemindChips(); }
+        return;
+      }
       const comp = t.closest('.btn-quick-complete'); if (comp) { handleQuickComplete(comp.getAttribute('data-id')); return; }
       const canc = t.closest('.btn-open-cancel-modal'); if (canc) { openCancelModal(canc.getAttribute('data-id')); return; }
       const reopen = t.closest('.btn-quick-reopen'); if (reopen) { handleQuickReopen(reopen.getAttribute('data-id')); return; }
@@ -913,7 +1147,7 @@
       privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE',
       quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0
     });
-    $('botSimOutput').textContent = res === null ? '[บอทเงียบ]\nเนื่องจากข้อความไม่ได้ขึ้นต้นด้วยคำว่า "คิว"' : res;
+    $('botSimOutput').textContent = res === null ? '[บอทเงียบ]\nเนื่องจากข้อความไม่ตรงกับคำสั่งบอท (ลองพิมพ์ "วันนี้", "ทั้งหมด" หรือ "ช่วยเหลือ")' : res;
   }
 
   window.addEventListener('DOMContentLoaded', initApp);

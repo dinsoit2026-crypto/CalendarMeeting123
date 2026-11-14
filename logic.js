@@ -1,5 +1,5 @@
 /**
- * logic.js - Core Domain Logic, Validation, Bangkok Timezone, Notification Engine & Analytics (v2.6.1)
+ * logic.js - Core Domain Logic, Validation, Bangkok Timezone, Notification Engine & Analytics (v2.6.2)
  * Universal Module Definition (Node.js + Browser) | 43-Key API Contract | Zero-Emoji Policy
  */
 (function (root, factory) {
@@ -8,7 +8,7 @@
 })(typeof self !== 'undefined' ? self : this, function () {
   'use strict';
 
-  const API_VERSION = '2.6.1', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.6.2', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({ CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' });
@@ -180,16 +180,19 @@
     if (!contactPerson) errs.push('กรุณาระบุชื่อผู้นัดพบ');
     if (input.appointmentDate && pDate === null) errs.push('รูปแบบวันที่ไม่ถูกต้อง');
     if (input.appointmentTime && pTime === null) errs.push('รูปแบบเวลาไม่ถูกต้อง (HH:mm)');
-    const rDays = input.remindDaysBefore != null && input.remindDaysBefore !== '' ? Number(input.remindDaysBefore) : 1;
-    const rHours = input.remindHoursBefore != null && input.remindHoursBefore !== '' ? Number(input.remindHoursBefore) : 1;
+    const rDays = input.remindDaysBefore != null && input.remindDaysBefore !== '' ? Number(input.remindDaysBefore) : 0;
+    const rHours = input.remindHoursBefore != null && input.remindHoursBefore !== '' ? Number(input.remindHoursBefore) : 0;
     if (!Number.isInteger(rDays) || rDays < 0 || rDays > 365) errs.push('จำนวนวันแจ้งเตือนต้องเป็น 0-365');
     if (!Number.isInteger(rHours) || rHours < 0 || rHours > 168) errs.push('จำนวนชั่วโมงแจ้งเตือนต้องเป็น 0-168');
+    const mapUrl = sanitizeNoEmoji(input.mapUrl || ''), imageUrl = sanitizeNoEmoji(input.imageUrl || '');
+    if (imageUrl.length > 48000) errs.push('ขนาดไฟล์รูปภาพใหญ่เกินขีดจำกัด (กรุณาใช้รูปภาพขนาดเล็กลง)');
     const createdBy = sanitizeNoEmoji(input.createdBy || input.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ';
     return {
       valid: !errs.length, errors: errs,
       sanitized: {
         title, appointmentDate: pDate || '', appointmentTime: pTime || '', location, contactPerson, status,
         remindDaysBefore: rDays, remindHoursBefore: rHours, notes: sanitizeNoEmoji(input.notes || ''),
+        mapUrl, imageUrl,
         createdBy, updatedBy: sanitizeNoEmoji(input.updatedBy || createdBy) || createdBy,
         statusChangedBy: sanitizeNoEmoji(input.statusChangedBy || ''),
         statusChangedAt: sanitizeNoEmoji(input.statusChangedAt || ''), statusReason: sanitizeNoEmoji(input.statusReason || '')
@@ -356,20 +359,23 @@
     else if (st === STATUS.CANCELLED) { if (apt.statusChangedBy) lines.push(`ผู้ยกเลิกนัด: ${sanitizeNoEmoji(apt.statusChangedBy)}`); if (apt.statusReason) lines.push(`สาเหตุการยกเลิก: ${sanitizeNoEmoji(apt.statusReason)}`); }
     else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) lines.push(`ผู้แก้ไขล่าสุด: ${sanitizeNoEmoji(apt.updatedBy)}`);
     if (apt.notes) lines.push(`หมายเหตุ: ${sanitizeNoEmoji(apt.notes)}`);
+    if (apt.mapUrl) lines.push(`แผนที่: ${sanitizeNoEmoji(apt.mapUrl)}`);
     return sanitizeNoEmoji(lines.join('\n'));
   }
 
-  // LINE Bot Command Parser
+  // LINE Bot Command Parser (Supports short commands without "คิว" and legacy "คิว ..." commands)
   function parseAndExecuteLineCommand(rawText, appointments, nowIso, settings) {
     const text = sanitizeNoEmoji(rawText || '').trim();
-    if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(text)) return null;
+    const isLegacy = /^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(text);
+    const isShort = /^(?:ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|help|เดือน\s+\d{1,2}[-/]\d{4}|ปี\s*\d{4}|ค้นหา\s+.+)$/i.test(text);
+    if (!isLegacy && !isShort) return null;
     const cfg = settings || {};
     if (cfg.enableLineBotQuery === false) return '[ระบบปิดการค้นหาผ่านแชทชั่วคราว] กรุณาตรวจสอบผ่านหน้าเว็บแอป';
     const arg = text.replace(/^คิว\s*/, '').trim(), bkk = getBangkokParts(nowIso), list = (appointments || []).filter(a => a && !a.deletedAt);
     const fmtList = (hdr, itms) => { const o = `${hdr}\n` + itms.map((a, i) => formatAptLine(a, i + 1, cfg)).join('\n\n'); return sanitizeNoEmoji(o.length > LINE_MAX_LEN ? o.slice(0, LINE_MAX_LEN - 80) + '\n...(ดูเพิ่มเติมบนเว็บแอป)' : o); };
 
     if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') {
-      return ['[คำสั่งตรวจสอบตารางงาน]', '- คิวทั้งหมด (หรือ คิว ทั้งหมด) : นัดหมายที่กำลังจะมาถึงทั้งหมด', '- คิว วันนี้ : นัดหมายวันนี้', '- คิว พรุ่งนี้ : นัดหมายพรุ่งนี้', '- คิว สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- คิว ค้างอยู่ : งานเลยกำหนดเวลา', '- คิว เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- คิว เดือน MM/YYYY : เช่น คิว เดือน 12/2569', '- คิว ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- คิว ปี YYYY : เช่น คิว ปี 2570', '- คิว ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง', '- คิว โควตา : ตรวจสอบโควตารายเดือน'].join('\n');
+      return ['[คำสั่งตรวจสอบตารางงาน]', '- ทั้งหมด : นัดหมายที่กำลังจะมาถึงทั้งหมด', '- วันนี้ : นัดหมายวันนี้', '- พรุ่งนี้ : นัดหมายพรุ่งนี้', '- สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- ค้างอยู่ : งานเลยกำหนดเวลา', '- เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- เดือน MM/YYYY : เช่น เดือน 12/2569', '- ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- ปี YYYY : เช่น ปี 2570', '- ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง', '- โควตา : ตรวจสอบโควตารายเดือน'].join('\n');
     }
     if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
     if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') {
@@ -386,19 +392,19 @@
     const mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
     if (mm) {
       const y = normalizeYearToCE(mm[2]), m = +mm[1];
-      if (!y || m < 1 || m > 12) return '[ข้อผิดพลาด] รูปแบบเดือนไม่ถูกต้อง เช่น คิว เดือน 12/2569';
+      if (!y || m < 1 || m > 12) return '[ข้อผิดพลาด] รูปแบบเดือนไม่ถูกต้อง เช่น เดือน 12/2569';
       const r = queryByMonth(list, y, m, { nowIso });
       return r.items.length ? fmtList(`[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear} (${r.ceYear})] รวม ${r.stats.total} รายการ (สิ้นสุด ${r.stats.completed} | ยกเลิก ${r.stats.cancelled})`, r.items) : `[ตารางงานเดือน${r.monthNameThai} พ.ศ. ${r.buddhistYear}]\nไม่มีรายการนัดหมาย`;
     }
     if (arg === 'ปีนี้' || arg === 'ปีหน้า') return formatYearCommandReply(queryByYear(list, arg === 'ปีนี้' ? bkk.year : bkk.year + 1, { nowIso }));
     const ym = arg.match(/^ปี\s*(\d{4})$/);
-    if (ym) { const y = normalizeYearToCE(ym[1]); return y ? formatYearCommandReply(queryByYear(list, y, { nowIso })) : '[ข้อผิดพลาด] รูปแบบปีไม่ถูกต้อง เช่น คิว ปี 2570'; }
+    if (ym) { const y = normalizeYearToCE(ym[1]); return y ? formatYearCommandReply(queryByYear(list, y, { nowIso })) : '[ข้อผิดพลาด] รูปแบบปีไม่ถูกต้อง เช่น ปี 2570'; }
     const sm = arg.match(/^ค้นหา\s+(.+)$/);
     if (sm) {
       const kw = sm[1].trim().toLowerCase(), itms = list.filter(a => `${a.id} ${a.title} ${a.location} ${a.contactPerson} ${a.createdBy || ''} ${a.statusChangedBy || ''} ${a.status} ${a.notes}`.toLowerCase().includes(kw));
       return itms.length ? fmtList(`[ผลการค้นหา "${sm[1].trim()}"] (${itms.length} รายการ)`, itms) : `[ผลการค้นหา "${sm[1].trim()}"]\nไม่พบรายการที่ตรงกัน`;
     }
-    return '[ไม่พบคำสั่งที่ระบุ] พิมพ์ "คิว ช่วยเหลือ" เพื่อดูรายการคำสั่ง';
+    return '[ไม่พบคำสั่งที่ระบุ] พิมพ์ "ช่วยเหลือ" เพื่อดูรายการคำสั่ง';
   }
 
   function formatYearCommandReply(r) {

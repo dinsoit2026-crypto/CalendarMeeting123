@@ -1,11 +1,11 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.1)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.2)
  * Zero-Emoji Policy | Request-Level Sheet & Props Cache | Parallel LINE API & Smart Trigger Skip
  */
-var API_VER = '2.6.1';
+var API_VER = '2.6.2';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
-var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt'];
+var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt', 'mapUrl', 'imageUrl'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
 var META_COLS = ['key', 'value', 'updatedAt'];
@@ -76,8 +76,15 @@ function getSheetData_(name, cols) {
   if (_dataCache[name]) return _dataCache[name];
   var sh = ensureSheet_(getSs_(), name, cols), lr = sh.getLastRow();
   if (lr <= 1) return (_dataCache[name] = { sh: sh, headers: cols || [], rows: [] });
-  var all = sh.getRange(1, 1, lr, sh.getLastColumn()).getDisplayValues();
-  return (_dataCache[name] = { sh: sh, headers: all[0], rows: all.slice(1) });
+  var lc = Math.max(sh.getLastColumn(), 1), all = sh.getRange(1, 1, lr, lc).getDisplayValues(), hdrs = all[0], added = false;
+  if (cols) cols.forEach(function (c) {
+    if (hdrs.indexOf(c) === -1) { hdrs.push(c); added = true; sh.getRange(1, hdrs.length).setNumberFormat('@').setValue(c).setFontWeight('bold'); }
+  });
+  if (added) {
+    var diff = hdrs.length - lc;
+    for (var ri = 1; ri < all.length; ri++) for (var k = 0; k < diff; k++) all[ri].push('');
+  }
+  return (_dataCache[name] = { sh: sh, headers: hdrs, rows: all.slice(1) });
 }
 
 function setupDatabase() {
@@ -151,8 +158,9 @@ function scheduleExactReminderForApt_(apt) {
     var map = JSON.parse(getProp_('ONEOFF_TRIGGERS_JSON') || '{}'), uids = Object.keys(map);
     var aptUids = uids.filter(function (u) { return getTrigId_(map[u]) === apt.id; });
     var ep = (apt.status === STATUS.CONFIRMED && apt.appointmentDate && apt.appointmentTime) ? bkkSlotToEpoch_(apt.appointmentDate, apt.appointmentTime) : null;
-    var rH = +apt.remindHoursBefore || 1, remindMs = ep ? ep - (rH * 3600000) : 0, nowMs = getBkkNow_().epochMs;
-    var shouldCreate = Boolean(ep && remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000));
+    var rH = (apt.remindHoursBefore != null && apt.remindHoursBefore !== '') ? +apt.remindHoursBefore : 0;
+    var remindMs = (ep && rH > 0) ? ep - (rH * 3600000) : 0, nowMs = getBkkNow_().epochMs;
+    var shouldCreate = Boolean(ep && rH > 0 && remindMs > nowMs + 180000 && remindMs <= nowMs + (48 * 3600000));
 
     // Fast-skip costly ScriptApp.getProjectTriggers() when no trigger mutation is required
     if (!shouldCreate && !aptUids.length) return;
@@ -383,8 +391,10 @@ function readAllApts_(includeDeleted) {
   return d.rows.reduce(function (arr, r) {
     var o = {}; d.headers.forEach(function (c, i) { o[c] = String(r[i] || '').trim(); });
     o.status = normalizeStatus_(o.status);
-    o.remindDaysBefore = Number(o.remindDaysBefore || 1); o.remindHoursBefore = Number(o.remindHoursBefore || 1);
+    o.remindDaysBefore = (o.remindDaysBefore !== '' && o.remindDaysBefore != null) ? Number(o.remindDaysBefore) : 0;
+    o.remindHoursBefore = (o.remindHoursBefore !== '' && o.remindHoursBefore != null) ? Number(o.remindHoursBefore) : 0;
     o.rescheduleCount = Number(o.rescheduleCount || 0);
+    o.mapUrl = sanitizeNoEmoji(o.mapUrl || ''); o.imageUrl = sanitizeNoEmoji(o.imageUrl || '');
     o.createdBy = sanitizeNoEmoji(o.createdBy || o.updatedBy || 'ผู้ใช้งานระบบ');
     o.statusChangedBy = sanitizeNoEmoji(o.statusChangedBy || ''); o.statusChangedAt = sanitizeNoEmoji(o.statusChangedAt || ''); o.statusReason = sanitizeNoEmoji(o.statusReason || '');
     var isDel = delIdx !== -1 && Boolean(String(r[delIdx] || '').trim());
@@ -400,8 +410,10 @@ function createApt_(inp) {
   var rec = {
     id: pfx + String(max + 1).padStart(3, '0'), title: sanitizeNoEmoji(inp.title), appointmentDate: sanitizeNoEmoji(inp.appointmentDate), appointmentTime: sanitizeNoEmoji(inp.appointmentTime),
     location: sanitizeNoEmoji(inp.location), contactPerson: sanitizeNoEmoji(inp.contactPerson), status: st,
-    remindDaysBefore: inp.remindDaysBefore != null ? +inp.remindDaysBefore : 1, remindHoursBefore: inp.remindHoursBefore != null ? +inp.remindHoursBefore : 1,
-    notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0, notes: sanitizeNoEmoji(inp.notes), createdBy: creator,
+    remindDaysBefore: (inp.remindDaysBefore != null && inp.remindDaysBefore !== '') ? +inp.remindDaysBefore : 0,
+    remindHoursBefore: (inp.remindHoursBefore != null && inp.remindHoursBefore !== '') ? +inp.remindHoursBefore : 0,
+    notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0, notes: sanitizeNoEmoji(inp.notes),
+    mapUrl: sanitizeNoEmoji(inp.mapUrl || ''), imageUrl: sanitizeNoEmoji(inp.imageUrl || ''), createdBy: creator,
     statusChangedBy: st !== STATUS.CONFIRMED ? (sanitizeNoEmoji(inp.statusChangedBy) || creator) : '', statusChangedAt: st !== STATUS.CONFIRMED ? now.isoStr : '',
     statusReason: sanitizeNoEmoji(inp.statusReason || ''), updatedBy: creator, createdAt: now.isoStr, updatedAt: now.isoStr, deletedAt: ''
   };
@@ -486,6 +498,7 @@ function deleteApt_(id, user) {
 function validateApt_(r) {
   if (!r.title) throw new Error('กรุณาระบุหัวข้องาน');
   if (!r.appointmentDate || !r.appointmentTime || !r.location || !r.contactPerson) throw new Error('กรุณาระบุวันที่, เวลา, สถานที่ และผู้นัดพบให้ครบถ้วน');
+  if (r.imageUrl && String(r.imageUrl).length > 48000) throw new Error('ขนาดรูปภาพเกินขีดจำกัดของ Google Sheets');
 }
 
 function getMetaMap_() {
@@ -701,17 +714,17 @@ function buildQuotaFlex_(used, limit, webAppUrl) {
 }
 
 function buildHelpFlex_(webAppUrl) {
-  var cmds = [['คิว วันนี้', 'ดูนัดหมายเฉพาะวันนี้'], ['คิว พรุ่งนี้', 'ดูนัดหมายวันพรุ่งนี้'], ['คิว สัปดาห์นี้', 'ดูนัดหมาย 7 วันข้างหน้า'], ['คิว ค้างอยู่', 'ดูนัดหมายที่เลยกำหนดเวลา'], ['คิว ทั้งหมด', 'ดูนัดหมายรอพบทั้งหมด'], ['คิว เดือนนี้', 'ดูรายการงานประจำเดือนนี้'], ['คิว ปีนี้', 'สรุปผลงานและสถิติประจำปี'], ['คิว โควตา', 'เช็คโควตาข้อความ LINE'], ['คิว ค้นหา <คำ>', 'ค้นหาจากชื่อ งาน หรือสถานที่']];
+  var cmds = [['วันนี้', 'ดูนัดหมายเฉพาะวันนี้'], ['พรุ่งนี้', 'ดูนัดหมายวันพรุ่งนี้'], ['สัปดาห์นี้', 'ดูนัดหมาย 7 วันข้างหน้า'], ['ค้างอยู่', 'ดูนัดหมายที่เลยกำหนดเวลา'], ['ทั้งหมด', 'ดูนัดหมายรอพบทั้งหมด'], ['เดือนนี้', 'ดูรายการงานประจำเดือนนี้'], ['ปีนี้', 'สรุปผลงานและสถิติประจำปี'], ['โควตา', 'เช็คโควตาข้อความ LINE'], ['ค้นหา <คำ>', 'ค้นหาจากชื่อ งาน หรือสถานที่']];
   var rows = cmds.map(function (c) { return fBox('horizontal', [fTxt(c[0], { weight: 'bold', color: '#4f46e5', size: 'sm', flex: 4 }), fTxt(c[1], { color: '#64748b', size: 'sm', flex: 6, wrap: true })], { spacing: 'sm', margin: 'xs' }); });
-  var qBtn = function (lbl, pri) { return fBtn(pri ? 'primary' : 'secondary', { type: 'message', label: lbl, text: lbl }, pri ? '#4f46e5' : '#f1f5f9'); };
+  var qBtn = function (lbl, col) { return fBtn('primary', { type: 'message', label: lbl, text: lbl }, col || '#4f46e5'); };
   var ftItems = [
-    fBox('horizontal', [qBtn('คิว วันนี้', true), qBtn('คิว พรุ่งนี้', false)], { spacing: 'sm' }),
-    fBox('horizontal', [qBtn('คิว ค้างอยู่', false), qBtn('คิว ทั้งหมด', false)], { spacing: 'sm' }),
-    fBox('horizontal', [qBtn('คิว ปีนี้', false), qBtn('คิว โควตา', false)], { spacing: 'sm' })
+    fBox('horizontal', [qBtn('วันนี้', '#4f46e5'), qBtn('พรุ่งนี้', '#4f46e5')], { spacing: 'sm' }),
+    fBox('horizontal', [qBtn('ค้างอยู่', '#dc2626'), qBtn('ทั้งหมด', '#0284c7')], { spacing: 'sm' }),
+    fBox('horizontal', [qBtn('ปีนี้', '#059669'), qBtn('โควตา', '#334155')], { spacing: 'sm' })
   ];
   if (webAppUrl) ftItems.push(fBtn('link', { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }));
   var b = fBubble('#eef2ff', [fTxt('[คำสั่งตรวจสอบตารางงาน]', { weight: 'bold', color: '#4338ca', size: 'sm' }), fTxt('แตะปุ่มด้านล่างหรือพิมพ์คำสั่งเพื่อค้นหา', { size: 'xs', color: '#4f46e5', margin: 'xs' })],
-    [fTxt('คำสั่งลัดที่ใช้งานบ่อย:', { weight: 'bold', size: 'sm', color: '#0f172a' }), { type: 'separator', color: '#c7d2fe' }, fBox('vertical', rows, { spacing: 'xs', margin: 'md' })], fBox('vertical', ftItems, { spacing: 'sm' }));
+    [fTxt('คำสั่งลัดที่ใช้งานบ่อย:', { weight: 'bold', size: 'sm', color: '#0f172a' }), { type: 'separator', color: '#c7d2fe' }, fBox('vertical', rows, { spacing: 'xs', margin: 'md' }), fTxt('รองรับคำสั่งสั้นทันที หรือพิมพ์ "คิว ..." ตามเดิม', { size: 'xxs', color: '#64748b', margin: 'sm' })], fBox('vertical', ftItems, { spacing: 'sm' }));
   return wrapFlex_('[คำสั่งตรวจสอบตารางงาน] แตะเพื่อดูคำสั่งทั้งหมด', b);
 }
 
@@ -754,9 +767,17 @@ function buildYearStatsFlex_(year, total, act, comp, canc, rate, sampleItems, we
   return wrapFlex_('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + '] รวม ' + total + ' งาน', b);
 }
 
+function getValidMapUri_(raw) {
+  var s = sanitizeNoEmoji(raw || '').trim();
+  if (!s) return '';
+  if (/^https?:\/\//i.test(s)) return s.indexOf(' ') !== -1 ? s.replace(/ /g, '%20') : s;
+  var ll = s.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
+  return ll ? ('https://www.google.com/maps?q=' + ll[1] + ',' + ll[2]) : '';
+}
+
 function buildAptBubble_(apt, opts) {
   opts = opts || {};
-  var isUpd = Boolean(opts.isUpdate), webAppUrl = opts.webAppUrl || '', c = sanitizeNoEmoji(apt.contactPerson || '-');
+  var isUpd = Boolean(opts.isUpdate), webAppUrl = opts.webAppUrl || '', mapUri = getValidMapUri_(apt.mapUrl), c = sanitizeNoEmoji(apt.contactPerson || '-');
   if (opts.maskContact && c.length > 2) c = c.slice(0, 2) + '***';
   var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || 'ผู้ใช้งานระบบ'), st = normalizeStatus_(apt.status), theme = getAptFlexTheme_(st, isUpd, Boolean(apt.reopened));
   var infoRows = [fRow('วันนัด', fmtThaiDate_(apt.appointmentDate), true, '#0f172a'), fRow('เวลา', (apt.appointmentTime || '-') + ' น.', true, '#0f172a'), fRow('สถานที่', apt.location || '-', false, '#334155', true), fRow('ผู้นัดพบ', c, false, '#334155', true), fRow('สถานะ', '[' + st + ']', true, theme.stColor), fRow('ผู้สร้าง', creator, false, '#64748b')];
@@ -774,9 +795,17 @@ function buildAptBubble_(apt, opts) {
       fBtn('primary', { type: 'postback', label: 'เสร็จสิ้น', data: 'action=quickComplete&id=' + encodeURIComponent(apt.id), displayText: 'บันทึกเสร็จสิ้น [' + apt.id + ']' }, '#10b981'),
       fBtn('primary', { type: 'postback', label: 'ยกเลิก', data: 'action=quickCancel&id=' + encodeURIComponent(apt.id), displayText: 'ขอยกเลิกนัดหมาย [' + apt.id + ']' }, '#ef4444')
     ];
-    ft = webAppUrl ? fBox('vertical', [fBox('horizontal', actionBtns, { spacing: 'md' }), fBtn('link', { type: 'uri', label: 'เปิดดูรายละเอียดบนเว็บแอป', uri: webAppUrl })], { spacing: 'sm', paddingTop: 'sm' }) : fBox('horizontal', actionBtns, { spacing: 'md', paddingTop: 'sm' });
-  } else if (webAppUrl) {
-    ft = fBox('vertical', [fBtn('link', { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl })], { paddingTop: 'sm' });
+    if (mapUri || webAppUrl) {
+      var ftList = [fBox('horizontal', actionBtns, { spacing: 'md' })];
+      if (mapUri) ftList.push(fBtn('link', { type: 'uri', label: 'ดูแผนที่นำทาง', uri: mapUri }));
+      if (webAppUrl) ftList.push(fBtn('link', { type: 'uri', label: 'เปิดดูรายละเอียดบนเว็บแอป', uri: webAppUrl }));
+      ft = fBox('vertical', ftList, { spacing: 'sm', paddingTop: 'sm' });
+    } else ft = fBox('horizontal', actionBtns, { spacing: 'md', paddingTop: 'sm' });
+  } else if (mapUri || webAppUrl) {
+    var linkList = [];
+    if (mapUri) linkList.push(fBtn('link', { type: 'uri', label: 'ดูแผนที่นำทาง', uri: mapUri }));
+    if (webAppUrl) linkList.push(fBtn('link', { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }));
+    ft = fBox('vertical', linkList, { spacing: 'xs', paddingTop: 'sm' });
   }
   var b = fBubble(opts.bgHdrOverride || theme.bgHdr, [fTxt(opts.hdrOverride || theme.tag, { weight: 'bold', color: opts.hdrColorOverride || theme.hdrColor, size: 'sm' }), fTxt(apt.id || '-', { size: 'xs', color: opts.subColorOverride || theme.subColor, margin: 'xs', weight: 'bold' })], bodyItems, ft);
   b.header.paddingBottom = 'md'; b.body.spacing = 'md';
@@ -900,7 +929,9 @@ function handleLineWebhook_(body, qParams) {
 
 function parseWebhookCmd_(raw) {
   var txt = sanitizeNoEmoji(raw || '').trim();
-  if (!/^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(txt)) return null;
+  var isLegacy = /^คิว(?:\s+|ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|$)/.test(txt);
+  var isShort = /^(?:ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ|help|เดือน\s+\d{1,2}[-/]\d{4}|ปี\s*\d{4}|ค้นหา\s+.+)$/i.test(txt);
+  if (!isLegacy && !isShort) return null;
   var m = getMetaMap_(), webAppUrl = m.WEB_APP_URL || '';
   if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return buildNoticeFlex_('-', 'ระบบปิดค้นหาชั่วคราว', 'ผู้ดูแลระบบปิดการค้นหาผ่านแชทชั่วคราว กรุณาดูบนเว็บแอป', '', '', '');
 
@@ -922,7 +953,7 @@ function parseWebhookCmd_(raw) {
   var mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
   if (mm) {
     var yr = +mm[2], mo = +mm[1]; if (yr > 2400) yr -= 543;
-    return (mo >= 1 && mo <= 12) ? sendQ('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + ']', list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(yr + '-' + pad2_(mo) + '-') === 0; })) : buildNoticeFlex_('-', 'รูปแบบเดือนไม่ถูกต้อง', 'กรุณาระบุรูปแบบเดือน เช่น คิว เดือน 12/2569', '', '', '');
+    return (mo >= 1 && mo <= 12) ? sendQ('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + ']', list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(yr + '-' + pad2_(mo) + '-') === 0; })) : buildNoticeFlex_('-', 'รูปแบบเดือนไม่ถูกต้อง', 'กรุณาระบุรูปแบบเดือน เช่น เดือน 12/2569', '', '', '');
   }
   if (arg === 'ปีนี้' || arg === 'ปีหน้า') {
     var ty = arg === 'ปีนี้' ? now.year : now.year + 1, yi = list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(ty + '-') === 0; }).sort(cmpSlot);

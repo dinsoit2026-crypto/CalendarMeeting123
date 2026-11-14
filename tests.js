@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.1)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.2)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -53,9 +53,13 @@
   });
 
   // --- Suite 3: Streamlined Status & Rescheduling ---
-  runTest('3. Status & Reschedule', 'สร้างนัดหมายเสร็จเป็นสถานะ นัดหมายแล้ว ทันที และบังคับกรอกข้อมูลครบ', () => {
+  runTest('3. Status & Reschedule', 'สร้างนัดหมายเสร็จเป็นสถานะ นัดหมายแล้ว ทันที เตือนล่วงหน้า Default=0 และรองรับแผนที่/รูปภาพ', () => {
     const valid = Logic.validateAppointmentInput({ title: 'นัดเซ็นสัญญาโครงการ', appointmentDate: '2026-11-20', appointmentTime: '10:00', location: 'สำนักงานใหญ่', contactPerson: 'คุณสมศักดิ์' });
     assert(valid.valid && valid.sanitized.status === Logic.STATUS.CONFIRMED, 'กรอกข้อมูลครบต้องผ่านและเป็น นัดหมายแล้ว');
+    assert(valid.sanitized.remindDaysBefore === 0 && valid.sanitized.remindHoursBefore === 0, 'ค่าเริ่มต้นแจ้งเตือนล่วงหน้าต้องเป็น 0 วัน 0 ชม.');
+    const withMedia = Logic.validateAppointmentInput({ title: 'นัดตรวจหน้างาน', appointmentDate: '2026-11-21', appointmentTime: '14:00', location: 'ไซท์ A', contactPerson: 'คุณเอก', mapUrl: '13.7563, 100.5018', imageUrl: 'https://example.com/site.jpg' });
+    assert(withMedia.valid && withMedia.sanitized.mapUrl === '13.7563, 100.5018' && withMedia.sanitized.imageUrl === 'https://example.com/site.jpg', 'mapUrl และ imageUrl ต้องถูกบันทึก');
+    assert(!Logic.validateAppointmentInput({ title: 'รูปเกินขนาด', appointmentDate: '2026-11-21', appointmentTime: '14:00', location: 'ไซท์ A', contactPerson: 'คุณเอก', imageUrl: 'x'.repeat(49000) }).valid, 'รูปภาพเกิน 48,000 ตัวอักษรต้องไม่ผ่าน');
     assert(!Logic.validateAppointmentInput({ title: 'นัดไม่ครบ', appointmentDate: '', appointmentTime: '10:00' }).valid, 'ไม่ระบุวันที่ต้องไม่ผ่าน');
   });
 
@@ -142,25 +146,30 @@
     assert(reply && reply.includes('สรุปสถิติประจำปี') && reply.includes('รวมทั้งหมด: 2 งาน') && !Logic.hasEmoji(reply), 'คำตอบ คิว ปีนี้ ต้องครบถ้วนและไร้ Emoji');
   });
 
-  runTest('5. Year-End Statistics', 'LINE Bot คำสั่ง คิวทั้งหมด และแจ้งเตือนนัดหมายใหม่ทันทีทำงานถูกต้อง', () => {
+  runTest('5. Year-End Statistics', 'LINE Bot คำสั่งสั้น (ไม่ใช้คำว่า คิว) / คำสั่งเดิม และแจ้งเตือนนัดหมายใหม่ทำงานถูกต้อง', () => {
     const list = [
       Logic.createAppointmentRecord({ title: 'งานที่ผ่านมาแล้ว', appointmentDate: '2026-11-01', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ก', status: Logic.STATUS.CONFIRMED }, [], '2026-10-01T09:00:00+07:00'),
-      Logic.createAppointmentRecord({ title: 'งานกำลังจะมาถึง 1', appointmentDate: '2026-11-15', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ข', status: Logic.STATUS.CONFIRMED }, [], '2026-11-10T09:00:00+07:00'),
+      Logic.createAppointmentRecord({ title: 'งานกำลังจะมาถึง 1', appointmentDate: '2026-11-15', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ข', status: Logic.STATUS.CONFIRMED, mapUrl: '13.7563,100.5018' }, [], '2026-11-10T09:00:00+07:00'),
       Logic.createAppointmentRecord({ title: 'งานกำลังจะมาถึง 2', appointmentDate: '2026-12-05', appointmentTime: '14:00', location: 'นนทบุรี', contactPerson: 'คุณ ค', status: Logic.STATUS.CONFIRMED }, [], '2026-11-10T09:00:00+07:00'),
       Logic.createAppointmentRecord({ title: 'งานที่ยกเลิก', appointmentDate: '2026-11-20', appointmentTime: '11:00', location: 'กทม.', contactPerson: 'คุณ ง', status: Logic.STATUS.CANCELLED }, [], '2026-11-10T09:00:00+07:00')
     ];
-    const r1 = Logic.parseAndExecuteLineCommand('คิวทั้งหมด', list, '2026-11-10T09:00:00+07:00', {}), r2 = Logic.parseAndExecuteLineCommand('คิว ทั้งหมด', list, '2026-11-10T09:00:00+07:00', {});
-    assert(r1 && r1.includes('(2 รายการ)') && r1 === r2, 'คิวทั้งหมด / คิว ทั้งหมด ต้องตรงกันและแสดง 2 รายการ');
+    const r1 = Logic.parseAndExecuteLineCommand('คิวทั้งหมด', list, '2026-11-10T09:00:00+07:00', {}),
+          r2 = Logic.parseAndExecuteLineCommand('คิว ทั้งหมด', list, '2026-11-10T09:00:00+07:00', {}),
+          r3 = Logic.parseAndExecuteLineCommand('ทั้งหมด', list, '2026-11-10T09:00:00+07:00', {});
+    assert(r1 && r1.includes('(2 รายการ)') && r1 === r2 && r1 === r3, 'ทั้งหมด / คิวทั้งหมด / คิว ทั้งหมด ต้องตรงกันและแสดง 2 รายการ');
+    assert(Logic.parseAndExecuteLineCommand('โควตา', list, '2026-11-10T09:00:00+07:00', { quotaUsed: 30, quotaLimit: 300 }).includes('30 / 300'), 'คำสั่งสั้น โควตา ต้องทำงาน');
+    assert(Logic.parseAndExecuteLineCommand('วันนี้ฝนตกไหม', list, '2026-11-10T09:00:00+07:00', {}) === null, 'ประโยคคุยทั่วไปต้องไม่ตอบซ้อน');
+    assert(Logic.parseAndExecuteLineCommand('ทั้งหมดเท่าไหร่', list, '2026-11-10T09:00:00+07:00', {}) === null, 'ประโยคคุยทั่วไปที่มีคำว่าทั้งหมดต้องเงียบ');
     const instantMsg = Logic.formatInstantAppointmentMessage(list[1], false, {});
-    assert(instantMsg.includes('[แจ้งเตือนนัดหมายใหม่]') && instantMsg.includes('งานกำลังจะมาถึง 1') && !Logic.hasEmoji(instantMsg), 'ข้อความนัดใหม่ต้องครบถ้วน');
+    assert(instantMsg.includes('[แจ้งเตือนนัดหมายใหม่]') && instantMsg.includes('งานกำลังจะมาถึง 1') && instantMsg.includes('แผนที่:') && !Logic.hasEmoji(instantMsg), 'ข้อความนัดใหม่ต้องครบถ้วนและมีลิงก์แผนที่');
     assert(Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.COMPLETED }, true, {}).includes('[แจ้งเตือนสิ้นสุดการนัดหมาย]'), 'ข้อความสิ้นสุดต้องถูกต้อง');
     assert(Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.CANCELLED }, true, {}).includes('[แจ้งเตือนยกเลิกการนัดหมาย]'), 'ข้อความยกเลิกต้องถูกต้อง');
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0, 2.5.0, 2.5.1, 2.5.2, 2.5.3, 2.6.0 และ 2.6.1 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 11, 'ต้องมีประวัติอย่างน้อย 11 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.2 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 12, 'ต้องมีประวัติอย่างน้อย 12 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -268,10 +277,10 @@
       ['_metaCache', '_dataCache', '_propsCache', 'needsTriggerSync', 'fetchAll', 'LN_U_'].forEach(sym => assert(codeGs.includes(sym), `Code.gs ต้องมี ${sym}`));
     });
 
-    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Live Cache และ Lazy Render ครบถ้วน', () => {
+    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Staff Role Guard, Map Pin และ Image Compress ครบถ้วน', () => {
       const appJs = readF('app.js');
       new vm.Script(appJs, { filename: 'app.js' });
-      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
+      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
     });
 
     runTest('13. GAS Guard Audit', 'LINE Flex Message และ Postback Action ทำงานถูกต้องและปราศจากอิโมจิ', () => {
@@ -308,7 +317,12 @@
       assertEqual(sandbox.buildQuotaFlex_(285, 300, 'https://example.com').contents.styles.header.backgroundColor, '#fef2f2', 'โควตา >=90% แดงอ่อน');
 
       const helpCard = sandbox.buildHelpFlex_('https://example.com');
-      assert(helpCard.contents.footer.contents.length >= 2 && helpCard.contents.styles.header.backgroundColor === '#eef2ff' && !Logic.hasEmoji(JSON.stringify(helpCard)), 'Help Card ถูกต้อง');
+      const helpBtns = helpCard.contents.footer.contents.flatMap(r => r.contents || []);
+      assert(helpCard.contents.footer.contents.length >= 2 && helpBtns.length >= 6 && helpCard.contents.styles.header.backgroundColor === '#eef2ff' && !Logic.hasEmoji(JSON.stringify(helpCard)), 'Help Card ถูกต้อง');
+      assert(helpBtns.every(b => b.style === 'primary' && b.color && b.action && !String(b.action.label).includes('คิว') && !String(b.action.text).includes('คิว')), 'ปุ่ม Help Card ทั้ง 6 ปุ่มต้องเป็นสีชัดเจนและไม่มีคำว่า คิว');
+      assert(typeof sandbox.getValidMapUri_ === 'function' && sandbox.getValidMapUri_('13.7563, 100.5018').includes('13.7563'), 'getValidMapUri_ แปลงพิกัดเป็นลิงก์แผนที่ได้');
+      const mapFlex = sandbox.buildAptFlexMsg_({ id: 'APT-202611-999', title: 'นัดตรวจไซต์', appointmentDate: '2026-11-20', appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณเอก', status: 'CONFIRMED', mapUrl: '13.7563,100.5018' }, false, false, 'https://example.com');
+      assert(JSON.stringify(mapFlex).includes('ดูแผนที่นำทาง'), 'Flex ต้องมีปุ่ม ดูแผนที่นำทาง เมื่อระบุ mapUrl');
 
       const qToday = sandbox.buildQueueFlex_('คิวงานวันนี้', 1, [apt], 'https://example.com', false, { variant: 'today' });
       const qOver = sandbox.buildQueueFlex_('คิวงานค้างอยู่', 1, [apt], 'https://example.com', false, { variant: 'overdue' });
