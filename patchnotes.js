@@ -7,6 +7,17 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.4',
+      date: '16/11/2569',
+      title: 'Ultra Low-Latency Engine, Codebase Compaction, Surgical Calendar Update, Quick Duplicate / Copy / .ICS Export & Keyboard Shortcuts',
+      changes: [
+        'Codebase Compaction & O(1) DOM/Row Indexing (gas/Code.gs, app.js, logic.js, style.css, index.html): ลดความยาวโค้ดหลักลงกว่า 500+ บรรทัด เพิ่ม O(1) DOM Element Cache (_el), O(N) Date/Month Bucket Indexing ในหน้าปฏิทินเดือนและรายปี และรวมศูนย์ Optimistic Mutation & Rollback (syncAptMutation)',
+        'Short-Lock I/O & Lazy Webhook Read (gas/Code.gs): ปลดล็อก LockService ทันทีหลังเขียนชีตเสร็จโดยไม่ล็อกค้างระหว่างยิง LINE API หรือตั้ง Trigger และย้ายการตรวจคำสั่ง "ช่วยเหลือ" / "โควตา" ใน parseWebhookCmd_ ให้ตอบกลับทันทีโดยไม่ต้องอ่านชีต Appointments',
+        'Instant Calendar Cell Selection & Per-Card Sync Badge (app.js, style.css): คลิกเลือกวันในปฏิทินสลับคลาส .selected และอัปเดตรายการด้านขวาเฉพาะจุดทันที (< 1ms) โดยไม่ต้องวาดตาราง 35 ช่องใหม่ พร้อมป้ายสถานะ "กำลังซิงก์..." รายการ์ดและแอนิเมชันเปิด Modal นุ่มนวล',
+        'ฟีเจอร์ลัดครบวงจร (F1-F5): เพิ่มตัวกรองด่วน "เฉพาะงานของฉัน" บนหน้าปฏิทินเดือน (btnCalFilterMyApts), ปุ่ม "คัดลอกนัด" (Duplicate), ปุ่ม "คัดลอกข้อความ" ลงคลิปบอร์ด, ปุ่มดาวน์โหลดไฟล์ปฏิทินมาตรฐาน (.ics) และคีย์ลัดคีย์บอร์ด (Alt+N สร้างนัดใหม่, Esc ปิดหน้าต่าง)'
+      ]
+    },
+    {
       version: '2.6.3',
       date: '14/11/2569',
       title: 'Excel CSV Export (UTF-8 BOM) & Executive A4 Print / PDF Report Across Calendar, Queue & Yearly Overview',

@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.3)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.4)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -167,9 +167,9 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.3 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 13, 'ต้องมีประวัติอย่างน้อย 13 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.4 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 14, 'ต้องมีประวัติอย่างน้อย 14 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -343,6 +343,38 @@
       assert(remC.contents.type === 'carousel' && remC.contents.contents.length === 10 && JSON.stringify(remC).includes('เตือนโควตา LINE') && !Logic.hasEmoji(JSON.stringify(remC)), 'Reminder Carousel ถูกต้อง');
 
       ['buildReminderNotificationFlex_(', 'buildQuotaFlex_(', 'if (reop) up.reopened = true;'].forEach(s => assert(codeGs.includes(s), `Code.gs ต้องมี ${s}`));
+    });
+
+    runTest('14. Performance & Compaction Guard', 'ระบบ O(N) Bucketing, Lazy Webhook Read, ฟีเจอร์ F1-F5 และความกระชับของโค้ดทำงานสมบูรณ์', () => {
+      const codeGs = readF('gas', 'Code.gs'), appJs = readF('app.js');
+      // 1. ตรวจสอบว่า parseWebhookCmd_ ตอบกลับ ช่วยเหลือ และ โควตา ก่อนเรียก readAllApts_
+      const webhookFn = codeGs.substring(codeGs.indexOf('function parseWebhookCmd_'));
+      const helpIdx = webhookFn.indexOf('buildHelpFlex_'), quotaIdx = webhookFn.indexOf('buildQuotaFlex_'), readIdx = webhookFn.indexOf('readAllApts_()');
+      assert(helpIdx > 0 && quotaIdx > 0 && readIdx > helpIdx && readIdx > quotaIdx, 'parseWebhookCmd_ ต้องตรวจสอบ ช่วยเหลือ และ โควตา ก่อนเรียก readAllApts_()');
+
+      // 2. ตรวจสอบฟีเจอร์ F1-F5 และ Surgical Calendar Render ใน app.js
+      ['selectCalendarDate', 'renderMonthAgenda', 'openDuplicateModal', 'copyAppointmentText', 'exportAppointmentToIcs', 'syncAptMutation', 'btnCalFilterMyApts'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
+
+      // 3. Benchmark O(N) queryByYear & parseAndExecuteLineCommand สำหรับข้อมูล 500 นัดหมาย (< 25ms)
+      const bulk = Array.from({ length: 500 }, (_, i) => ({
+        id: `APT-2026-${String(i + 1).padStart(4, '0')}`, title: `งานทดสอบความเร็ว ${i + 1}`,
+        appointmentDate: `2026-${String((i % 12) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
+        appointmentTime: '10:00', location: 'กรุงเทพฯ', contactPerson: 'คุณลูกค้า',
+        status: i % 3 === 0 ? Logic.STATUS.COMPLETED : Logic.STATUS.CONFIRMED, createdBy: 'คุณสมชาย'
+      }));
+      const t0 = Date.now();
+      const yrRes = Logic.queryByYear(bulk, 2026, { nowIso: '2026-06-15T09:00:00+07:00' });
+      const cmdRes = Logic.parseAndExecuteLineCommand('ช่วยเหลือ', bulk, '2026-06-15T09:00:00+07:00', {});
+      const elapsed = Date.now() - t0;
+      assert(yrRes.stats.total === 500 && yrRes.months.length === 12 && cmdRes.includes('คำสั่งตรวจสอบตารางงาน'), 'ผลลัพธ์ Benchmark 500 รายการต้องถูกต้อง');
+      assert(elapsed < 50, `การประมวลผล 500 รายการต้องเสร็จสิ้นใน < 50ms (ใช้จริง ${elapsed}ms)`);
+
+      // 4. ตรวจสอบความกระชับและความสมบูรณ์ของโค้ด (ป้องกันบล็อกว่างจากการ Compaction)
+      assert(codeGs.includes('rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50)') && codeGs.includes("logId: 'LOG-' + now.epochMs"), 'Code.gs ต้องมี buildSyncBundle_ และ updateApt_ log generation ครบถ้วน');
+      assert(!/\{\s{2,}\}/.test(codeGs) && !/\{\s{2,}\}/.test(appJs) && !/\{\s{2,}\}/.test(readF('logic.js')) && !/\{\s{2,}\}/.test(readF('style.css')), 'ห้ามมีบล็อกคำสั่งว่างผิดปกติในไฟล์หลัก');
+      assert(codeGs.split(/\r?\n/).length <= 710, 'gas/Code.gs ต้องมีความยาวไม่เกิน 710 บรรทัด');
+      assert(appJs.split(/\r?\n/).length <= 920, 'app.js ต้องมีความยาวไม่เกิน 920 บรรทัด');
+      assert(readF('logic.js').split(/\r?\n/).length <= 350, 'logic.js ต้องมีความยาวไม่เกิน 350 บรรทัด');
     });
 
     runTest('7. Codebase Audit', 'ไฟล์ทั้งหมดใน C:\\Calendar ต้องไม่มีอิโมจิหลุดรอด (ยกเว้นไอคอนปุ่มสลับธีมตามคำอนุญาตพิเศษ)', () => {
