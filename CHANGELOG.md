@@ -4,6 +4,20 @@
 
 ---
 
+## เวอร์ชัน 2.6.5 (17 พฤศจิกายน 2569) - Progressive Web App (PWA) & Web Push Notification Engine
+> **จุดเด่น:** ยกระดับเว็บแอปให้ติดตั้งลงเครื่องได้จริงแบบ Standalone (PWA) พร้อม Service Worker แคชออฟไลน์ และระบบขออนุญาตแจ้งเตือนผ่านเว็บเบราว์เซอร์ (Web Push / Browser Notification) โดยไม่เสียโควตา LINE
+
+### 1. ระบบติดตั้งเว็บแอปลงเครื่อง (Progressive Web App - PWA)
+- **Web App Manifest & ไอคอน SVG (`manifest.json`, `icon.svg`, `index.html`, `style.css`):** ตั้งค่าโหมด `standalone`, สีธีม Executive Indigo (`#4f46e5`), และไอคอน SVG ความละเอียดสูง รองรับการติดตั้งบน Windows/Mac (Chrome, Edge), Android และ iOS/iPadOS (Add to Home Screen)
+- **Service Worker (`sw.js`):** แคชไฟล์ App Shell ด้วยกลยุทธ์ Network-First with Cache Fallback พร้อมบายพาสคำขอ Google Apps Script API เพื่อให้ข้อมูลซิงก์สดใหม่เสมอ
+- **ปุ่มติดตั้งแอปอัจฉริยะ (`#btnInstallPwa`, `#btnInstallPwaSettings`):** ดักจับ `beforeinstallprompt` ให้ติดตั้งในคลิกเดียวและซ่อนปุ่มเมื่อเปิดในโหมด Standalone
+
+### 2. ระบบแจ้งเตือนผ่านเว็บและอุปกรณ์ (Web Push & Browser Notification Engine)
+- **ปุ่มขออนุญาตและควบคุมด่วน (`#btnHeaderWebNotify`, `#btnRequestWebNotify`, `#btnTestWebNotify`):** เปิดสิทธิ์แจ้งเตือนได้ทันทีจากแถบ Header (รองรับทั้ง `ADMIN` และ `STAFF`) และแผงตั้งค่าพร้อมปุ่มทดสอบเด้งแจ้งเตือน
+- **Smart Notification & Click-to-Focus (`sw.js`, `app.js`):** รองรับอีเวนต์ `push` และ `notificationclick` แจ้งเตือนเมื่อถึงเกณฑ์ก่อนเวลานัดหมายและแจ้งเตือนเมื่อทีมงานเพิ่ม/แก้ไขรายการระหว่างซิงก์เบื้องหลังทุก 3 นาที โดยไม่กระทบโควตา LINE
+
+---
+
 ## เวอร์ชัน 2.6.4 (16 พฤศจิกายน 2569) - Ultra Low-Latency Engine, Codebase Compaction & Quick Productivity Tools
 > **จุดเด่น:** ยกระดับความเร็วและลดขนาดโค้ดทั้งระบบด้วย $O(1)$ DOM Cache, $O(N)$ Date/Month Bucketing, Surgical Calendar Selection, Short-Lock I/O ใน GAS, Lazy Webhook Read พร้อมเพิ่มตัวกรองเฉพาะงานของฉันในปฏิทินเดือน ปุ่มคัดลอกนัด คัดลอกข้อความ ส่งออกไฟล์ `.ics` และคีย์ลัดคีย์บอร์ด
 

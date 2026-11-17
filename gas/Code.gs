@@ -1,8 +1,8 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.4)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.5)
  * Zero-Emoji Policy | Request-Level Sheet & Props Cache | Short-Lock I/O | Lazy Webhook Read
  */
-var API_VER = '2.6.4';
+var API_VER = '2.6.5';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt', 'mapUrl', 'imageUrl'];

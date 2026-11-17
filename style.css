@@ -1,6 +1,6 @@
 /**
- * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.4)
- * Zero-Emoji Policy Compliant | Ultra-Fluid Micro-Interactions | Print Report A4 Layout
+ * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.5)
+ * Zero-Emoji Policy Compliant | Ultra-Fluid Micro-Interactions | Print Report A4 Layout | PWA Standalone
  */
 :root { --bg-body: #f5f7fb; --bg-gradient: radial-gradient(1200px 520px at 50% -140px, rgba(79,70,229,0.08), transparent 70%), #f5f7fb;
   --bg-surface: #ffffff; --bg-muted: #f1f5f9; --bg-subtle: #f8fafc; --bg-header: rgba(255,255,255,0.92);
@@ -310,6 +310,12 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .toast-item { pointer-events: auto; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border); border-left: 5px solid var(--primary); border-radius: var(--radius-sm); padding: 11px 16px; box-shadow: 0 12px 28px rgba(15,23,42,0.16); font-size: 13px; font-weight: 600; animation: toastSlideIn 0.2s ease-out; }
 .toast-item.toast-success { border-left-color: #10b981; } .toast-item.toast-error { border-left-color: #ef4444; } .toast-item.toast-warn { border-left-color: #f59e0b; }
 @keyframes toastSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.btn-web-notify.is-granted { background: var(--st-comp-bg); color: var(--st-comp-text); border-color: var(--st-comp-border); }
+.btn-web-notify.is-denied { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
+.btn-pwa-install { border-color: var(--primary-border); }
+.pwa-status-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.pwa-status-row strong { color: var(--text-main); }
+@media (display-mode: standalone) { .app-header { padding-top: env(safe-area-inset-top, 0px); } .mobile-bottom-nav { padding-bottom: env(safe-area-inset-bottom, 0px); } }
 .mobile-bottom-nav, .print-report-sheet { display: none; }
 /* Responsive Breakpoints */
 @media (max-width: 1240px) { .header-inner { padding: 10px 18px; gap: 10px; } .nav-tabs-bar { order: 3; width: 100%; justify-content: center; } }

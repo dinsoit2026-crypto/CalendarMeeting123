@@ -1,6 +1,6 @@
 /**
- * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.4)
- * Zero-Emoji Policy | O(1) DOM Cache | Surgical Calendar Update | Duplicate/Copy/ICS & CSV/Print Report
+ * app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.5)
+ * Zero-Emoji Policy | O(1) DOM Cache | Surgical Calendar Update | PWA & Web Push Notification
  */
 (function () { 'use strict'; const Logic = window.CalendarLogic, PatchNotes = window.PATCH_NOTES || []; const _el = {};
   const $ = id => _el[id] || (_el[id] = document.getElementById(id)); const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
@@ -9,7 +9,7 @@
   const closeModal = id => { const el = $(id); if (el) el.classList.remove('active'); };
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' };
   const escapeHtml = s => s == null ? '' : String(s).replace(/[&<>"']/g, c => ESC[c]);
-  const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2', LIVE_CACHE: 'CAL_LIVE_CACHE_V2' };
+  const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2', LIVE_CACHE: 'CAL_LIVE_CACHE_V2', WEB_NOTIF: 'CAL_WEB_NOTIF_CFG_V2', WEB_NOTIF_SENT: 'CAL_WEB_NOTIF_SENT_V2' };
   const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwEq-EehM4BDKQLsh7dFQCJNeJNg2g_DtM1_INYgjblaKyhcdkNuAdiIEhkvSke--ro/exec';
   const DEFAULT_PASSCODE = 'CALL1234';
   const FIELD_LABELS = { appointmentDate: 'วันที่นัดหมาย', appointmentTime: 'เวลานัดหมาย', location: 'สถานที่', contactPerson: 'ผู้นัดพบ', status: 'สถานะ', DELETED: 'ลบนัดหมาย' };
@@ -26,7 +26,8 @@
   }; const state = { isLive: true, gasUrl: DEFAULT_GAS_URL, passcode: DEFAULT_PASSCODE, currentUser: null, users: [], theme: 'light',
     activeTab: 'tabMonth', quickRange: 'ALL', calOnlyMyApts: false, appointments: [], rescheduleLogs: [],
     meta: { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', DAILY_DIGEST_HOUR: '8', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' },
-    calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '', overviewYear: Logic.getBangkokParts().year, editingUserId: null };
+    calYear: Logic.getBangkokParts().year, calMonth: Logic.getBangkokParts().month, calSelectedDate: '', overviewYear: Logic.getBangkokParts().year, editingUserId: null,
+    webNotif: { enabled: true, bgSync: true }, swReg: null, deferredPwaPrompt: null, isStandalone: false, pendingNotifAptId: '' };
   const isStaffOnlyCalendar = () => Boolean(state.currentUser && state.currentUser.role !== 'ADMIN');
   function showToast(msg, type = 'info') { const c = $('toastContainer'); if (!c) return; const it = document.createElement('div');
     it.className = `toast-item ${type === 'success' ? 'toast-success' : type === 'error' ? 'toast-error' : type === 'warn' ? 'toast-warn' : ''}`;
@@ -93,7 +94,10 @@
     try { localStorage.setItem(STORAGE.AUTH_USER, JSON.stringify(userObj)); } catch (_) {}
     updateUserSessionUI(); if (state.isLive && state.gasUrl) { if (syncBundle) { applySyncBundle(syncBundle); renderAll(); }
       else { if (loadLiveCache()) renderAll(); await syncWithServer(true); }
-    } else { loadDemoData(); renderAll(); } showToast(welcomeMsg, 'success'); }
+    } else { loadDemoData(); renderAll(); }
+    evaluateAndFireWebNotifications(null, false);
+    if (state.pendingNotifAptId) { const pid = state.pendingNotifAptId; state.pendingNotifAptId = ''; focusAppointmentFromNotif(pid); }
+    showToast(welcomeMsg, 'success'); }
   async function handleLoginSubmit(e) { e.preventDefault();
     const un = ($('loginUsername').value || '').trim(), pw = $('loginPassword').value || '', errEl = $('loginErrorMsg'), submitBtn = $('btnSubmitLogin'); try {
       disp(errEl, 'none'); if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'กำลังตรวจสอบ...'; }
@@ -127,9 +131,13 @@
       else { state.gasUrl = DEFAULT_GAS_URL; state.passcode = DEFAULT_PASSCODE; state.isLive = true;
         localStorage.setItem(STORAGE.CFG, JSON.stringify({ gasUrl: state.gasUrl, passcode: state.passcode, isLive: true })); }
       if ($('cfgGasUrl')) $('cfgGasUrl').value = state.gasUrl; if ($('cfgPasscode')) $('cfgPasscode').value = state.passcode; } catch (_) {}
-    loadSavedSession(); initMonthSelector(); bindEvents(); if (state.currentUser) {
+    loadSavedSession(); initMonthSelector(); bindEvents(); initPwaAndWebPush(); if (state.currentUser) {
       if (state.isLive && state.gasUrl) { if (loadLiveCache()) renderAll(); syncWithServer(true); } else { loadDemoData(); renderAll(); }
-    } else if (!state.isLive) loadDemoData(); updateClock(); setInterval(updateClock, 15000); }
+      evaluateAndFireWebNotifications(null, false);
+      if (state.pendingNotifAptId) { const pid = state.pendingNotifAptId; state.pendingNotifAptId = ''; focusAppointmentFromNotif(pid); }
+    } else if (!state.isLive) loadDemoData(); updateClock(); setInterval(updateClock, 15000);
+    setInterval(() => evaluateAndFireWebNotifications(null, false), 60000);
+    setInterval(() => { if (state.currentUser && state.isLive && state.gasUrl && state.webNotif.bgSync && document.visibilityState !== 'hidden') syncWithServer(true, true); }, 180000); }
   function loadDemoData() { state.isLive = false; try {
       const a = localStorage.getItem(STORAGE.APTS), l = localStorage.getItem(STORAGE.LOGS), u = localStorage.getItem(STORAGE.USERS);
       state.users = u ? JSON.parse(u) : [...Logic.DEFAULT_USERS];
@@ -148,10 +156,12 @@
       method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action, passcode: state.passcode, currentUser: state.currentUser ? state.currentUser.displayName : 'ผู้ใช้งานระบบ', ...payload })
     }); const r = await res.json(); if (!r.ok) { const err = new Error(r.error || 'Server error'); err.code = r.code; throw err; } return r.data; }
-  async function syncWithServer(silent = false) { if (!state.isLive || !state.gasUrl) { renderAll(); return; }
-    const btn = $('btnSyncNow'), lbl = $('syncBtnLabel'); try { if (btn) btn.classList.add('is-syncing'); txt(lbl, 'กำลังซิงก์...');
-      applySyncBundle(await callGasApi('list', {})); renderAll(); if (!silent) showToast('ซิงก์ข้อมูลล่าสุดสำเร็จ', 'success');
-    } catch (e) { showToast('ซิงก์ไม่สำเร็จ: ' + e.message, 'error'); }
+  async function syncWithServer(silent = false, isBgDiff = false) { if (!state.isLive || !state.gasUrl) { renderAll(); return; }
+    const btn = $('btnSyncNow'), lbl = $('syncBtnLabel'), prevApts = isBgDiff ? state.appointments.slice() : null;
+    try { if (btn) btn.classList.add('is-syncing'); txt(lbl, 'กำลังซิงก์...');
+      applySyncBundle(await callGasApi('list', {})); renderAll(); evaluateAndFireWebNotifications(prevApts, isBgDiff);
+      if (!silent) showToast('ซิงก์ข้อมูลล่าสุดสำเร็จ', 'success');
+    } catch (e) { if (!isBgDiff) showToast('ซิงก์ไม่สำเร็จ: ' + e.message, 'error'); }
     finally { if (btn) btn.classList.toggle('is-syncing', bgTaskCount > 0); txt(lbl, bgTaskCount > 0 ? 'กำลังบันทึก...' : 'ซิงก์'); } }
   // Lazy Active-Tab Rendering Pipeline
   function renderActiveTab() { if (isStaffOnlyCalendar() && state.activeTab !== 'tabMonth') { state.activeTab = 'tabMonth'; applyTabClasses('tabMonth'); }
@@ -339,6 +349,7 @@
     $('cfgEnableBotQuery').checked = String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE';
     $('cfgPrivacyMask').checked = String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
     if ($('cfgNotifyStatusChange')) $('cfgNotifyStatusChange').checked = String(state.meta.NOTIFY_ON_STATUS_CHANGE).toUpperCase() !== 'FALSE';
+    updatePwaAndNotifyUI();
     const uTableBody = $('userTableBody'); if (uTableBody) {
       const isAdmin = Boolean(state.currentUser && state.currentUser.role === 'ADMIN'), curUn = state.currentUser ? state.currentUser.username : '';
       uTableBody.innerHTML = (state.users && state.users.length ? state.users : Logic.DEFAULT_USERS).map(u => {
@@ -618,7 +629,92 @@
     on('btnRunBotSim', 'click', runBotSim); on('botSimInput', 'keydown', e => { if (e.key === 'Enter') { e.preventDefault(); runBotSim(); } });
     on('btnPreviewNotificationPlan', 'click', () => { const bkk = Logic.getBangkokParts();
       const plan = Logic.buildNotificationPlan(state.appointments, `${bkk.dateStr}T08:15:00+07:00`, { dailyDigestHour: +state.meta.DAILY_DIGEST_HOUR || 8, quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0 });
-      txt($('botSimUserEcho'), '[ระบบจำลองรอบเตือนอัตโนมัติ 08:15 น.]'); txt($('botSimOutput'), plan.shouldPush ? plan.messageText : '[จำลองการแจ้งเตือน]\nไม่มีรายการที่ถึงเกณฑ์เตือนในรอบนี้'); }); }
+      txt($('botSimUserEcho'), '[ระบบจำลองรอบเตือนอัตโนมัติ 08:15 น.]'); txt($('botSimOutput'), plan.shouldPush ? plan.messageText : '[จำลองการแจ้งเตือน]\nไม่มีรายการที่ถึงเกณฑ์เตือนในรอบนี้'); });
+    on('btnHeaderWebNotify', 'click', () => {
+      if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        state.webNotif.enabled = !state.webNotif.enabled; saveWebNotifCfg(); updatePwaAndNotifyUI();
+        showToast(state.webNotif.enabled ? 'เปิดการแจ้งเตือนผ่านเว็บแล้ว' : 'พักการแจ้งเตือนผ่านเว็บชั่วคราว', state.webNotif.enabled ? 'success' : 'info');
+      } else requestWebNotifyPermission(); });
+    on('btnInstallPwa', 'click', handleInstallPwaClick); on('btnInstallPwaSettings', 'click', handleInstallPwaClick);
+    on('btnRequestWebNotify', 'click', requestWebNotifyPermission); on('btnTestWebNotify', 'click', handleTestWebNotify);
+    on('cfgWebNotifyEnable', 'change', () => { state.webNotif.enabled = Boolean($('cfgWebNotifyEnable').checked); saveWebNotifCfg(); updatePwaAndNotifyUI(); });
+    on('cfgWebNotifyBgSync', 'change', () => { state.webNotif.bgSync = Boolean($('cfgWebNotifyBgSync').checked); saveWebNotifCfg(); updatePwaAndNotifyUI(); }); }
+  // PWA & Web Push Notification Engine
+  function loadWebNotifCfg() { try { const c = JSON.parse(localStorage.getItem(STORAGE.WEB_NOTIF) || 'null');
+      if (c && typeof c === 'object') state.webNotif = { enabled: c.enabled !== false, bgSync: c.bgSync !== false }; } catch (_) {} }
+  function saveWebNotifCfg() { try { localStorage.setItem(STORAGE.WEB_NOTIF, JSON.stringify(state.webNotif)); } catch (_) {} }
+  function getWebNotifSentList() { try { const arr = JSON.parse(localStorage.getItem(STORAGE.WEB_NOTIF_SENT) || '[]'); return Array.isArray(arr) ? arr : []; } catch (_) { return []; } }
+  function markWebNotifSent(key) { try { const arr = getWebNotifSentList(); if (!arr.includes(key)) { arr.push(key); if (arr.length > 150) arr.splice(0, arr.length - 150); localStorage.setItem(STORAGE.WEB_NOTIF_SENT, JSON.stringify(arr)); } } catch (_) {} }
+  function updatePwaAndNotifyUI() {
+    state.isStandalone = Boolean((window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) || window.navigator.standalone === true);
+    const hasNotif = typeof Notification !== 'undefined', perm = hasNotif ? Notification.permission : 'unsupported';
+    const hBtn = $('btnHeaderWebNotify'), hLbl = $('headerWebNotifyLabel');
+    if (hBtn) { hBtn.classList.toggle('is-granted', perm === 'granted' && state.webNotif.enabled); hBtn.classList.toggle('is-denied', perm === 'denied'); }
+    txt(hLbl, perm === 'granted' ? (state.webNotif.enabled ? 'แจ้งเตือน: เปิด' : 'แจ้งเตือน: พัก') : (perm === 'denied' ? 'แจ้งเตือน: บล็อก' : 'เปิดแจ้งเตือนเว็บ'));
+    txt($('webNotifyStatusBadge'), !hasNotif ? 'เบราว์เซอร์ไม่รองรับ' : (perm === 'granted' ? (state.webNotif.enabled ? 'อนุญาตแล้ว (เปิดใช้งาน)' : 'อนุญาตแล้ว (พักชั่วคราว)') : (perm === 'denied' ? 'ถูกบล็อกโดยเบราว์เซอร์' : 'ยังไม่ได้ขออนุญาต')));
+    txt($('pwaInstallStatusBadge'), state.isStandalone ? 'ติดตั้งเป็นแอปแล้ว (Standalone)' : (state.deferredPwaPrompt ? 'พร้อมติดตั้งลงเครื่อง' : 'ใช้งานผ่านเบราว์เซอร์'));
+    disp($('btnInstallPwa'), state.isStandalone ? 'none' : 'inline-flex');
+    txt($('installPwaBtnLabel'), state.deferredPwaPrompt ? 'ติดตั้งแอปทันที' : 'ติดตั้งแอป');
+    if ($('btnInstallPwaSettings')) { $('btnInstallPwaSettings').disabled = state.isStandalone; $('btnInstallPwaSettings').textContent = state.isStandalone ? 'ติดตั้งเป็นแอปแล้ว' : 'ติดตั้งเว็บแอปลงเครื่อง (PWA)'; }
+    if ($('cfgWebNotifyEnable')) $('cfgWebNotifyEnable').checked = state.webNotif.enabled;
+    if ($('cfgWebNotifyBgSync')) $('cfgWebNotifyBgSync').checked = state.webNotif.bgSync; }
+  async function sendWebPushNotification(title, body, tag, aptId) {
+    if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+    const cleanTitle = Logic.sanitizeNoEmoji(title || 'แจ้งเตือนนัดคิวทำงาน'), cleanBody = Logic.sanitizeNoEmoji(body || '');
+    const opts = { body: cleanBody, icon: './icon.svg', badge: './icon.svg', tag: tag || ('cal-' + Date.now()), renotify: true, data: { url: './index.html', aptId: aptId || '' } };
+    try { if (state.swReg && typeof state.swReg.showNotification === 'function') { await state.swReg.showNotification(cleanTitle, opts); return true; }
+      const n = new Notification(cleanTitle, opts); n.onclick = () => { try { window.focus(); } catch (_) {} if (aptId) focusAppointmentFromNotif(aptId); n.close(); }; return true;
+    } catch (_) { return false; } }
+  async function requestWebNotifyPermission() {
+    if (typeof Notification === 'undefined') { showToast('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนเว็บ', 'warn'); updatePwaAndNotifyUI(); return false; }
+    if (Notification.permission === 'denied') { showToast('การแจ้งเตือนถูกบล็อก กรุณากดอนุญาตที่ไอคอนตั้งค่าข้างแถบ URL ของเบราว์เซอร์', 'warn'); updatePwaAndNotifyUI(); return false; }
+    try { const res = await Notification.requestPermission();
+      if (res === 'granted') { state.webNotif.enabled = true; saveWebNotifCfg(); updatePwaAndNotifyUI(); showToast('เปิดรับการแจ้งเตือนผ่านเว็บเรียบร้อยแล้ว', 'success');
+        await sendWebPushNotification('ระบบนัดคิวทำงานพร้อมแจ้งเตือน', 'คุณจะได้รับการแจ้งเตือนนัดหมายและอัปเดตบนอุปกรณ์นี้', 'cal-perm-' + Date.now(), ''); return true;
+      } updatePwaAndNotifyUI(); showToast('ยังไม่ได้รับอนุญาตให้แสดงการแจ้งเตือนบนอุปกรณ์นี้', 'warn'); return false;
+    } catch (e) { showToast('ขออนุญาตแจ้งเตือนไม่สำเร็จ: ' + e.message, 'error'); return false; } }
+  async function handleTestWebNotify() {
+    if (typeof Notification === 'undefined') { showToast('เบราว์เซอร์นี้ไม่รองรับการแจ้งเตือนบนเว็บ', 'warn'); return; }
+    if (Notification.permission !== 'granted') { const ok = await requestWebNotifyPermission(); if (!ok) return; }
+    const sent = await sendWebPushNotification('ทดสอบแจ้งเตือน: ระบบนัดคิวทำงาน', 'การแจ้งเตือน Web Push บนอุปกรณ์นี้ทำงานปกติ (ไม่เสียโควตา LINE)', 'cal-test-' + Date.now(), '');
+    showToast(sent ? 'ส่งแจ้งเตือนทดสอบไปยังอุปกรณ์นี้แล้ว' : 'ไม่สามารถแสดงการแจ้งเตือนบนอุปกรณ์นี้ได้', sent ? 'success' : 'error'); }
+  async function handleInstallPwaClick() {
+    if (state.isStandalone) { showToast('เว็บแอปถูกติดตั้งและกำลังเปิดใช้งานแบบแอปแล้ว', 'info'); return; }
+    if (state.deferredPwaPrompt) { try { state.deferredPwaPrompt.prompt(); const ch = await state.deferredPwaPrompt.userChoice;
+        state.deferredPwaPrompt = null; updatePwaAndNotifyUI();
+        if (ch && ch.outcome === 'accepted') showToast('ติดตั้งเว็บแอปลงเครื่องเรียบร้อยแล้ว', 'success');
+      } catch (_) {} return; }
+    const isIos = /iphone|ipad|ipod/i.test(navigator.userAgent || '');
+    showToast(isIos ? 'สำหรับ iOS: แตะปุ่ม แชร์ (Share) ของ Safari แล้วเลือก "เพิ่มไปยังหน้าจอโฮม"' : 'หากเปิดผ่าน HTTPS บน Chrome/Edge กดไอคอนติดตั้งที่แถบ URL หรือเมนูเบราว์เซอร์ "ติดตั้งแอป"', 'info'); }
+  function focusAppointmentFromNotif(aptId) {
+    const a = state.appointments.find(x => x.id === aptId && !x.deletedAt); if (!a) return;
+    if (a.appointmentDate) { const p = a.appointmentDate.split('-').map(Number); if (p[0] && p[1]) { state.calYear = p[0]; state.calMonth = p[1]; state.calSelectedDate = a.appointmentDate; } }
+    switchTab('tabMonth'); showToast(`เปิดรายการนัดหมาย [${a.id}] ${a.title}`, 'info'); }
+  function evaluateAndFireWebNotifications(prevApts, isSyncDiff) {
+    if (!state.currentUser || !state.webNotif.enabled || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const nowBkk = Logic.getBangkokParts(), sentSet = new Set(getWebNotifSentList());
+    const cfg = { dailyDigestHour: +state.meta.DAILY_DIGEST_HOUR || 8, quietHoursStart: 22, quietHoursEnd: 7, requireDigestWindow: true };
+    state.appointments.forEach(a => { const ev = Logic.evaluateAppointmentNotification(a, nowBkk.isoStr, cfg);
+      if (ev.shouldNotifyHour) { const key = `HOUR:${a.id}:${ev.targetHourSlot}`;
+        if (!sentSet.has(key)) { markWebNotifSent(key); sentSet.add(key);
+          sendWebPushNotification(`[เตือนก่อนเวลานัด] ${a.title}`, `${Logic.formatThaiDateDisplay(a.appointmentDate, false)} เวลา ${a.appointmentTime} น. | ${a.location}`, key, a.id); }
+      } else if (ev.shouldNotifyDay) { const key = `DAY:${a.id}:${ev.targetDaySlot}`;
+        if (!sentSet.has(key)) { markWebNotifSent(key); sentSet.add(key);
+          sendWebPushNotification(`[แจ้งเตือนนัดหมาย] ${a.title}`, `${Logic.formatThaiDateDisplay(a.appointmentDate, false)} เวลา ${a.appointmentTime} น. | ${a.location}`, key, a.id); } } });
+    if (isSyncDiff && Array.isArray(prevApts) && prevApts.length) { const prevMap = new Map(prevApts.map(x => [x.id, x])), me = state.currentUser.displayName;
+      state.appointments.forEach(a => { if (!a || a.deletedAt || pendingIds.has(a.id)) return; const p = prevMap.get(a.id);
+        if (!p && a.createdBy !== me) { const key = `NEW:${a.id}:${a.updatedAt || a.createdAt}`;
+          if (!sentSet.has(key)) { markWebNotifSent(key); sendWebPushNotification(`[นัดหมายใหม่] ${a.title}`, `โดย ${a.createdBy || '-'} | ${Logic.formatThaiDateDisplay(a.appointmentDate, false)} ${a.appointmentTime || ''} น.`, key, a.id); }
+        } else if (p && p.updatedAt !== a.updatedAt && (a.statusChangedBy || a.updatedBy) !== me) { const key = `UPD:${a.id}:${a.updatedAt}`;
+          if (!sentSet.has(key)) { markWebNotifSent(key); sendWebPushNotification(`[อัปเดตนัดหมาย] ${a.title}`, `สถานะ: ${Logic.normalizeStatus(a.status)} โดย ${a.statusChangedBy || a.updatedBy || '-'}`, key, a.id); } } }); } }
+  function initPwaAndWebPush() {
+    loadWebNotifCfg(); const hm = (window.location.hash || '').match(/apt=([^&]+)/); if (hm) state.pendingNotifAptId = decodeURIComponent(hm[1]);
+    if ('serviceWorker' in navigator && /^https?:$/i.test(window.location.protocol)) {
+      navigator.serviceWorker.register('./sw.js').then(reg => { state.swReg = reg; }).catch(() => {});
+      navigator.serviceWorker.addEventListener('message', ev => { if (ev.data && ev.data.type === 'NOTIFICATION_CLICK' && ev.data.aptId) focusAppointmentFromNotif(ev.data.aptId); }); }
+    window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); state.deferredPwaPrompt = e; updatePwaAndNotifyUI(); });
+    window.addEventListener('appinstalled', () => { state.deferredPwaPrompt = null; state.isStandalone = true; updatePwaAndNotifyUI(); showToast('ติดตั้งเว็บแอปลงเครื่องเรียบร้อยแล้ว', 'success'); });
+    updatePwaAndNotifyUI(); }
   function runBotSim() { const val = $('botSimInput').value; txt($('botSimUserEcho'), val || '...');
     const res = Logic.parseAndExecuteLineCommand(val, state.appointments, Logic.getBangkokParts().isoStr, { enableLineBotQuery: String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE', privacyMaskContact: String(state.meta.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE', quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0 });
     txt($('botSimOutput'), res === null ? '[บอทเงียบ]\nเนื่องจากข้อความไม่ตรงกับคำสั่งบอท (ลองพิมพ์ "วันนี้", "ทั้งหมด" หรือ "ช่วยเหลือ")' : res); }

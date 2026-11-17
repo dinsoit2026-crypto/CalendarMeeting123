@@ -1,10 +1,10 @@
 /**
- * logic.js - Core Domain Logic, Validation, Bangkok Timezone, Notification Engine & Analytics (v2.6.4)
+ * logic.js - Core Domain Logic, Validation, Bangkok Timezone, Notification Engine & Analytics (v2.6.5)
  * Universal Module Definition (Node.js + Browser) | 43-Key API Contract | Zero-Emoji Policy
  */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.CalendarLogic = factory();
 })(typeof self !== 'undefined' ? self : this, function () { 'use strict';
-  const API_VERSION = '2.6.4', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
+  const API_VERSION = '2.6.5', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500;
   const STATUS = Object.freeze({ CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const VALID_STATUSES = Object.freeze([STATUS.CONFIRMED, STATUS.COMPLETED, STATUS.CANCELLED]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' });

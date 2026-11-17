@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.4)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.5)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -167,9 +167,9 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.4 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 14, 'ต้องมีประวัติอย่างน้อย 14 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.5 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 15, 'ต้องมีประวัติอย่างน้อย 15 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -277,10 +277,21 @@
       ['_metaCache', '_dataCache', '_propsCache', 'needsTriggerSync', 'fetchAll', 'LN_U_'].forEach(sym => assert(codeGs.includes(sym), `Code.gs ต้องมี ${sym}`));
     });
 
-    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Staff Role Guard, Map/Image และ CSV/Print Report ครบถ้วน', () => {
+    runTest('13. GAS Guard Audit', 'app.js ไวยากรณ์ถูกต้องและมีระบบ Optimistic UI, Staff Role Guard, Map/Image, PWA/Web Push และ CSV/Print Report ครบถ้วน', () => {
       const appJs = readF('app.js');
       new vm.Script(appJs, { filename: 'app.js' });
-      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile', 'exportAppointmentsToCsv', 'printAppointmentsReport', 'buildCsvContent'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
+      ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile', 'exportAppointmentsToCsv', 'printAppointmentsReport', 'buildCsvContent', 'initPwaAndWebPush', 'requestWebNotifyPermission', 'sendWebPushNotification', 'handleInstallPwaClick'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
+    });
+
+    runTest('15. PWA & Web Push Audit', 'ไฟล์ manifest.json, sw.js, icon.svg และเมตาแท็ก PWA ใน index.html ถูกต้องสมบูรณ์', () => {
+      const manifestRaw = readF('manifest.json'), swJs = readF('sw.js'), iconSvg = readF('icon.svg'), indexHtml = readF('index.html');
+      const manifest = JSON.parse(manifestRaw);
+      assertEqual(manifest.display, 'standalone', 'manifest.json ต้องตั้งค่า display เป็น standalone');
+      assert(manifest.short_name && Array.isArray(manifest.icons) && manifest.icons.length >= 1, 'manifest.json ต้องมี short_name และ icons');
+      new vm.Script(swJs, { filename: 'sw.js' });
+      ['push', 'notificationclick', 'showNotification', 'cal-pwa'].forEach(sym => assert(swJs.includes(sym), `sw.js ต้องมี ${sym}`));
+      assert(iconSvg.includes('<svg') && iconSvg.includes('</svg>'), 'icon.svg ต้องเป็น SVG ที่ถูกต้อง');
+      ['rel="manifest"', 'href="manifest.json"', 'icon.svg', 'theme-color'].forEach(tag => assert(indexHtml.includes(tag), `index.html ต้องมี ${tag}`));
     });
 
     runTest('13. GAS Guard Audit', 'LINE Flex Message และ Postback Action ทำงานถูกต้องและปราศจากอิโมจิ', () => {
@@ -378,7 +389,7 @@
     });
 
     runTest('7. Codebase Audit', 'ไฟล์ทั้งหมดใน C:\\Calendar ต้องไม่มีอิโมจิหลุดรอด (ยกเว้นไอคอนปุ่มสลับธีมตามคำอนุญาตพิเศษ)', () => {
-      const files = ['index.html', 'style.css', 'logic.js', 'app.js', 'patchnotes.js', 'tests.html', 'tests.js', 'README.md', 'CHANGELOG.md', 'SETUP_GUIDE.md', path.join('gas', 'Code.gs'), path.join('gas', 'appsscript.json')];
+      const files = ['index.html', 'style.css', 'logic.js', 'app.js', 'patchnotes.js', 'manifest.json', 'sw.js', 'icon.svg', 'tests.html', 'tests.js', 'README.md', 'CHANGELOG.md', 'SETUP_GUIDE.md', path.join('gas', 'Code.gs'), path.join('gas', 'appsscript.json')];
       files.forEach(f => {
         const full = path.join(__dirname, f);
         if (fs.existsSync(full)) {

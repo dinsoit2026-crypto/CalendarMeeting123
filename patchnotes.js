@@ -7,6 +7,17 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.5',
+      date: '17/11/2569',
+      title: 'Progressive Web App (PWA) Standalone Installability & Hybrid Web Push / Browser Notification Engine',
+      changes: [
+        'ติดตั้งเว็บแอปลงเครื่องได้เต็มรูปแบบ (PWA Installable): เพิ่มไฟล์ manifest.json, ไอคอน SVG ความละเอียดสูง (icon.svg) และ Service Worker (sw.js) รองรับการแคชไฟล์ App Shell แบบ Network-First เพื่อเปิดใช้งานแบบ Standalone ทั้งบนคอมพิวเตอร์และมือถือ (Android / iOS)',
+        'ปุ่มติดตั้งแอปอัจฉริยะ (btnInstallPwa / btnInstallPwaSettings): ดักจับอีเวนต์ beforeinstallprompt ให้ติดตั้งได้ในคลิกเดียว พร้อมตรวจจับสถานะ Standalone และคำแนะนำสำหรับ iOS Safari',
+        'ระบบขออนุญาตและส่งการแจ้งเตือนผ่านเว็บ (Web Push & Browser Notification): เพิ่มปุ่มกระดิ่งแจ้งเตือนบนแถบ Header (btnHeaderWebNotify) สำหรับทั้ง ADMIN และ STAFF รวมถึงแผงควบคุมเต็มรูปแบบในแท็บตั้งค่า (ขออนุญาต, ทดสอบเด้งแจ้งเตือน, เปิด/ปิดการแจ้งเตือน และซิงก์เบื้องหลังทุก 3 นาที)',
+        'Smart Service Worker Notification & Click Focus: แจ้งเตือนล่วงหน้ารายวัน/รายชั่วโมงตามเกณฑ์นัดหมายจริง และแจ้งเตือนเมื่อสมาชิกในทีมเพิ่มหรืออัปเดตนัดหมายโดยไม่เสียโควตา LINE พร้อมคลิกที่การแจ้งเตือนเพื่อเปิดดูนัดหมายนั้นได้ทันที'
+      ]
+    },
+    {
       version: '2.6.4',
       date: '16/11/2569',
       title: 'Ultra Low-Latency Engine, Codebase Compaction, Surgical Calendar Update, Quick Duplicate / Copy / .ICS Export & Keyboard Shortcuts',

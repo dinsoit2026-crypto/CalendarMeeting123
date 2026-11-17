@@ -4,7 +4,14 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ระบบนัดคิวทำงาน v2.6.4</title>
+  <title>ระบบนัดคิวทำงาน v2.6.5</title>
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="นัดคิวทำงาน">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="icon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -95,7 +102,7 @@
             <div class="brand-title-line">
               <h1 class="brand-title">ระบบนัดคิวทำงาน</h1>
               <div class="brand-badges-group"><button type="button" class="version-badge" id="btnOpenPatchNotesModal"
-                  title="ดูประวัติการอัปเดต">v2.6.4</button><span id="connectionModeBadge"
+                  title="ดูประวัติการอัปเดต">v2.6.5</button><span id="connectionModeBadge"
                   class="mode-badge demo">Demo</span></div>
             </div>
             <span class="brand-subtitle">ระบบบริหารตารางนัดหมายทีมและแจ้งเตือน LINE อัตโนมัติ</span>
@@ -139,6 +146,17 @@
             <button type="button" class="btn-logout" id="btnLogout" title="ออกจากระบบ">ออกจากระบบ</button>
           </div>
           <div class="header-tools-group">
+            <button type="button" class="btn btn-outline btn-sm btn-icon-mobile btn-web-notify" id="btnHeaderWebNotify"
+              title="ตั้งค่าการแจ้งเตือนบนอุปกรณ์ (Web Push)"><svg viewBox="0 0 24 24" width="15" height="15">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg><span id="headerWebNotifyLabel" class="hide-sm">แจ้งเตือนเว็บ</span></button>
+            <button type="button" class="btn btn-soft btn-sm btn-icon-mobile btn-pwa-install" id="btnInstallPwa"
+              title="ติดตั้งเว็บแอปลงเครื่อง (PWA)"><svg viewBox="0 0 24 24" width="15" height="15">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                <polyline points="7 10 12 15 17 10"></polyline>
+                <line x1="12" y1="15" x2="12" y2="3"></line>
+              </svg><span id="installPwaBtnLabel" class="hide-sm">ติดตั้งแอป</span></button>
             <button type="button" class="btn btn-outline btn-sm btn-theme-toggle" id="btnToggleTheme"
               title="สลับโหมดมืด / สว่าง"><span id="iconThemeSun" style="display:none;">☀️<span class="hide-sm">
                   โหมดสว่าง</span></span><span id="iconThemeMoon">🌙<span class="hide-sm">
@@ -500,6 +518,37 @@
         <div class="panel-card">
           <div class="settings-card-header">
             <div class="settings-card-icon"><svg viewBox="0 0 24 24" width="18" height="18">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"></path>
+              </svg></div>
+            <div style="flex: 1;">
+              <h3>ระบบแจ้งเตือนผ่านเว็บ (Web Push Notification) & ติดตั้งแอป (PWA)</h3>
+              <p class="hint-text">รับการแจ้งเตือนบนเบราว์เซอร์/อุปกรณ์โดยตรงโดยไม่เสียโควตา LINE และติดตั้งเว็บแอปลงเครื่องแบบ Standalone</p>
+            </div>
+          </div>
+          <div class="input-stack">
+            <div class="pwa-status-row">
+              <span class="badge-info">สิทธิ์แจ้งเตือน: <strong id="webNotifyStatusBadge">กำลังตรวจสอบ</strong></span>
+              <span class="badge-info">สถานะแอป: <strong id="pwaInstallStatusBadge">กำลังตรวจสอบ</strong></span>
+            </div>
+            <div class="settings-toggles">
+              <label class="checkbox-card" for="cfgWebNotifyEnable"><input type="checkbox" id="cfgWebNotifyEnable" checked>
+                <div><strong>เปิดใช้งานการแจ้งเตือนผ่านเว็บเบราว์เซอร์ / อุปกรณ์</strong><span class="hint-text">แจ้งเตือนเมื่อถึงกำหนดเตือนล่วงหน้า (วัน/ชั่วโมง) ตามเวลาที่ตั้งไว้ในแต่ละนัดหมาย</span></div>
+              </label>
+              <label class="checkbox-card" for="cfgWebNotifyBgSync"><input type="checkbox" id="cfgWebNotifyBgSync" checked>
+                <div><strong>ซิงก์ข้อมูลเบื้องหลังอัตโนมัติและแจ้งเตือนทันที</strong><span class="hint-text">ตรวจสอบรายการใหม่หรือการเปลี่ยนสถานะจากสมาชิกในทีมทุกๆ 3 นาทีเมื่อเปิดแอปอยู่</span></div>
+              </label>
+            </div>
+            <div class="btn-group">
+              <button type="button" id="btnRequestWebNotify" class="btn btn-primary btn-sm">ขออนุญาตแจ้งเตือน (Allow Web Push)</button>
+              <button type="button" id="btnTestWebNotify" class="btn btn-outline btn-sm">ทดสอบเด้งแจ้งเตือนบนอุปกรณ์นี้</button>
+              <button type="button" id="btnInstallPwaSettings" class="btn btn-soft btn-sm">ติดตั้งเว็บแอปลงเครื่อง (PWA)</button>
+            </div>
+          </div>
+        </div>
+        <div class="panel-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon"><svg viewBox="0 0 24 24" width="18" height="18">
                 <circle cx="12" cy="12" r="10"></circle>
                 <polyline points="12 6 12 12 16 14"></polyline>
               </svg></div>
@@ -844,7 +893,7 @@
               <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
             </svg></div>
-          <h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.4</h2>
+          <h2>คู่มือการใช้งานระบบนัดคิวทำงาน v2.6.5</h2>
         </div><button type="button" id="btnCloseGuideModalTop" class="btn-close">&times;</button>
       </div>
       <div class="modal-body guide-content">
@@ -883,6 +932,14 @@
             </div>
             <div class="guide-cmd-item"><code>ช่วยเหลือ</code><span>ดูรายการคำสั่งทั้งหมดของบอท</span></div>
           </div>
+        </div>
+        <div class="guide-section">
+          <h4>4. การแจ้งเตือนผ่านเว็บ (Web Push) และการติดตั้งแอปลงเครื่อง (PWA)</h4>
+          <ul class="guide-list">
+            <li><strong>เปิดรับการแจ้งเตือนบนอุปกรณ์:</strong> กดปุ่ม <code>แจ้งเตือนเว็บ</code> บนแถบด้านบน (หรือไปที่แท็บ <strong>ตั้งค่า / บอท</strong>) แล้วกด <strong>อนุญาต (Allow)</strong> เมื่อเบราว์เซอร์สอบถาม ระบบจะแจ้งเตือนนัดหมายและอัปเดตของทีมโดยไม่หักโควตา LINE</li>
+            <li><strong>ติดตั้งบนคอมพิวเตอร์ / Android:</strong> กดปุ่ม <code>ติดตั้งแอป</code> บนแถบด้านบน หรือกดปุ่มติดตั้งบนแถบ URL ของเบราว์เซอร์ Chrome / Edge เพื่อเปิดใช้งานแบบเต็มหน้าจอเสมือนแอปพลิเคชัน</li>
+            <li><strong>ติดตั้งบน iPhone / iPad (Safari):</strong> แตะปุ่ม <strong>แชร์ (Share)</strong> ด้านล่าง แล้วเลือก <strong>เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)</strong></li>
+          </ul>
         </div>
       </div>
       <div class="modal-footer"><button type="button" id="btnCloseGuideModal" class="btn btn-primary">เข้าใจแล้ว
