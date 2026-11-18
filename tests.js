@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.7)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.8)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -212,12 +212,37 @@
     assert(Logic.parseAndExecuteLineCommand('สร้างนัด', createdList, b0.isoStr, botCfg).includes('วิธีพิมพ์สร้างนัดหมาย'), 'พิมพ์ สร้างนัด เปล่าต้องแนะนำวิธีใช้');
     assert(Logic.parseAndExecuteLineCommand('สร้างนัด วันนี้', createdList, b0.isoStr, botCfg).includes('รูปแบบคำสั่งสร้างนัดไม่ถูกต้อง'), 'พิมพ์ข้อมูลไม่ครบต้องแจ้งวิธีแก้');
     assert(Logic.parseAndExecuteLineCommand('พรุ่งนี้ค่อยสร้างนัดกันใหม่นะครับ', createdList, b0.isoStr, botCfg) === null, 'ประโยคสนทนาทั่วไปต้องไม่ถูกตีความเป็นคำสั่ง');
+
+    // 5c. Flexible Syntax (สร้างงาน / แยกสแลช / หัวข้อนำหน้า / พ.ศ. 2 หลัก / เดือนไทย / หลายบรรทัดไม่มีหัวข้อ)
+    const msgWork = Logic.parseAndExecuteLineCommand('สร้างงาน พรุ่งนี้ 10:30 / ประชุมทีม / ห้อง A / คุณสมชาย', createdList, b0.isoStr, botCfg);
+    const rWork = createdList[createdList.length - 1];
+    assert(msgWork && rWork.appointmentDate === tmr && rWork.appointmentTime === '10:30' && rWork.title === 'ประชุมทีม' && rWork.location === 'ห้อง A' && rWork.contactPerson === 'คุณสมชาย', 'รองรับคำสั่ง สร้างงาน');
+
+    const msgSlashDt = Logic.parseAndExecuteLineCommand('สร้างนัด พรุ่งนี้ / 10:30 / ประชุมแยกสแลช / ห้อง B / คุณวิภาดา', createdList, b0.isoStr, botCfg);
+    const rSlashDt = createdList[createdList.length - 1];
+    assert(msgSlashDt && rSlashDt.appointmentDate === tmr && rSlashDt.appointmentTime === '10:30' && rSlashDt.title === 'ประชุมแยกสแลช' && rSlashDt.location === 'ห้อง B' && rSlashDt.contactPerson === 'คุณวิภาดา', 'รองรับวันที่และเวลาแยกด้วย /');
+
+    const msgTitleFirst = Logic.parseAndExecuteLineCommand('สร้างงาน ประชุมด่วน พรุ่งนี้ เวลา 10.30 น.', createdList, b0.isoStr, botCfg);
+    const rTitleFirst = createdList[createdList.length - 1];
+    assert(msgTitleFirst && rTitleFirst.appointmentDate === tmr && rTitleFirst.appointmentTime === '10:30' && rTitleFirst.title === 'ประชุมด่วน', 'รองรับหัวข้อก่อนวันเวลาและ เวลา ... น.');
+
+    const msgYr2 = Logic.parseAndExecuteLineCommand('เพิ่มงาน 25/11/69 14:00 / ตรวจรับระบบ', createdList, b0.isoStr, botCfg);
+    const rYr2 = createdList[createdList.length - 1];
+    assert(msgYr2 && rYr2.appointmentDate === '2026-11-25' && rYr2.appointmentTime === '14:00' && rYr2.title === 'ตรวจรับระบบ', 'รองรับ พ.ศ. 2 หลัก (25/11/69)');
+
+    const msgThMonth = Logic.parseAndExecuteLineCommand('สร้างคิว 25 พ.ย. 69 09:30 / นัดลูกค้า', createdList, b0.isoStr, botCfg);
+    const rThMonth = createdList[createdList.length - 1];
+    assert(msgThMonth && rThMonth.appointmentDate === '2026-11-25' && rThMonth.appointmentTime === '09:30' && rThMonth.title === 'นัดลูกค้า', 'รองรับชื่อเดือนไทย + ปี 2 หลัก');
+
+    const msgUnlabeledMl = Logic.parseAndExecuteLineCommand('สร้างงาน\nพรุ่งนี้ 11:00\nส่งมอบงาน\nตึก A', createdList, b0.isoStr, botCfg);
+    const rUnlMl = createdList[createdList.length - 1];
+    assert(msgUnlabeledMl && rUnlMl.appointmentDate === tmr && rUnlMl.appointmentTime === '11:00' && rUnlMl.title === 'ส่งมอบงาน' && rUnlMl.location === 'ตึก A', 'รองรับหลายบรรทัดแบบไม่มีป้ายกำกับ หัวข้อ:');
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.7 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 17, 'ต้องมีประวัติอย่างน้อย 17 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5', '2.6.6', '2.6.7'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.8 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 18, 'ต้องมีประวัติอย่างน้อย 18 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5', '2.6.6', '2.6.7', '2.6.8'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -408,7 +433,9 @@
       assertEqual(resComp.contents.styles.header.backgroundColor, '#ecfdf5', 'Result Complete หัวเขียวอ่อน');
       assertEqual(resCanc.contents.styles.header.backgroundColor, '#fef2f2', 'Result Cancel หัวแดงอ่อน');
       assertEqual(notice.contents.styles.header.backgroundColor, '#fffbeb', 'Notice หัวอำพันอ่อน');
-      assert(!Logic.hasEmoji(JSON.stringify([resComp, resCanc, notice])), 'Result/Notice Cards ต้องไม่มีอิโมจิ');
+      const noticeEmpty = sandbox.buildNoticeFlex_('-', 'วิธีพิมพ์', 'คำอธิบาย', '', '', '');
+      assert(!noticeEmpty.contents.body.contents.some(el => el.type === 'box' && Array.isArray(el.contents) && el.contents.length === 0), 'buildNoticeFlex_ ต้องไม่สร้างกล่องว่างเมื่อไม่มี status/actor');
+      assert(!Logic.hasEmoji(JSON.stringify([resComp, resCanc, notice, noticeEmpty])), 'Result/Notice Cards ต้องไม่มีอิโมจิ');
 
       assertEqual(sandbox.buildQuotaFlex_(60, 300, 'https://example.com').contents.styles.header.backgroundColor, '#ecfdf5', 'โควตา <80% เขียวอ่อน');
       assertEqual(sandbox.buildQuotaFlex_(255, 300, 'https://example.com').contents.styles.header.backgroundColor, '#fffbeb', 'โควตา >=80% อำพันอ่อน');
@@ -454,6 +481,7 @@
         SpreadsheetApp: { getActiveSpreadsheet: () => null },
         UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => '{}' }) },
         ScriptApp: { getProjectTriggers: () => [], newTrigger: () => ({ timeBased: () => ({ at: () => ({ create: () => {} }) }) }) },
+        ContentService: { MimeType: { JSON: 'application/json' }, createTextOutput: t => ({ setMimeType: () => t }) },
         Session: { getScriptTimeZone: () => 'Asia/Bangkok' }
       };
       vm.runInNewContext(cg, gasSb);
@@ -482,6 +510,26 @@
       existing = [{ ...saved[0], id: 'APT-OLD-1', title: 'งานเดิม' }];
       const dupRes = gasSb.parseWebhookCmd_('คิว สร้างนัด พรุ่งนี้ 10:30 / งานซ้อน', 'G1', 'U1');
       assert(JSON.stringify(dupRes).includes('คำเตือนคิวชน') && !Logic.hasEmoji(JSON.stringify(dupRes)), 'Webhook เวลาซ้อนต้องมีคำเตือนคิวชน');
+
+      // Flexible GAS syntax checks
+      const wRes = gasSb.parseWebhookCmd_('สร้างงาน พรุ่งนี้ / 10:30 / ประชุมแยกสแลช / ห้อง B / คุณวิภาดา', 'G1', 'U1');
+      const sLast = saved[saved.length - 1];
+      assert(wRes.contents.type === 'bubble' && sLast.title === 'ประชุมแยกสแลช' && sLast.appointmentTime === '10:30' && sLast.location === 'ห้อง B', 'GAS รองรับ สร้างงาน + วัน/เวลาแยกสแลช');
+
+      gasSb.parseWebhookCmd_('สร้างงาน ประชุมด่วน 25 พ.ย. 69 เวลา 10.30 น.', 'G1', 'U1');
+      const sTh = saved[saved.length - 1];
+      assert(sTh.title === 'ประชุมด่วน' && sTh.appointmentDate === '2026-11-25' && sTh.appointmentTime === '10:30', 'GAS รองรับหัวข้อนำหน้า + เดือนไทย + พ.ศ. 2 หลัก');
+
+      gasSb.parseWebhookCmd_('สร้างงาน\n25/11/69 11:00\nส่งมอบงาน\nตึก A', 'G1', 'U1');
+      const sMl = saved[saved.length - 1];
+      assert(sMl.appointmentDate === '2026-11-25' && sMl.appointmentTime === '11:00' && sMl.title === 'ส่งมอบงาน' && sMl.location === 'ตึก A', 'GAS รองรับหลายบรรทัดไม่ใส่ป้ายกำกับ + ปี 2 หลัก');
+
+      // Direct 1-on-1 chat should not be blocked when ALLOWED_GROUP_IDS is set & ALLOWED_USER_IDS is empty
+      const replied = [];
+      gasSb.sendLineReply_ = (rt, msg) => replied.push({ rt, msg });
+      gasSb.getProp_ = k => ({ LINE_CHANNEL_ACCESS_TOKEN: 'tok', ALLOWED_GROUP_IDS: 'C_TEAM_1', ALLOWED_USER_IDS: '', LINE_TARGET_ID: 'C_TARGET_1' }[k] || '');
+      gasSb.handleLineWebhook_({ events: [{ type: 'message', replyToken: 'rt-dm', source: { userId: 'U_DM_1' }, message: { type: 'text', text: 'สร้างงาน 25/11/69 16:00 / เช็กแชทเดี่ยว' } }] }, {});
+      assert(replied.length === 1 && replied[0].rt === 'rt-dm' && saved[saved.length - 1].title === 'เช็กแชทเดี่ยว', 'Webhook แชท 1-on-1 ต้องทำงานได้เมื่อไม่จำกัด ALLOWED_USER_IDS');
     });
 
     runTest('14. Performance & Compaction Guard', 'ระบบ O(N) Bucketing, Lazy Webhook Read, ฟีเจอร์ F1-F5 และความกระชับของโค้ดทำงานสมบูรณ์', () => {

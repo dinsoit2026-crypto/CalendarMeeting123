@@ -1,4 +1,4 @@
-/** app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.7) */
+/** app.js - Web Frontend Controller, State Management & Low-Latency Engine (v2.6.8) */
 (function () { 'use strict'; const Logic = window.CalendarLogic, PatchNotes = window.PATCH_NOTES || [], _el = {};
   const $ = id => _el[id] || (_el[id] = document.getElementById(id)), on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   const txt = (el, v) => { if (el) el.textContent = v; }, disp = (el, v) => { if (el) el.style.display = v; };
@@ -117,7 +117,9 @@
   function saveDemoData() { if (!state.isLive) { sSet(STORAGE.APTS, state.appointments); sSet(STORAGE.LOGS, state.rescheduleLogs); sSet(STORAGE.USERS, state.users); } }
   async function callGasApi(action, payload) { if (!state.gasUrl) throw new Error('ยังไม่ได้ระบุ Web App URL'); const res = await fetch(state.gasUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action, passcode: state.passcode, currentUser: curUserDisp(), ...payload }) });
-    const r = await res.json(); if (!r.ok) { const err = new Error(r.error || 'Server error'); err.code = r.code; throw err; } return r.data; }
+    const r = await res.json();
+    if (r && r.version && r.version !== Logic.API_VERSION && !state._verWarned) { state._verWarned = true; showToast('เซิร์ฟเวอร์ GAS ยังเป็น v' + r.version + ' (เว็บแอป v' + Logic.API_VERSION + ') กรุณาอัปเดตโค้ด Code.gs และกด Deploy -> New version', 'warn'); }
+    if (!r.ok) { const err = new Error(r.error || 'Server error'); err.code = r.code; throw err; } return r.data; }
   async function syncWithServer(silent = false, isBgDiff = false) { if (!state.isLive || !state.gasUrl) { renderAll(); return; }
     const btn = $('btnSyncNow'), lbl = $('syncBtnLabel'), prevApts = state.appointments.length ? state.appointments.slice() : null;
     try { if (btn) btn.classList.add('is-syncing'); txt(lbl, 'กำลังซิงก์...'); applySyncBundle(await callGasApi('list', {})); renderAll(); evaluateAndFireWebNotifications(prevApts, Boolean(prevApts));

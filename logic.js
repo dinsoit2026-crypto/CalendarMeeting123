@@ -1,7 +1,7 @@
-/** logic.js - Core Domain Logic, Bangkok Timezone, Notification & Analytics Engine (v2.6.7) */
+/** logic.js - Core Domain Logic, Bangkok Timezone, Notification & Analytics Engine (v2.6.8) */
 (function (root, factory) { if (typeof module === 'object' && module.exports) module.exports = factory(); else root.CalendarLogic = factory();
 })(typeof self !== 'undefined' ? self : this, function () { 'use strict';
-  const API_VERSION = '2.6.7', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500, S_SYS = 'ผู้ใช้งานระบบ', NO_ITEM = 'ไม่มีรายการนัดหมาย';
+  const API_VERSION = '2.6.8', BKK_OFFSET_MS = 7 * 3600 * 1000, LINE_MAX_LEN = 4500, S_SYS = 'ผู้ใช้งานระบบ', NO_ITEM = 'ไม่มีรายการนัดหมาย';
   const STATUS = Object.freeze({ CONFIRMED: 'เริ่มนัด', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' });
   const S_CF = STATUS.CONFIRMED, S_CP = STATUS.COMPLETED, S_CN = STATUS.CANCELLED, VALID_STATUSES = Object.freeze([S_CF, S_CP, S_CN]);
   const USER_ROLES = Object.freeze({ ADMIN: 'ADMIN', STAFF: 'STAFF' }), DEF_TS = '2026-11-01T08:00:00+07:00';
@@ -162,41 +162,58 @@
     const lines = [hdr, `รหัส: ${sn(apt.id || '-')}`, `หัวข้อ: ${sn(apt.title || '-')}`, `วันนัด: ${ftd(apt.appointmentDate, false)} เวลา ${sn(apt.appointmentTime || '-')} น.`, `สถานที่: ${sn(apt.location || '-')}`, `ผู้นัดพบ: ${maskContact(apt.contactPerson, cfg && cfg.privacyMaskContact)}`, `สถานะ: [${sn(st)}]`, `ผู้สร้างนัดหมาย: ${creator}`];
     if (st === S_CP && apt.statusChangedBy) lines.push(`ผู้ยืนยันเสร็จสิ้น: ${sn(apt.statusChangedBy)}`); else if (st === S_CN) { if (apt.statusChangedBy) lines.push(`ผู้ยกเลิกนัด: ${sn(apt.statusChangedBy)}`); if (apt.statusReason) lines.push(`สาเหตุการยกเลิก: ${sn(apt.statusReason)}`); } else if (isUpdate && apt.updatedBy && apt.updatedBy !== creator) lines.push(`ผู้แก้ไขล่าสุด: ${sn(apt.updatedBy)}`);
     if (apt.notes) lines.push(`หมายเหตุ: ${sn(apt.notes)}`); if (apt.mapUrl) lines.push(`แผนที่: ${sn(apt.mapUrl)}`); return sn(lines.join('\n')); }
-  const Q_KEYS = 'ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ', C_KW = '(?:สร้างนัด|เพิ่มนัด|นัดใหม่)';
-  const CMD_RE = new RegExp(`^คิว(?:\\s+|${Q_KEYS}|${C_KW}|$)|^(?:${Q_KEYS}|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+|${C_KW}(?:\\s+[\\s\\S]+)?)$`, 'i');
-  function parseLineCreateCmd(arg, bkk, defCreator) { const cm = arg.match(/^(?:สร้างนัด|เพิ่มนัด|นัดใหม่)(?:\s+([\s\S]+))?$/i); if (!cm) return null;
+  const Q_KEYS = 'ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ', C_KW = '(?:สร้างนัด(?:หมาย)?|เพิ่มนัด(?:หมาย)?|นัด(?:หมาย)?ใหม่|สร้างงาน|เพิ่มงาน|งานใหม่|ลงนัด|ตั้งนัด|สร้างคิว|เพิ่มคิว|จองคิว)';
+  const CMD_RE = new RegExp(`^คิว(?:\\s+|${Q_KEYS}|${C_KW}|$)|^(?:${Q_KEYS}|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+|${C_KW}(?:[\\s:：]+[\\s\\S]+)?)$`, 'i');
+  function parseLineCreateCmd(arg, bkk, defCreator) { const cm = arg.match(new RegExp(`^${C_KW}(?:[\\s:：]+([\\s\\S]+))?$`, 'i')); if (!cm) return null;
     const body = (cm[1] || '').trim(); if (!body) return { help: true };
-    const pSmartDt = r => { const s = sn(r); if (!s) return null; if (s === 'วันนี้') return bkk.dateStr; if (s === 'พรุ่งนี้') return gb(bkk.epochMs + 86400000).dateStr;
+    const yr2ce = y => { const n = Number(y); return (!Number.isInteger(n) || n < 0) ? null : (n < 100 ? (n >= 40 ? 2500 + n - 543 : 2000 + n) : normalizeYearToCE(n)); };
+    const pSmartDt = r => { const s = sn(r).replace(/^(?:วันที่|วันนัด|วัน(?=\s|[:：]))\s*[:：]?\s*/, '').trim(); if (!s) return null;
+      if (s === 'วันนี้') return bkk.dateStr; if (s === 'พรุ่งนี้') return gb(bkk.epochMs + 86400000).dateStr;
       if (s === 'มะรืน' || s === 'มะรืนนี้') return gb(bkk.epochMs + 172800000).dateStr;
       const dm = s.match(/^(\d{1,2})[-/](\d{1,2})$/); if (dm) { const d = +dm[1], m = +dm[2], mx = getDaysInMonth(bkk.year, m); return mx && d >= 1 && d <= mx ? `${bkk.year}-${pad2(m)}-${pad2(d)}` : null; }
+      const dmy = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/); if (dmy) { const ce = yr2ce(dmy[3]), d = +dmy[1], m = +dmy[2], mx = ce ? getDaysInMonth(ce, m) : 0; return mx && d >= 1 && d <= mx ? `${ce}-${pad2(m)}-${pad2(d)}` : null; }
+      const th = s.match(/^(\d{1,2})\s*([\u0E01-\u0E4E.]+?)(?:\s*(\d{2,4}))?$/);
+      if (th) { const ms = th[2].trim(), mc = ms.replace(/\./g, ''); let mi = THAI_MONTHS_FULL.indexOf(ms);
+        if (mi === -1) mi = THAI_MONTHS_SHORT.findIndex(x => x === ms || x.replace(/\./g, '') === mc);
+        if (mi !== -1) { const ce = th[3] ? yr2ce(th[3]) : bkk.year, mo = mi + 1, dy = +th[1], mx = ce ? getDaysInMonth(ce, mo) : 0;
+          return mx && dy >= 1 && dy <= mx ? `${ce}-${pad2(mo)}-${pad2(dy)}` : null; } }
       return pfd(s); };
-    const pSmartTm = r => parseTimeInput(String(r || '').trim().replace(/\s*น\.?$/, '').replace(/\./g, ':'));
+    const pSmartTm = r => { const s = String(r || '').trim().replace(/^(?:เวลา|เวลานัด)\s*[:：]?\s*/, '').trim(); if (!s) return null;
+      const mg = s.match(/^(\d{1,2})\s*โมง(ครึ่ง)?(?:\s*[-~ถึง].*)?$/i); if (mg) return +mg[1] <= 23 ? `${pad2(mg[1])}:${mg[2] ? '30' : '00'}` : null;
+      return parseTimeInput(s.replace(/(?:\s*[-~ถึง]\s*\d{1,2}(?:[:.]\d{2})?)?\s*(?:น\.?|โมง)?$/i, '').replace(/\./g, ':').trim()); };
     const pRem = s => { const dM = s.match(/(\d+)\s*(?:วัน|ว\.?|d)/i), hM = s.match(/(\d+)\s*(?:ชั่วโมง|ชม\.?|h)/i); return { d: dM ? +dM[1] : 0, h: hM ? +hM[1] : 0 }; };
     let title = '', dateRaw = '', timeRaw = '', location = '', contactPerson = '', notes = '', mapUrl = '', rD = 0, rH = 0;
     const kvTest = /^(หัวข้อ|งาน|เรื่อง|วันที่|วันนัด|วัน|วันเวลา|เวลา|เวลานัด|สถานที่|ที่นัดหมาย|ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ|เตือน|แจ้งเตือน|หมายเหตุ|รายละเอียด|แผนที่|พิกัด)\s*[:：]\s*(.+)$/i;
     const lines = body.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
     if (lines.length > 1 && lines.some(l => kvTest.test(l))) { lines.forEach(l => { const m = l.match(kvTest); if (!m) return; const k = m[1], v = m[2].trim();
-        if (/^(?:หัวข้อ|งาน|เรื่อง)$/.test(k)) title = v; else if (/^(?:วันที่|วันนัด|วัน)$/.test(k)) dateRaw = v; else if (k === 'วันเวลา') { const p = v.split(/\s+/); dateRaw = p[0] || ''; timeRaw = p[1] || ''; }
+        if (/^(?:หัวข้อ|งาน|เรื่อง)$/.test(k)) title = v; else if (/^(?:วันที่|วันนัด|วัน)$/.test(k)) dateRaw = v;
+        else if (k === 'วันเวลา') { const dm = v.match(/^(.*?)\s+(\d{1,2}(?:[:.]\d{2}|\s*โมง).*)$/); if (dm) { dateRaw = dm[1]; timeRaw = dm[2]; } else { const p = v.split(/\s+/); dateRaw = p[0] || ''; timeRaw = p.slice(1).join(' '); } }
         else if (/^(?:เวลา|เวลานัด)$/.test(k)) timeRaw = v; else if (/^(?:สถานที่|ที่นัดหมาย)$/.test(k)) location = v; else if (/^(?:ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ)$/.test(k)) contactPerson = v;
         else if (/^(?:เตือน|แจ้งเตือน)$/.test(k)) { const r = pRem(v); rD = r.d; rH = r.h; } else if (/^(?:หมายเหตุ|รายละเอียด)$/.test(k)) notes = v; else if (/^(?:แผนที่|พิกัด)$/.test(k)) mapUrl = v; });
-      if (dateRaw && !timeRaw && /\s/.test(dateRaw)) { const p = dateRaw.split(/\s+/); dateRaw = p[0]; timeRaw = p[1] || ''; }
-    } else { const segs = body.replace(/\r?\n/g, ' ').split(/\s*[\/|]\s*/).map(x => x.trim()).filter(Boolean);
-      const dtTmRe = /^(วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|\d{1,4}[-/]\d{1,2}(?:[-/]\d{2,4})?)\s+(\d{1,2}[:.]\d{2}(?:\s*น\.?)?)(?:\s+([\s\S]+))?$/i;
-      const m0 = segs[0] && segs[0].match(dtTmRe), m1 = !m0 && segs[1] && segs[1].match(dtTmRe);
-      let extraIdx = 4;
-      if (m0) { dateRaw = m0[1]; timeRaw = m0[2]; const r0 = (m0[3] || '').trim();
-        if (segs.length === 1) { title = r0; extraIdx = 1; } else { title = r0 ? `${r0} ${segs[1]}` : segs[1]; location = segs[2] || ''; contactPerson = segs[3] || ''; }
-      } else if (m1) { title = segs[0] || ''; dateRaw = m1[1]; timeRaw = m1[2]; location = segs[2] || ''; contactPerson = segs[3] || ''; }
-      const noteList = []; segs.slice(extraIdx).forEach(s => { if (/^(?:เตือน|แจ้งเตือน)\s+/i.test(s)) { const r = pRem(s); rD = r.d; rH = r.h; } else noteList.push(s); });
-      if (segs.length === 3 && m0 && /^(?:เตือน|แจ้งเตือน)\s+/i.test(location)) { const r = pRem(location); rD = r.d; rH = r.h; location = ''; }
-      notes = noteList.join(' / '); }
+      if (dateRaw && !timeRaw) { const tm = dateRaw.match(/^(.+?)\s+(?:เวลา\s*)?(\d{1,2}[:.]\d{2}(?:\s*น\.?)?|\d{1,2}\s*โมง(?:ครึ่ง)?)$/i); if (tm) { dateRaw = tm[1]; timeRaw = tm[2]; } }
+    } else {
+      const urls = [], safeBody = body.replace(/https?:\/\/\S+/gi, u => (urls.push(u), `\x02${urls.length - 1}\x02`)).replace(/(\d)\/(?=\d)/g, '$1\x01');
+      const hasSep = /[\/|]/.test(safeBody), rest = s => s.replace(/\x01/g, '/').replace(/\x02(\d+)\x02/g, (_, i) => urls[+i] || '').trim();
+      const segs = (hasSep ? safeBody.replace(/\r?\n/g, ' ').split(/\s*[\/|]\s*/) : (lines.length > 1 ? safeBody.split(/\r?\n/) : [safeBody])).map(rest).filter(Boolean);
+      const dtTokRe = /(?:^|\s)((?:(?:วันที่|วันนัด|วัน(?=\s|[:：]))\s*[:：]?\s*)?(?:วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|\d{4}[-/]\d{1,2}[-/]\d{1,2}|\d{1,2}[-/]\d{1,2}(?:[-/]\d{2,4})?|\d{1,2}\s*(?:มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|ม\.?ค\.?|ก\.?พ\.?|มี\.?ค\.?|เม\.?ย\.?|พ\.?ค\.?|มิ\.?ย\.?|ก\.?ค\.?|ส\.?ค\.?|ก\.?ย\.?|ต\.?ค\.?|พ\.?ย\.?|ธ\.?ค\.?)(?:\s*(?:\d{4}|\d{2}(?!\s*(?:โมง|[:.]))))?))(?=\s|$)/i;
+      const tmTokRe = /(?:^|\s)((?:(?:เวลา|เวลานัด)\s*[:：]?\s*)?(?:\d{1,2}[:.]\d{2}(?:\s*[-~ถึง]\s*\d{1,2}[:.]\d{2})?\s*(?:น\.?|โมง)?|\d{1,2}\s*โมง(?:ครึ่ง)?))(?=\s|$)/i;
+      const txtSegs = [];
+      segs.forEach(seg => {
+        if (/^(?:เตือน|แจ้งเตือน)\s+/i.test(seg)) { const r = pRem(seg); rD = r.d; rH = r.h; return; }
+        let w = seg;
+        if (!dateRaw) { const dm = w.match(dtTokRe); if (dm && pSmartDt(dm[1])) { dateRaw = dm[1]; w = w.replace(dm[0], ' ').trim(); } }
+        if (!timeRaw) { const tm = w.match(tmTokRe); if (tm && pSmartTm(tm[1])) { timeRaw = tm[1]; w = w.replace(tm[0], ' ').trim(); } }
+        if (w) txtSegs.push(w);
+      });
+      title = txtSegs[0] || ''; location = txtSegs[1] || ''; contactPerson = txtSegs[2] || ''; notes = txtSegs.slice(3).join(' / ');
+    }
     const appointmentDate = pSmartDt(dateRaw), appointmentTime = pSmartTm(timeRaw), cleanTitle = sn(title);
     if (!appointmentDate || !appointmentTime || !cleanTitle) return { error: '[ข้อผิดพลาด] รูปแบบคำสั่งสร้างนัดไม่ถูกต้อง\nตัวอย่าง: สร้างนัด พรุ่งนี้ 10:30 / ประชุมตรวจรับงาน / ห้อง B / คุณสมชาย' };
     const creator = sn(defCreator) || S_SYS;
     return { payload: { title: cleanTitle, appointmentDate, appointmentTime, location: sn(location) || 'ไม่ระบุสถานที่', contactPerson: sn(contactPerson) || sn(defCreator) || 'ผู้ใช้งาน LINE', status: S_CF, remindDaysBefore: rD, remindHoursBefore: rH, notes: sn(notes), mapUrl: sn(mapUrl), createdBy: creator } }; }
   function parseAndExecuteLineCommand(rawText, appointments, nowIso, settings) { const text = sn(rawText || ''); if (!CMD_RE.test(text)) return null; const cfg = settings || {}, arg = text.replace(/^คิว\s*/, '').trim();
     if (cfg.enableLineBotQuery === false) return '[ระบบปิดการค้นหาผ่านแชทชั่วคราว] กรุณาตรวจสอบผ่านหน้าเว็บแอป';
-    if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') return ['[คำสั่งตรวจสอบตารางงาน]', '- ทั้งหมด : นัดหมายที่กำลังจะมาถึงทั้งหมด', '- วันนี้ : นัดหมายวันนี้', '- พรุ่งนี้ : นัดหมายพรุ่งนี้', '- สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- ค้างอยู่ : งานเลยกำหนดเวลา', '- เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- เดือน MM/YYYY : เช่น เดือน 12/2569', '- ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- ปี YYYY : เช่น ปี 2570', '- ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง', '- สร้างนัด <วัน> <เวลา> / <หัวข้อ> / <สถานที่> / <ผู้นัด> : สร้างนัดผ่านแชท', '- โควตา : ตรวจสอบโควตารายเดือน'].join('\n');
+    if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') return ['[คำสั่งตรวจสอบตารางงาน]', '- ทั้งหมด : นัดหมายที่กำลังจะมาถึงทั้งหมด', '- วันนี้ : นัดหมายวันนี้', '- พรุ่งนี้ : นัดหมายพรุ่งนี้', '- สัปดาห์นี้ : นัดหมาย 7 วันข้างหน้า', '- ค้างอยู่ : งานเลยกำหนดเวลา', '- เดือนนี้ : สรุปงานเดือนปัจจุบัน', '- เดือน MM/YYYY : เช่น เดือน 12/2569', '- ปีนี้ : สรุปงานและสถิติท้ายปีปัจจุบัน', '- ปี YYYY : เช่น ปี 2570', '- ค้นหา <คำค้น> : ค้นหาตามชื่อ/สถานที่/หัวข้อ/ผู้สร้าง', '- สร้างนัด / สร้างงาน <วัน> <เวลา> / <หัวข้อ> / <สถานที่> / <ผู้นัด> : สร้างนัดผ่านแชท', '- โควตา : ตรวจสอบโควตารายเดือน'].join('\n');
     if (arg === 'โควตา') return `[สถานะโควตา LINE ประจำเดือน]\nใช้ไปแล้ว: ${+cfg.quotaUsed || 0} / ${+cfg.quotaLimit || 300} ข้อความ`;
     const bkk = gb(nowIso), list = (appointments || []).filter(a => a && !a.deletedAt), cRes = parseLineCreateCmd(arg, bkk, cfg.defaultCreator || 'ผู้ใช้งาน LINE');
     if (cRes) { if (cRes.help) return ['[วิธีพิมพ์สร้างนัดหมายในแชท]', '1) แบบบรรทัดเดียว (คั่นด้วย /):', 'สร้างนัด พรุ่งนี้ 10:30 / ประชุมงาน / ห้อง B / คุณสมชาย', '(หรือแบบย่อ: สร้างนัด วันนี้ 14:00 / สรุปงานทีม)', '2) แบบหลายบรรทัด:', 'สร้างนัด', 'หัวข้อ: ประชุมตรวจรับงาน', 'วันที่: 25/11/2569', 'เวลา: 10:30', 'สถานที่: ห้อง B', 'ผู้นัดพบ: คุณสมชาย'].join('\n');

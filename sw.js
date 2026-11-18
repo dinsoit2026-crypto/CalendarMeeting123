@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_NAME = 'cal-pwa-v2.6.7';
+const CACHE_NAME = 'cal-pwa-v2.6.8';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './logic.js', './patchnotes.js', './manifest.json', './icon.svg'];
 const BYPASS_HOSTS = ['script.google.com', 'script.googleusercontent.com', 'nominatim.openstreetmap.org', 'api.line.me'];
 const cleanText = s => String(s || '').replace(/\p{Extended_Pictographic}/gu, '').replace(/[ \t]{2,}/g, ' ').trim();

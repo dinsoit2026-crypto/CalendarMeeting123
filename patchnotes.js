@@ -7,6 +7,16 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.8',
+      date: '18/11/2569',
+      title: 'LINE Group & Direct Chat Appointment Creation, Flexible Thai Parser & GAS Version Check',
+      changes: [
+        'รองรับการพิมพ์สร้างนัดหมาย/สร้างงานผ่านแชทกลุ่ม LINE และแชทส่วนตัว (logic.js, gas/Code.gs): เพิ่มคำสั่ง สร้างนัด, สร้างนัดหมาย, เพิ่มนัด, นัดใหม่, สร้างงาน, เพิ่มงาน, งานใหม่, ลงนัด, ตั้งนัด, สร้างคิว, เพิ่มคิว, จองคิว (ฟรีผ่าน Reply API พร้อมเช็กคิวชนและตั้งเตือนอัตโนมัติ)',
+        'Smart Thai Date/Time Parser: รองรับแยกวัน-เวลาด้วย / (พรุ่งนี้ / 10:30), วางหัวข้อไว้หน้าวันเวลา (ประชุมด่วน พรุ่งนี้ เวลา 10.30 น.), ปี พ.ศ. 2 หลัก (25/11/69), ชื่อเดือนภาษาไทย (25 พ.ย. 69), เวลาแบบ โมง/โมงครึ่ง และการพิมพ์หลายบรรทัดแบบไม่ต้องใส่ป้ายกำกับ',
+        'แก้ไข Webhook 1-on-1 Direct Chat & Reply Fallback (gas/Code.gs) + แจ้งเตือนเวอร์ชัน GAS (app.js): ไม่บล็อกแชท 1-on-1 เมื่อ ALLOWED_USER_IDS ว่าง, ดึง LINE_TARGET_ID เข้ารายการกลุ่มอัตโนมัติ, ตัดกล่องว่างใน buildNoticeFlex_ และแจ้งเตือนบนเว็บแอปหากยังไม่ได้ Deploy Code.gs เวอร์ชันใหม่'
+      ]
+    },
+    {
       version: '2.6.7',
       date: '18/11/2569',
       title: 'Unified Web Push & In-App Notification Engine (Full LINE Parity + Quota-Exhausted Fallback)',
