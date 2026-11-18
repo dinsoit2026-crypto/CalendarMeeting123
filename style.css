@@ -1,5 +1,5 @@
 /**
- * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.5)
+ * style.css - Executive Indigo-Slate & Traffic-Light Semantics UI (v2.6.7)
  * Zero-Emoji Policy Compliant | Ultra-Fluid Micro-Interactions | Print Report A4 Layout | PWA Standalone
  */
 :root { --bg-body: #f5f7fb; --bg-gradient: radial-gradient(1200px 520px at 50% -140px, rgba(79,70,229,0.08), transparent 70%), #f5f7fb;
@@ -194,9 +194,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .legend-dot.status-confirmed { background: var(--st-conf-border); } .legend-dot.status-completed { background: var(--st-comp-border); } .legend-dot.status-cancelled { background: var(--st-canc-border); }
 .legend-hint { margin-left: auto; color: var(--text-muted); font-size: 12px; }
 .calendar-side-pane { position: sticky; top: 106px; } .agenda-side-card { margin-bottom: 0; max-height: calc(100vh - 130px); display: flex; flex-direction: column; padding: 18px 20px; }
-.agenda-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+.agenda-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
 .agenda-eyebrow { font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--primary); letter-spacing: 0.4px; } .agenda-header h3 { margin: 3px 0 0; font-size: 16px; }
 .agenda-scroll-list { overflow-y: auto; padding-right: 3px; gap: 10px; } .agenda-scroll-list .apt-card-slim { grid-template-columns: 104px minmax(0, 1fr); padding: 12px 14px; gap: 12px; }
+.agenda-scroll-list .apt-date-block { padding: 8px 6px; overflow: hidden; }
 .agenda-scroll-list .apt-slim-actions { grid-column: 1 / -1; justify-content: flex-end; border-top: 1px solid var(--border-light); padding-top: 9px; }
 .year-top-bar, .panel-card-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
 .section-heading { margin: 0; font-size: 20px; color: var(--text-main); } .section-subheading { margin: 3px 0 0; font-size: 13.5px; color: var(--text-secondary); }
@@ -310,11 +311,27 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
 .toast-item { pointer-events: auto; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--border); border-left: 5px solid var(--primary); border-radius: var(--radius-sm); padding: 11px 16px; box-shadow: 0 12px 28px rgba(15,23,42,0.16); font-size: 13px; font-weight: 600; animation: toastSlideIn 0.2s ease-out; }
 .toast-item.toast-success { border-left-color: #10b981; } .toast-item.toast-error { border-left-color: #ef4444; } .toast-item.toast-warn { border-left-color: #f59e0b; }
 @keyframes toastSlideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+.btn-web-notify { position: relative; }
 .btn-web-notify.is-granted { background: var(--st-comp-bg); color: var(--st-comp-text); border-color: var(--st-comp-border); }
 .btn-web-notify.is-denied { background: var(--danger-bg); color: var(--danger-text); border-color: var(--danger-border); }
 .btn-pwa-install { border-color: var(--primary-border); }
 .pwa-status-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .pwa-status-row strong { color: var(--text-main); }
+.web-push-banner-container { position: fixed; top: 18px; right: 18px; z-index: 350; display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100vw - 28px)); pointer-events: none; }
+.web-push-card { pointer-events: auto; background: var(--bg-surface); color: var(--text-main); border: 1px solid var(--primary-border); border-left: 5px solid var(--primary); border-radius: var(--radius-md); padding: 12px 14px; box-shadow: var(--shadow-modal); display: flex; gap: 10px; align-items: flex-start; cursor: pointer; animation: toastSlideIn 0.2s ease-out; }
+.web-push-card.is-ok { border-left-color: #10b981; } .web-push-card.is-warn { border-left-color: #f59e0b; } .web-push-card.is-err { border-left-color: #ef4444; }
+.web-push-icon { width: 32px; height: 32px; border-radius: 9px; background: var(--primary-soft); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.web-push-content { flex: 1; min-width: 0; }
+.web-push-head { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 3px; }
+.web-push-title { font-size: 13px; font-weight: 700; color: var(--text-main); }
+.web-push-time { font-size: 11px; color: var(--text-muted); flex-shrink: 0; }
+.web-push-body { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; white-space: pre-line; word-break: break-word; }
+.web-push-close { background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 4px; flex-shrink: 0; }
+.notif-feed-item { background: var(--bg-subtle); border: 1px solid var(--border); border-left: 4px solid var(--primary); border-radius: var(--radius-sm); padding: 10px 13px; display: flex; flex-direction: column; gap: 4px; cursor: pointer; }
+.notif-feed-item:hover { border-color: var(--primary-border); background: var(--primary-soft); }
+.notif-feed-head { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 700; color: var(--text-main); }
+.notif-feed-time { font-size: 11.5px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.notif-feed-body { font-size: 12.5px; color: var(--text-secondary); white-space: pre-line; }
 @media (display-mode: standalone) { .app-header { padding-top: env(safe-area-inset-top, 0px); } .mobile-bottom-nav { padding-bottom: env(safe-area-inset-bottom, 0px); } }
 .mobile-bottom-nav, .print-report-sheet { display: none; }
 /* Responsive Breakpoints */
@@ -333,8 +350,10 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   .app-header .brand-title-line { flex-direction: column; align-items: flex-start; gap: 3px; }
   .app-header .brand-title { font-size: 15px; line-height: 1.2; }
   .version-badge, .mode-badge { font-size: 10.5px; padding: 1px 7px; }
-  .header-actions { display: contents; } .header-tools-group { order: 2; gap: 6px; flex-shrink: 0; }
-  .btn-theme-toggle, .btn-icon-mobile { width: 34px; height: 34px; padding: 0; border-radius: 9px; }
+  .header-actions { display: contents; } .header-tools-group { order: 2; gap: 5px; flex-shrink: 0; }
+  .btn-theme-toggle, .btn-icon-mobile { width: 32px; height: 32px; padding: 0; border-radius: 9px; }
+  #webNotifBadgeCount { position: absolute; top: -5px; right: -5px; padding: 0 4px; font-size: 9.5px; min-width: 16px; line-height: 16px; }
+  .web-push-banner-container { top: 12px; right: 12px; left: 12px; width: auto; }
   .user-session-bar { order: 3; width: 100%; justify-content: space-between; padding: 5px 10px; font-size: 12.5px; border-radius: 9px; }
   .user-session-name { max-width: 150px; }
   .quota-bar-strip { padding: 6px 14px; font-size: 11.5px; } .quota-bar-inner { flex-wrap: nowrap; gap: 8px; }
@@ -350,12 +369,13 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--p
   .filter-toolbar { grid-template-columns: 1fr 1fr; gap: 8px; }
   .filter-toolbar .select-filter, .filter-toolbar .input-date, .filter-toolbar #btnClearFilters { width: 100%; font-size: 13px; }
   .queue-group-header { padding: 6px 12px; } .queue-group-title { font-size: 13px; }
-  .apt-card-slim { grid-template-columns: 1fr; gap: 11px; padding: 13px 14px; }
-  .apt-date-block { flex-direction: row; justify-content: space-between; align-items: center; min-height: auto; padding: 8px 12px; gap: 8px; }
+  .agenda-header-actions { width: 100%; justify-content: flex-start; }
+  .apt-card-slim, .agenda-scroll-list .apt-card-slim { grid-template-columns: 1fr; gap: 11px; padding: 13px 14px; }
+  .apt-date-block, .agenda-scroll-list .apt-date-block { flex-direction: row; flex-wrap: wrap; justify-content: space-between; align-items: center; min-height: auto; padding: 8px 12px; gap: 6px 10px; width: 100%; overflow: hidden; }
   .apt-date-block > div:nth-child(2) { display: flex; align-items: baseline; gap: 5px; }
-  .apt-rel-badge { margin-bottom: 0; } .apt-day-num { font-size: 18px; } .apt-time-pill { margin-top: 0; font-size: 12.5px; }
+  .apt-rel-badge { margin-bottom: 0; white-space: nowrap; flex-shrink: 0; } .apt-day-num { font-size: 18px; } .apt-time-pill { margin-top: 0; font-size: 12.5px; white-space: nowrap; flex-shrink: 0; }
   .apt-slim-title { font-size: 15.5px; } .apt-slim-meta { gap: 8px 14px; font-size: 12.5px; }
-  .apt-slim-actions { width: 100%; display: flex; gap: 6px; border-top: 1px solid var(--border-light); padding-top: 10px; }
+  .apt-slim-actions { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; border-top: 1px solid var(--border-light); padding-top: 10px; }
   .apt-slim-actions .btn { flex: 1 1 auto; padding: 7px 8px; font-size: 12px; }
   .form-row-2 { grid-template-columns: 1fr; } .calendar-controls { padding: 12px 14px; }
   .cal-cell { min-height: 70px; padding: 4px; } .cal-apt-pill { font-size: 9.5px; padding: 2px 4px; }

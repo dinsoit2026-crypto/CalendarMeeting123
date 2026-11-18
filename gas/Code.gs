@@ -1,14 +1,14 @@
 /**
- * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.5)
+ * Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.6.7)
  * Zero-Emoji Policy | Request-Level Sheet & Props Cache | Short-Lock I/O | Lazy Webhook Read
  */
-var API_VER = '2.6.5';
+var API_VER = '2.6.7';
 var SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
 var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt'];
 var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt', 'mapUrl', 'imageUrl'];
 var RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
 var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
-var META_COLS = ['key', 'value', 'updatedAt']; var STATUS = { CONFIRMED: 'นัดหมายแล้ว', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' };
+var META_COLS = ['key', 'value', 'updatedAt']; var STATUS = { CONFIRMED: 'เริ่มนัด', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' };
 var TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
 var TH_MONTHS_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 var EMOJI_EXT_RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
@@ -48,7 +48,7 @@ function getSheetData_(name, cols) { if (_dataCache[name]) return _dataCache[nam
   return (_dataCache[name] = { sh: sh, headers: hdrs, rows: all.slice(1) }); }
 function setupDatabase() { var ss = getSs_();
   [[SH_USERS, USER_COLS], [SH_APTS, APT_COLS], [SH_RE_LOGS, RE_LOG_COLS], [SH_NOTIF_LOGS, NOTIF_LOG_COLS], [SH_META, META_COLS]].forEach(function (p) { ensureSheet_(ss, p[0], p[1], true); });
-  var defs = { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'TRUE', WEB_APP_URL: '' };
+  var defs = { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'FALSE', WEB_APP_URL: '' };
   var cur = getMetaMap_(), now = getBkkNow_().isoStr, mSh = ensureSheet_(ss, SH_META, META_COLS, true);
   Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) { mSh.appendRow([k, defs[k], now]); cur[k] = defs[k]; } });
   formatPlainText_(mSh, META_COLS.length); invalidateSheetCache_(SH_META); return 'ตั้งค่าโครงสร้างชีต Plain Text และบัญชีเริ่มต้นสำเร็จ'; }
@@ -103,11 +103,13 @@ function doPost(e) { try { var body = JSON.parse((e && e.postData && e.postData.
     if (a === 'deleteUser') return withLock_(function () { return json_({ ok: true, data: { result: deleteUser_(body.userId) } }); });
     if (a === 'list') return json_({ ok: true, data: buildSyncBundle_() });
     if (a === 'create') { var apt = withLock_(function () { return createApt_(body.payload || {}); });
-      var lineNotif = body.notifyLine !== false ? sendInstantAptNotification_(apt, false) : null;
+      var wantCreateNotif = body.notifyLine === true || String(body.notifyLine).toUpperCase() === 'TRUE';
+      var lineNotif = wantCreateNotif ? sendInstantAptNotification_(apt, false) : null;
       if (+apt.remindHoursBefore > 0) scheduleExactReminderForApt_(apt);
       return json_({ ok: true, data: { appointment: apt, lineNotification: lineNotif, meta: getMetaMap_() } }); }
-    if (a === 'update') { var res = withLock_(function () { return updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason, body.currentUser); });
-      if (body.notifyLine === true && res && res.appointment) { res.lineNotification = sendInstantAptNotification_(res.appointment, true); res.meta = getMetaMap_(); }
+    if (a === 'update') { var wantUpdNotif = body.notifyLine === true || String(body.notifyLine).toUpperCase() === 'TRUE';
+      var res = withLock_(function () { return updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason, body.currentUser, !wantUpdNotif); });
+      if (wantUpdNotif && res && res.appointment) { res.lineNotification = sendInstantAptNotification_(res.appointment, true); res.meta = getMetaMap_(); }
       if (res && res.appointment && res.needsTriggerSync) scheduleExactReminderForApt_(res.appointment); return json_({ ok: true, data: res }); }
     if (a === 'delete') return withLock_(function () { return json_({ ok: true, data: { appointment: deleteApt_(body.id, body.updatedBy) } }); });
     if (a === 'updateMeta') return withLock_(function () { return json_({ ok: true, data: { meta: updateMeta_(body.meta || {}) } }); });
@@ -204,7 +206,7 @@ function createApt_(inp) {
   var creator = sanitizeNoEmoji(inp.createdBy || inp.updatedBy || 'ผู้ใช้งานระบบ') || 'ผู้ใช้งานระบบ', st = normalizeStatus_(inp.status);
   var rec = { id: pfx + String(max + 1).padStart(3, '0'), title: sanitizeNoEmoji(inp.title), appointmentDate: sanitizeNoEmoji(inp.appointmentDate), appointmentTime: sanitizeNoEmoji(inp.appointmentTime), location: sanitizeNoEmoji(inp.location), contactPerson: sanitizeNoEmoji(inp.contactPerson), status: st, remindDaysBefore: (inp.remindDaysBefore != null && inp.remindDaysBefore !== '') ? +inp.remindDaysBefore : 0, remindHoursBefore: (inp.remindHoursBefore != null && inp.remindHoursBefore !== '') ? +inp.remindHoursBefore : 0, notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0, notes: sanitizeNoEmoji(inp.notes), mapUrl: sanitizeNoEmoji(inp.mapUrl || ''), imageUrl: sanitizeNoEmoji(inp.imageUrl || ''), createdBy: creator, statusChangedBy: st !== STATUS.CONFIRMED ? (sanitizeNoEmoji(inp.statusChangedBy) || creator) : '', statusChangedAt: st !== STATUS.CONFIRMED ? now.isoStr : '', statusReason: sanitizeNoEmoji(inp.statusReason || ''), updatedBy: creator, createdAt: now.isoStr, updatedAt: now.isoStr, deletedAt: '' };
   validateApt_(rec); appendPlainRow_(d.sh, d.headers.map(function (c) { return rec[c] !== undefined ? String(rec[c]) : ''; }), d.rows.length + 1); return rec; }
-function updateApt_(id, patch, expUpdated, reason, currentUser) {
+function updateApt_(id, patch, expUpdated, reason, currentUser, suppressSlotReset) {
   var d = getSheetData_(SH_APTS, APT_COLS), rows = d.rows, headers = d.headers, delIdx = headers.indexOf('deletedAt'), targetRow = -1, cur = null;
   for (var r = rows.length - 1; r >= 0; r--) { var isDel = delIdx !== -1 && Boolean(String(rows[r][delIdx] || '').trim());
     if (String(rows[r][0]).trim() === String(id).trim() && !isDel) { targetRow = r + 2; cur = {}; headers.forEach(function (c, i) { cur[c] = String(rows[r][i] || '').trim(); }); break; } }
@@ -218,7 +220,15 @@ function updateApt_(id, patch, expUpdated, reason, currentUser) {
   } else { up.statusChangedBy = cur.statusChangedBy || ''; up.statusChangedAt = cur.statusChangedAt || ''; up.statusReason = patch.statusReason !== undefined ? sanitizeNoEmoji(patch.statusReason) : (cur.statusReason || ''); }
   var dChg = cur.appointmentDate !== up.appointmentDate, tChg = cur.appointmentTime !== up.appointmentTime, rDChg = String(cur.remindDaysBefore) !== String(up.remindDaysBefore), rHChg = String(cur.remindHoursBefore) !== String(up.remindHoursBefore);
   var reop = (cur.status === STATUS.COMPLETED || cur.status === STATUS.CANCELLED) && up.status === STATUS.CONFIRMED;
-  if (dChg || reop || rDChg) up.notifiedDayForSlot = ''; if (dChg || tChg || reop || rHChg) up.notifiedHourForSlot = '';
+  var suppressReset = Boolean(suppressSlotReset && !dChg && !tChg && !rDChg && !rHChg);
+  if (!suppressReset) { if (dChg || reop || rDChg) up.notifiedDayForSlot = ''; if (dChg || tChg || reop || rHChg) up.notifiedHourForSlot = ''; }
+  else if (reop) {
+    var slotNow = (up.appointmentDate && up.appointmentTime) ? (up.appointmentDate + 'T' + up.appointmentTime) : '';
+    var epNow = slotNow ? bkkSlotToEpoch_(up.appointmentDate, up.appointmentTime) : null;
+    var diffHNow = epNow ? (epNow - now.epochMs) / 3600000 : -1, diffDNow = up.appointmentDate ? diffDays_(now.dateStr, up.appointmentDate) : null;
+    if (!up.notifiedDayForSlot && up.appointmentDate && (+up.remindDaysBefore || 0) > 0 && diffDNow !== null && diffDNow <= (+up.remindDaysBefore || 0)) up.notifiedDayForSlot = up.appointmentDate;
+    if (!up.notifiedHourForSlot && slotNow && (+up.remindHoursBefore || 0) > 0 && diffHNow > 0 && diffHNow <= (+up.remindHoursBefore || 0)) up.notifiedHourForSlot = slotNow;
+  }
   if ((cur.appointmentDate || cur.appointmentTime) && (dChg || tChg)) up.rescheduleCount = String((+cur.rescheduleCount || 0) + 1); validateApt_(up);
   var logs = []; ['appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status'].forEach(function (f, idx) {
     if (String(cur[f] || '') !== String(up[f] || '')) logs.push({ logId: 'LOG-' + now.epochMs + '-' + (idx + 1), appointmentId: cur.id, changedAt: now.isoStr, changedBy: up.updatedBy, fieldChanged: f, oldValue: cur[f] || '', newValue: up[f] || '', reason: sanitizeNoEmoji(reason || up.statusReason || '') }); });
@@ -226,7 +236,7 @@ function updateApt_(id, patch, expUpdated, reason, currentUser) {
     lSh.getRange(lSh.getLastRow() + 1, 1, logRows.length, RE_LOG_COLS.length).setNumberFormat('@').setValues(logRows); invalidateSheetCache_(SH_RE_LOGS); }
   d.sh.getRange(targetRow, 1, 1, headers.length).setNumberFormat('@').setValues([headers.map(function (c) { return String(up[c] !== undefined ? up[c] : ''); })]);
   invalidateSheetCache_(SH_APTS); if (reop) up.reopened = true;
-  return { appointment: up, logs: logs, needsTriggerSync: Boolean((+cur.remindHoursBefore > 0 || +up.remindHoursBefore > 0) && (dChg || tChg || rHChg || statusChanged)) }; }
+  return { appointment: up, logs: logs, needsTriggerSync: Boolean(!(suppressSlotReset && !dChg && !tChg && !rHChg && up.status === STATUS.CONFIRMED) && (+cur.remindHoursBefore > 0 || +up.remindHoursBefore > 0) && (dChg || tChg || rHChg || statusChanged)) }; }
 function deleteApt_(id, user) {
   var d = getSheetData_(SH_APTS, APT_COLS), rows = d.rows, headers = d.headers, delIdx = headers.indexOf('deletedAt'), removed = null, now = getBkkNow_();
   for (var r = rows.length - 1; r >= 0; r--) { var rowId = String(rows[r][0]).trim(), isDel = delIdx !== -1 && Boolean(String(rows[r][delIdx] || '').trim());
@@ -353,7 +363,7 @@ function buildQueueFlex_(title, count, items, webAppUrl, mask, opts) { var v = (
   return wrapFlex_(title + ' (' + count + ' รายการ)', b); }
 function buildYearStatsFlex_(year, total, act, comp, canc, rate, sampleItems, webAppUrl) { var safeRate = Math.max(0, Math.min(100, Number(rate) || 0));
   var yRow = function (lbl, val, col) { return fBox('baseline', [fTxt(lbl, { size: 'sm', color: '#64748b', flex: 4 }), fTxt(val, { size: 'sm', weight: 'bold', color: col || '#1e293b', flex: 6 })], { spacing: 'sm' }); };
-  var b = fBubble('#eef2ff', [fTxt('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + ']', { weight: 'bold', color: '#4338ca', size: 'sm' }), fTxt('สรุปผลงานและการดำเนินงานตลอดทั้งปี', { size: 'xs', color: '#4f46e5', margin: 'xs' })], [fTxt('ภาพรวมผลงานประจำปี:', { weight: 'bold', size: 'sm', color: '#0f172a' }), fSep('#c7d2fe'), fBox('vertical', [yRow('งานทั้งหมด', total + ' งาน', '#0f172a'), yRow('นัดหมายแล้ว', act + ' งาน', '#0284c7'), yRow('สิ้นสุดการนัดหมาย', comp + ' งาน (สำเร็จ ' + safeRate + '%)', '#059669'), yRow('ยกเลิกการนัดหมาย', canc + ' งาน', '#dc2626')], { spacing: 'xs', margin: 'md' }), fBar(safeRate, '#10b981')], fLinkFt(webAppUrl, 'เปิดดูแดชบอร์ดรายปีบนเว็บแอป'));
+  var b = fBubble('#eef2ff', [fTxt('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + ']', { weight: 'bold', color: '#4338ca', size: 'sm' }), fTxt('สรุปผลงานและการดำเนินงานตลอดทั้งปี', { size: 'xs', color: '#4f46e5', margin: 'xs' })], [fTxt('ภาพรวมผลงานประจำปี:', { weight: 'bold', size: 'sm', color: '#0f172a' }), fSep('#c7d2fe'), fBox('vertical', [yRow('งานทั้งหมด', total + ' งาน', '#0f172a'), yRow('เริ่มนัด', act + ' งาน', '#0284c7'), yRow('สิ้นสุดการนัดหมาย', comp + ' งาน (สำเร็จ ' + safeRate + '%)', '#059669'), yRow('ยกเลิกการนัดหมาย', canc + ' งาน', '#dc2626')], { spacing: 'xs', margin: 'md' }), fBar(safeRate, '#10b981')], fLinkFt(webAppUrl, 'เปิดดูแดชบอร์ดรายปีบนเว็บแอป'));
   return wrapFlex_('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + '] รวม ' + total + ' งาน', b); }
 function getValidMapUri_(raw) { var s = sanitizeNoEmoji(raw || '').trim(); if (!s) return '';
   if (/^https?:\/\//i.test(s)) return s.indexOf(' ') !== -1 ? s.replace(/ /g, '%20') : s;

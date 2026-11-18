@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.6.5)
+ * tests.js - Automated Test Suite for Calendar System (v2.6.7)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -8,7 +8,7 @@
   const Logic = typeof require !== 'undefined' ? require('./logic.js') : window.CalendarLogic;
   const PatchNotes = typeof require !== 'undefined' ? require('./patchnotes.js') : window.PATCH_NOTES;
 
-  const results = [];
+  const results = [], asyncTests = [];
   let passedCount = 0, failedCount = 0;
   const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'Assertion failed'); };
   const assertEqual = (act, exp, msg) => { if (act !== exp) throw new Error(`${msg || 'assertEqual failed'}: expected [${exp}] but got [${act}]`); };
@@ -16,6 +16,12 @@
   function runTest(suite, name, fn) {
     try { fn(); passedCount++; results.push({ suite, name, ok: true }); }
     catch (err) { failedCount++; results.push({ suite, name, ok: false, error: err.message }); }
+  }
+  function runTestAsync(suite, name, fn) {
+    asyncTests.push(Promise.resolve().then(fn).then(
+      () => { passedCount++; results.push({ suite, name, ok: true }); },
+      err => { failedCount++; results.push({ suite, name, ok: false, error: err.message }); }
+    ));
   }
 
   // --- Suite 1: Zero-Emoji Detection & Sanitization ---
@@ -53,9 +59,9 @@
   });
 
   // --- Suite 3: Streamlined Status & Rescheduling ---
-  runTest('3. Status & Reschedule', 'สร้างนัดหมายเสร็จเป็นสถานะ นัดหมายแล้ว ทันที เตือนล่วงหน้า Default=0 และรองรับแผนที่/รูปภาพ', () => {
+  runTest('3. Status & Reschedule', 'สร้างนัดหมายเสร็จเป็นสถานะ เริ่มนัด ทันที เตือนล่วงหน้า Default=0 และรองรับแผนที่/รูปภาพ', () => {
     const valid = Logic.validateAppointmentInput({ title: 'นัดเซ็นสัญญาโครงการ', appointmentDate: '2026-11-20', appointmentTime: '10:00', location: 'สำนักงานใหญ่', contactPerson: 'คุณสมศักดิ์' });
-    assert(valid.valid && valid.sanitized.status === Logic.STATUS.CONFIRMED, 'กรอกข้อมูลครบต้องผ่านและเป็น นัดหมายแล้ว');
+    assert(valid.valid && valid.sanitized.status === Logic.STATUS.CONFIRMED && Logic.STATUS.CONFIRMED === 'เริ่มนัด', 'กรอกข้อมูลครบต้องผ่านและเป็น เริ่มนัด');
     assert(valid.sanitized.remindDaysBefore === 0 && valid.sanitized.remindHoursBefore === 0, 'ค่าเริ่มต้นแจ้งเตือนล่วงหน้าต้องเป็น 0 วัน 0 ชม.');
     const withMedia = Logic.validateAppointmentInput({ title: 'นัดตรวจหน้างาน', appointmentDate: '2026-11-21', appointmentTime: '14:00', location: 'ไซท์ A', contactPerson: 'คุณเอก', mapUrl: '13.7563, 100.5018', imageUrl: 'https://example.com/site.jpg' });
     assert(withMedia.valid && withMedia.sanitized.mapUrl === '13.7563, 100.5018' && withMedia.sanitized.imageUrl === 'https://example.com/site.jpg', 'mapUrl และ imageUrl ต้องถูกบันทึก');
@@ -63,14 +69,15 @@
     assert(!Logic.validateAppointmentInput({ title: 'นัดไม่ครบ', appointmentDate: '', appointmentTime: '10:00' }).valid, 'ไม่ระบุวันที่ต้องไม่ผ่าน');
   });
 
-  runTest('3. Status & Reschedule', 'แปลงสถานะเดิม (กำลังนัดหมายวันเวลา, พบหมายแล้ว) เป็น นัดหมายแล้ว อัตโนมัติ', () => {
-    assertEqual(Logic.normalizeStatus('กำลังนัดหมายวันเวลา'), Logic.STATUS.CONFIRMED, 'กำลังนัดหมายวันเวลา -> นัดหมายแล้ว');
-    assertEqual(Logic.normalizeStatus('พบหมายแล้ว'), Logic.STATUS.CONFIRMED, 'พบหมายแล้ว -> นัดหมายแล้ว');
+  runTest('3. Status & Reschedule', 'แปลงสถานะเดิม (นัดหมายแล้ว, กำลังนัดหมายวันเวลา, พบหมายแล้ว) เป็น เริ่มนัด อัตโนมัติ', () => {
+    assertEqual(Logic.normalizeStatus('นัดหมายแล้ว'), Logic.STATUS.CONFIRMED, 'นัดหมายแล้ว -> เริ่มนัด');
+    assertEqual(Logic.normalizeStatus('กำลังนัดหมายวันเวลา'), Logic.STATUS.CONFIRMED, 'กำลังนัดหมายวันเวลา -> เริ่มนัด');
+    assertEqual(Logic.normalizeStatus('พบหมายแล้ว'), Logic.STATUS.CONFIRMED, 'พบหมายแล้ว -> เริ่มนัด');
     assertEqual(Logic.normalizeStatus('สิ้นสุดการนัดหมาย'), Logic.STATUS.COMPLETED, 'สิ้นสุดการนัดหมาย คงเดิม');
     assertEqual(Logic.normalizeStatus('ยกเลิกการนัดหมาย'), Logic.STATUS.CANCELLED, 'ยกเลิกการนัดหมาย คงเดิม');
   });
 
-  runTest('3. Status & Reschedule', 'เลื่อนวัน/เวลา และการรีเซ็ต Slot แจ้งเตือน', () => {
+  runTest('3. Status & Reschedule', 'เลื่อนวัน/เวลา และการรีเซ็ต Slot แจ้งเตือน รวมถึง suppressSlotReset เมื่อไม่ได้ติ๊กแจ้งเตือน', () => {
     const apt = Logic.createAppointmentRecord({ title: 'ตรวจรับงานระบบ', appointmentDate: '2026-11-15', appointmentTime: '14:00', location: 'อาคาร A', contactPerson: 'คุณเอกชัย' }, [], '2026-11-10T09:00:00+07:00');
     apt.notifiedDayForSlot = '2026-11-15'; apt.notifiedHourForSlot = '2026-11-15T14:00';
 
@@ -86,7 +93,16 @@
     const resComp = Logic.updateAppointmentRecord(resB.record, { status: Logic.STATUS.COMPLETED }, { nowIso: '2026-11-20T17:00:00+07:00' });
     assertEqual(resComp.record.status, Logic.STATUS.COMPLETED, 'สถานะเป็น สิ้นสุดการนัดหมาย');
     const resReopened = Logic.updateAppointmentRecord(resComp.record, { status: Logic.STATUS.CONFIRMED }, { nowIso: '2026-11-20T17:30:00+07:00' });
-    assert(resReopened.record.status === Logic.STATUS.CONFIRMED && resReopened.reopened, 'คืนสถานะต้องกลับมาเป็น นัดหมายแล้ว พร้อม flag reopened');
+    assert(resReopened.record.status === Logic.STATUS.CONFIRMED && resReopened.reopened, 'คืนสถานะต้องกลับมาเป็น เริ่มนัด พร้อม flag reopened');
+
+    const aptDoneSlot = { ...resComp.record, remindDaysBefore: 1, remindHoursBefore: 1, notifiedDayForSlot: '2026-11-20', notifiedHourForSlot: '2026-11-20T16:00' };
+    const resSuppressed = Logic.updateAppointmentRecord(aptDoneSlot, { status: Logic.STATUS.CONFIRMED }, { nowIso: '2026-11-20T15:30:00+07:00', suppressSlotReset: true });
+    assertEqual(resSuppressed.record.notifiedDayForSlot, '2026-11-20', 'suppressSlotReset ต้องไม่ล้าง notifiedDayForSlot');
+    assertEqual(resSuppressed.record.notifiedHourForSlot, '2026-11-20T16:00', 'suppressSlotReset ต้องไม่ล้าง notifiedHourForSlot');
+
+    const aptDueFresh = Logic.createAppointmentRecord({ title: 'งานใกล้เวลานัด', appointmentDate: '2026-11-20', appointmentTime: '16:00', location: 'ห้อง 1', contactPerson: 'คุณ ก', status: Logic.STATUS.COMPLETED, remindHoursBefore: 1 }, [], '2026-11-10T09:00:00+07:00');
+    const resDueSuppressed = Logic.updateAppointmentRecord(aptDueFresh, { status: Logic.STATUS.CONFIRMED }, { nowIso: '2026-11-20T15:30:00+07:00', suppressSlotReset: true });
+    assertEqual(resDueSuppressed.record.notifiedHourForSlot, '2026-11-20T16:00', 'คืนสถานะโดยไม่ติ๊ก LINE ในช่วงใกล้เวลานัดต้องกัน Trigger แจ้งเตือนซ้ำ');
   });
 
   runTest('3. Status & Reschedule', 'การแก้ไข remindDaysBefore หรือ remindHoursBefore ต้องรีเซ็ต Slot แจ้งเตือน', () => {
@@ -167,9 +183,9 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.5 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 15, 'ต้องมีประวัติอย่างน้อย 15 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.6.7 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 17, 'ต้องมีประวัติอย่างน้อย 17 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5', '2.6.6', '2.6.7'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -283,15 +299,54 @@
       ['pendingIds', 'setBgSync', 'applySyncBundle', 'LIVE_CACHE', 'renderActiveTab', 'isStaffOnlyCalendar', 'openMapPreviewModal', 'openImagePreviewModal', 'compressImageFile', 'exportAppointmentsToCsv', 'printAppointmentsReport', 'buildCsvContent', 'initPwaAndWebPush', 'requestWebNotifyPermission', 'sendWebPushNotification', 'handleInstallPwaClick'].forEach(sym => assert(appJs.includes(sym), `app.js ต้องมี ${sym}`));
     });
 
-    runTest('15. PWA & Web Push Audit', 'ไฟล์ manifest.json, sw.js, icon.svg และเมตาแท็ก PWA ใน index.html ถูกต้องสมบูรณ์', () => {
-      const manifestRaw = readF('manifest.json'), swJs = readF('sw.js'), iconSvg = readF('icon.svg'), indexHtml = readF('index.html');
+    runTest('15. PWA & Web Push Audit', 'ไฟล์ manifest.json, sw.js, icon.svg, Web Push UI และกฎ Responsive มือถือถูกต้องสมบูรณ์', () => {
+      const manifestRaw = readF('manifest.json'), swJs = readF('sw.js'), iconSvg = readF('icon.svg'), indexHtml = readF('index.html'), styleCss = readF('style.css'), codeGs = readF('gas', 'Code.gs'), appJs = readF('app.js');
       const manifest = JSON.parse(manifestRaw);
       assertEqual(manifest.display, 'standalone', 'manifest.json ต้องตั้งค่า display เป็น standalone');
       assert(manifest.short_name && Array.isArray(manifest.icons) && manifest.icons.length >= 1, 'manifest.json ต้องมี short_name และ icons');
       new vm.Script(swJs, { filename: 'sw.js' });
-      ['push', 'notificationclick', 'showNotification', 'cal-pwa'].forEach(sym => assert(swJs.includes(sym), `sw.js ต้องมี ${sym}`));
+      ['push', 'notificationclick', 'showNotification', 'cal-pwa', 'showSwNotification'].forEach(sym => assert(swJs.includes(sym), `sw.js ต้องมี ${sym}`));
       assert(iconSvg.includes('<svg') && iconSvg.includes('</svg>'), 'icon.svg ต้องเป็น SVG ที่ถูกต้อง');
-      ['rel="manifest"', 'href="manifest.json"', 'icon.svg', 'theme-color'].forEach(tag => assert(indexHtml.includes(tag), `index.html ต้องมี ${tag}`));
+      ['rel="manifest"', 'href="manifest.json"', 'icon.svg', 'theme-color', 'id="webNotifModal"', 'id="webPushBannerContainer"', 'id="btnModalTestWebNotify"', 'id="btnModalReqWebNotify"', 'id="webNotifFeedList"'].forEach(tag => assert(indexHtml.includes(tag), `index.html ต้องมี ${tag}`));
+      ['notifyWebPushForApt', 'openWebNotifModal', 'showWebPushBanner', 'sendWebPushNotification'].forEach(fn => assert(appJs.includes(fn), `app.js ต้องมี ${fn}`));
+      const mobileCss = styleCss.substring(styleCss.indexOf('@media (max-width: 768px)'));
+      assert(mobileCss.includes('.agenda-scroll-list .apt-card-slim') && mobileCss.includes('.agenda-scroll-list .apt-date-block'), 'style.css ต้องมีกฎ .agenda-scroll-list บนจอมือถือ');
+      assert(codeGs.includes('suppressSlotReset') && codeGs.includes("CONFIRMED: 'เริ่มนัด'"), 'Code.gs ต้องมี suppressSlotReset และสถานะ เริ่มนัด');
+    });
+
+    runTestAsync('15. PWA & Web Push Audit', 'จำลองระบบแจ้งเตือน Web Push: SW fallback -> Notification, Banner ในแอป, Reminder และโควตา LINE เต็ม', async () => {
+      const appJs = readF('app.js'), bannerChildren = [], notifCalls = [], memStore = {};
+      const bannerBox = { children: bannerChildren, appendChild: el => bannerChildren.push(el) };
+      const elMap = { webPushBannerContainer: bannerBox, webNotifModal: { classList: { contains: () => false } } };
+      function MockNotification(t, o) { notifCalls.push({ t, o }); }
+      MockNotification.permission = 'granted';
+      const sandbox = {
+        Logic, ICO: { bell: '<svg></svg>' }, escapeHtml: s => String(s || ''),
+        txt: () => {}, disp: () => {}, openModal: () => {}, switchTab: () => {}, showToast: () => {}, pendingIds: new Set(),
+        STORAGE: { WEB_NOTIF: 'wn', WEB_NOTIF_SENT: 'wns', WEB_NOTIF_FEED: 'wnf' },
+        localStorage: { getItem: k => memStore[k] || null, setItem: (k, v) => { memStore[k] = String(v); } },
+        $: id => elMap[id] || null,
+        Notification: MockNotification, navigator: { serviceWorker: {} }, window: { focus: () => {}, navigator: {} }, setTimeout: (fn, ms) => (ms > 1000 ? 0 : setTimeout(fn, ms)),
+        document: { createElement: () => ({ className: '', style: {}, innerHTML: '', addEventListener: () => {}, remove: () => {} }) },
+        state: { currentUser: { displayName: 'คุณสมชาย' }, appointments: [], webNotif: { enabled: true, bgSync: true }, webNotifFeed: [], webNotifUnread: 0, meta: { CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '300', DAILY_DIGEST_HOUR: '8' }, swReg: { active: {}, showNotification: async () => { throw new Error('SW fail'); } } }
+      };
+      vm.createContext(sandbox);
+      const slice = appJs.substring(appJs.indexOf('const localMutAt ='), appJs.indexOf('function initPwaAndWebPush'));
+      vm.runInContext(slice + '; this.notifyWebPushForApt = notifyWebPushForApt; this.evaluateAndFireWebNotifications = evaluateAndFireWebNotifications; this.state = state;', sandbox);
+      await sandbox.notifyWebPushForApt({ id: 'APT-001', title: 'ทดสอบประชุม', appointmentDate: '2026-11-20', appointmentTime: '10:00', location: 'ห้อง A', contactPerson: 'คุณ ก' }, 'CREATE');
+      assertEqual(notifCalls.length, 1, 'ต้อง fallback มาเรียก new Notification เมื่อ SW showNotification ผิดพลาด');
+      assert(notifCalls[0].t.includes('[แจ้งเตือนนัดหมายใหม่]') && notifCalls[0].o.body.includes('โควตา LINE เต็ม'), 'ต้องมีข้อความแจ้งเตือนครบและระบุกรณีโควตา LINE เต็ม');
+      assertEqual(sandbox.state.webNotifFeed.length, 1, 'ต้องบันทึกประวัติลง webNotifFeed');
+      assertEqual(bannerChildren.length, 1, 'ต้องแสดงการ์ดแจ้งเตือน In-App Banner');
+      assert(!Logic.hasEmoji(JSON.stringify(sandbox.state.webNotifFeed)), 'ประวัติการแจ้งเตือนต้องไม่มีอิโมจิ');
+
+      // ทดสอบกรณี Sync Diff (เพื่อนร่วมทีมสร้าง/จบงาน) และสิทธิ์ Notification เป็น default (ยังคงแจ้งเตือนในแอป)
+      MockNotification.permission = 'default';
+      sandbox.state.appointments = [{ id: 'APT-002', title: 'งานจากทีม', appointmentDate: '2026-11-21', appointmentTime: '11:00', location: 'ห้อง B', contactPerson: 'คุณ ข', status: Logic.STATUS.COMPLETED, updatedAt: '2026-11-18T09:10:00+07:00' }];
+      sandbox.evaluateAndFireWebNotifications([{ id: 'APT-001' }], true);
+      await new Promise(r => setTimeout(r, 15));
+      assertEqual(sandbox.state.webNotifFeed.length, 2, 'Sync Diff ต้องแจ้งเตือนในแอปได้แม้สิทธิ์ OS Push ยังเป็น default และโควตา LINE หมด');
+      assert(sandbox.state.webNotifFeed[0].title.includes('[แจ้งเตือนนัดหมายใหม่]'), 'รายการ Sync ใหม่ต้องแจ้งเตือนหัวข้อถูกต้อง');
     });
 
     runTest('13. GAS Guard Audit', 'LINE Flex Message และ Postback Action ทำงานถูกต้องและปราศจากอิโมจิ', () => {
@@ -409,8 +464,10 @@
       if (l) l.innerHTML = results.map(r => `<li class="${r.ok ? 'pass' : 'fail'}">[${r.ok ? 'PASS' : 'FAIL'}] ${r.suite} -> ${r.name}${r.error ? ' - ' + r.error : ''}</li>`).join('');
     });
   } else {
-    results.forEach(r => console.log(`[${r.ok ? 'PASS' : 'FAIL'}] ${r.suite} -> ${r.name}${r.error ? ' : ' + r.error : ''}`));
-    console.log(`\nTest Summary: ${passedCount} passed, ${failedCount} failed.`);
-    if (failedCount > 0) process.exit(1);
+    Promise.all(asyncTests).then(() => {
+      results.forEach(r => console.log(`[${r.ok ? 'PASS' : 'FAIL'}] ${r.suite} -> ${r.name}${r.error ? ' : ' + r.error : ''}`));
+      console.log(`\nTest Summary: ${passedCount} passed, ${failedCount} failed.`);
+      if (failedCount > 0) process.exit(1);
+    });
   }
 })();

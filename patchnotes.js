@@ -7,6 +7,26 @@
 
   const PATCH_NOTES = [
     {
+      version: '2.6.7',
+      date: '18/11/2569',
+      title: 'Unified Web Push & In-App Notification Engine (Full LINE Parity + Quota-Exhausted Fallback)',
+      changes: [
+        'แจ้งเตือนทุกเหตุการณ์เทียบเท่า LINE 100% (notifyWebPushForApt): ส่งการแจ้งเตือนผ่านเว็บและอุปกรณ์ทันทีเมื่อสร้างนัดหมายใหม่, แก้ไข/เลื่อนนัด, กดเสร็จสิ้น, ยกเลิกนัด, คืนสถานะนัด, ลบนัดหมาย และเมื่อถึงเวลาเตือนล่วงหน้า (ทำงานควบคู่กับ LINE เมื่อมีโควตา และแจ้งเตือนต่อผ่านแอปอัตโนมัติแม้โควตา LINE เต็ม)',
+        'ศูนย์การแจ้งเตือนเว็บแอปและแบนเนอร์ลอยมุมขวาบน (#webNotifModal, #webPushBannerContainer): รองรับทั้งสิทธิ์ STAFF และ ADMIN กดกระดิ่งเพื่อดูประวัติการแจ้งเตือน 40 รายการล่าสุด, ขออนุญาต OS Push, หรือทดสอบเด้งแจ้งเตือนได้ทันทีโดยไม่ต้องสลับหน้า',
+        'แก้ไขบั๊กการส่ง OS Push & Service Worker Fallback (app.js, sw.js): แยก try/catch ระหว่าง reg.showNotification, new Notification และ postMessage รวมถึงใช้ navigator.serviceWorker.ready เพื่อไม่ให้ข้อความแจ้งเตือนตกหล่นหรือเงียบหาย พร้อมลดรอบซิงก์เบื้องหลังเหลือทุก 60 วินาที'
+      ]
+    },
+    {
+      version: '2.6.6',
+      date: '17/11/2569',
+      title: 'Status Rename ("เริ่มนัด"), Strict LINE Notification Guard on Status Edits & Mobile Agenda Card Layout Fix',
+      changes: [
+        'เปลี่ยนชื่อสถานะเริ่มต้นจาก "นัดหมายแล้ว" เป็น "เริ่มนัด" (STATUS.CONFIRMED) ครบทั้งระบบ (logic.js, gas/Code.gs, index.html, app.js) พร้อมแปลงข้อมูลเก่าที่เป็น "นัดหมายแล้ว" ให้แสดงเป็น "เริ่มนัด" อัตโนมัติ 100%',
+        'แก้ไขปัญหาบอท LINE แอบแจ้งเตือนเมื่อแก้ไขสถานะโดยไม่ได้ติ๊กแจ้งเตือน (app.js, gas/Code.gs, logic.js): ตั้งค่าเริ่มต้น NOTIFY_ON_STATUS_CHANGE เป็น FALSE, ยกเลิกการบังคับส่งแจ้งเตือนในปุ่ม "คืนสถานะนัด" และหน้าต่างยกเลิกนัด, และเพิ่มกลไก suppressSlotReset ไม่ให้รีเซ็ต Slot หรือปลุก Trigger เบื้องหลังเมื่อผู้ใช้ไม่ได้ติ๊กส่ง LINE',
+        'แก้ไขปัญหาตัวอักษรเวลาทับซ้อนบนหน้าจอมือถือ (style.css): แก้ไข CSS Specificity Collision ระหว่าง .agenda-scroll-list .apt-card-slim กับ @media (max-width: 768px) ให้การ์ดในหน้าปฏิทินเดือนบนมือถือเรียงเป็น 1 คอลัมน์เต็มความกว้าง พร้อมป้องกันการตัดคำแนวตั้งและล้นกรอบใน .apt-date-block'
+      ]
+    },
+    {
       version: '2.6.5',
       date: '17/11/2569',
       title: 'Progressive Web App (PWA) Standalone Installability & Hybrid Web Push / Browser Notification Engine',

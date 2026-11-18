@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'cal-pwa-v2.6.5';
+const CACHE_NAME = 'cal-pwa-v2.6.7';
 const ASSETS = [
   './',
   './index.html',
@@ -52,6 +52,22 @@ self.addEventListener('fetch', event => {
   );
 });
 
+function showSwNotification(title, opts) {
+  const safeTitle = cleanText(title) || 'แจ้งเตือนนัดคิวทำงาน';
+  const safeOpts = Object.assign({
+    body: '',
+    icon: './icon.svg',
+    badge: './icon.svg',
+    vibrate: [180, 80, 180],
+    requireInteraction: false,
+    renotify: true
+  }, opts || {});
+  if (safeOpts.body) safeOpts.body = cleanText(safeOpts.body);
+  return self.registration.showNotification(safeTitle, safeOpts).catch(() =>
+    self.registration.showNotification(safeTitle, { body: safeOpts.body || '', tag: safeOpts.tag, data: safeOpts.data })
+  );
+}
+
 self.addEventListener('push', event => {
   let payload = { title: 'แจ้งเตือนนัดคิวทำงาน', body: 'มีรายการนัดหมายที่ต้องติดตาม', aptId: '', url: './index.html' };
   if (event.data) {
@@ -62,16 +78,11 @@ self.addEventListener('push', event => {
       payload.body = event.data.text() || payload.body;
     }
   }
-  const title = cleanText(payload.title) || 'แจ้งเตือนนัดคิวทำงาน';
-  const options = {
-    body: cleanText(payload.body),
-    icon: './icon.svg',
-    badge: './icon.svg',
+  event.waitUntil(showSwNotification(payload.title, {
+    body: payload.body,
     tag: payload.tag || ('cal-push-' + (payload.aptId || Date.now())),
-    renotify: true,
     data: { url: payload.url || './index.html', aptId: payload.aptId || '' }
-  };
-  event.waitUntil(self.registration.showNotification(title, options));
+  }));
 });
 
 self.addEventListener('message', event => {
@@ -80,14 +91,7 @@ self.addEventListener('message', event => {
   if (msg.type === 'SKIP_WAITING') {
     self.skipWaiting();
   } else if (msg.type === 'SHOW_NOTIFICATION') {
-    const title = cleanText(msg.title) || 'แจ้งเตือนนัดคิวทำงาน';
-    const opts = Object.assign({
-      icon: './icon.svg',
-      badge: './icon.svg',
-      renotify: true
-    }, msg.options || {});
-    if (opts.body) opts.body = cleanText(opts.body);
-    event.waitUntil(self.registration.showNotification(title, opts));
+    event.waitUntil(showSwNotification(msg.title, msg.options));
   }
 });
 

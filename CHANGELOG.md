@@ -4,6 +4,34 @@
 
 ---
 
+## เวอร์ชัน 2.6.7 (18 พฤศจิกายน 2569) - Unified Web Push & In-App Notification Center (LINE Parity & Quota Fallback)
+> **จุดเด่น:** แก้ไขปัญหาการแจ้งเตือนฝั่ง Web Push (PWA) ให้แสดงผลครบทุกเหตุการณ์เหมือน LINE (ทั้งตอนโควตา LINE ยังอยู่และทำงานต่อผ่านแอปทันทีเมื่อโควตา LINE เต็ม) พร้อมศูนย์แจ้งเตือนและแบนเนอร์โต้ตอบได้ทั้ง `ADMIN` และ `STAFF`
+
+### 1. ระบบแจ้งเตือน Web Push ครบทุกเหตุการณ์ (Full LINE Notification Parity)
+- **แจ้งเตือนทุก Action ทันที (`notifyWebPushForApt`):** รองรับการแจ้งเตือนเมื่อสร้างนัดใหม่, แก้ไข/เลื่อน, กดเสร็จสิ้น, ยกเลิกนัด, คืนสถานะ และลบนัดหมาย รวมถึงแจ้งเตือนเมื่อสมาชิกในทีมอัปเดตรายการในรอบซิงก์ทุก 60 วินาที
+- **โควตา LINE หมดยังแจ้งเตือนต่อในแอป:** หากโควตา LINE เต็มหรือไม่ได้ติ๊กส่งเข้า LINE ระบบ Web Push และแบนเนอร์ในแอปยังแจ้งเตือนต่อเนื่องพร้อมระบุ `(แจ้งเตือนผ่านแอป - โควตา LINE เต็ม)`
+
+### 2. ศูนย์การแจ้งเตือน & แก้ไขบั๊ก Service Worker Fallback (`index.html`, `style.css`, `app.js`, `sw.js`)
+- **แบนเนอร์แจ้งเตือนลอย (#webPushBannerContainer) & ศูนย์แจ้งเตือน (#webNotifModal):** กดปุ่มกระดิ่งบน Header ได้ทั้ง `ADMIN` และ `STAFF` เพื่อดูประวัติการแจ้งเตือน, ขออนุญาต OS Push, และทดสอบแจ้งเตือนได้ทันที
+- **แยก try/catch ระดับ Delivery Chain:** ป้องกันไม่ให้ `reg.showNotification` ล้มเหลวแล้วกลืน Fallback ของ `new Notification` และ `reg.active.postMessage` พร้อมเพิ่ม `vibrate` และ fallback option ใน `sw.js`
+
+---
+
+## เวอร์ชัน 2.6.6 (17 พฤศจิกายน 2569) - Status Rename ("เริ่มนัด"), Strict LINE Notification Guard & Mobile Card Fix
+> **จุดเด่น:** เปลี่ยนชื่อสถานะ `"นัดหมายแล้ว"` เป็น `"เริ่มนัด"` พร้อมรองรับข้อมูลเก่าอัตโนมัติ, ปิดจุดรั่วไหลการแจ้งเตือน LINE เมื่อแก้ไขสถานะโดยไม่ได้ติ๊กแจ้งเตือน และแก้ไขปัญหาตัวอักษรทับกันบนหน้าจอมือถือ
+
+### 1. เปลี่ยนชื่อสถานะเป็น "เริ่มนัด" (`logic.js`, `gas/Code.gs`, `index.html`, `app.js`)
+- เปลี่ยน `STATUS.CONFIRMED` เป็น `'เริ่มนัด'` ในทุกหน้าจอ ตัวกรอง และรายงานสรุป โดยข้อมูลเก่าใน Google Sheets ที่บันทึกเป็น `'นัดหมายแล้ว'` จะถูกแปลงเป็น `'เริ่มนัด'` อัตโนมัติผ่าน `normalizeStatus`
+
+### 2. ปิดจุดรั่วไหลการแจ้งเตือน LINE เมื่อไม่ได้ติ๊กแจ้งเตือน (`app.js`, `gas/Code.gs`, `logic.js`)
+- ตั้งค่าเริ่มต้น `NOTIFY_ON_STATUS_CHANGE` เป็น `'FALSE'` และปรับปุ่ม `"คืนสถานะนัด"` (`handleQuickReopen`) กับหน้าต่างยกเลิก (`openCancelModal`) ให้ไม่บังคับส่ง LINE โดยอัตโนมัติ
+- เพิ่มตัวแปร `suppressSlotReset` ใน `updateApt_` และ `updateAppointmentRecord` เพื่อไม่ให้ล้างค่า `notifiedDayForSlot` / `notifiedHourForSlot` หรือปลุก Trigger เมื่อแก้ไข/เปลี่ยนสถานะโดยไม่ได้ติ๊กส่งแจ้งเตือน LINE
+
+### 3. แก้ไขตัวอักษรซ้อนทับกันบนหน้าจอมือถือ (`style.css`)
+- แก้ไข CSS Specificity ภายใน `@media (max-width: 768px)` โดยเพิ่ม `.agenda-scroll-list .apt-card-slim` และ `.agenda-scroll-list .apt-date-block` ให้การ์ดนัดหมายบนปฏิทินมือถือเรียงเป็น 1 คอลัมน์เต็มความกว้าง และป้องกันป้ายเวลา/ระยะเวลาไม่ให้ล้นหรือถูกบีบตกบรรทัด
+
+---
+
 ## เวอร์ชัน 2.6.5 (17 พฤศจิกายน 2569) - Progressive Web App (PWA) & Web Push Notification Engine
 > **จุดเด่น:** ยกระดับเว็บแอปให้ติดตั้งลงเครื่องได้จริงแบบ Standalone (PWA) พร้อม Service Worker แคชออฟไลน์ และระบบขออนุญาตแจ้งเตือนผ่านเว็บเบราว์เซอร์ (Web Push / Browser Notification) โดยไม่เสียโควตา LINE
 
