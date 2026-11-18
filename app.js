@@ -10,7 +10,7 @@
   const sGet = (k, fb = null) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (_) { return fb; } };
   const sSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (_) {} }, sDel = k => { try { localStorage.removeItem(k); } catch (_) {} };
   const STORAGE = { APTS: 'CAL_DEMO_APTS_V2', LOGS: 'CAL_DEMO_LOGS_V2', CFG: 'CAL_CONN_CFG_V2', THEME: 'CAL_THEME_V2', AUTH_USER: 'CAL_AUTH_USER_V2', USERS: 'CAL_DEMO_USERS_V2', LIVE_CACHE: 'CAL_LIVE_CACHE_V2', WEB_NOTIF: 'CAL_WEB_NOTIF_CFG_V2', WEB_NOTIF_SENT: 'CAL_WEB_NOTIF_SENT_V2', WEB_NOTIF_FEED: 'CAL_WEB_NOTIF_FEED_V2' };
-  const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbyNCnQTj5goMgIru7OgSVj625AiVDptWPQnYAvYxKj_1r0BzgfLPLES9T51ph3DSYbS/exec', DEFAULT_PASSCODE = 'CALL1234';
+  const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbwV6eELAM3SjyYI2dxUA2tY879qNfI_7ucl2qeXo5yNEw41YAKAYR5h_KXPX8YBtmQg/exec', DEFAULT_PASSCODE = 'CALL1234';
   const FIELD_LABELS = { appointmentDate: 'วันที่นัดหมาย', appointmentTime: 'เวลานัดหมาย', location: 'สถานที่', contactPerson: 'ผู้นัดพบ', status: 'สถานะ', DELETED: 'ลบนัดหมาย' };
   const MODAL_IDS = ['appointmentModal', 'cancelModal', 'userModal', 'guideModal', 'patchNotesModal', 'mapPreviewModal', 'imagePreviewModal', 'webNotifModal'];
   const mkI = (s, b, ex = '') => `<svg viewBox="0 0 24 24" width="${s}" height="${s}"${ex}>${b}</svg>`;
