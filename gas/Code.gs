@@ -8,7 +8,7 @@ var STATUS = { CONFIRMED: 'เริ่มนัด', COMPLETED: 'สิ้น�
 var TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'], TH_MONTHS_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 var EMOJI_EXT_RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
 var EMOJI_MOD_RE = /[\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/gu, FAST_SAFE_RE = /^[\x00-\x7F\u0E00-\u0E7F]*$/;
-var Q_KEYS = 'ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ', WEBHOOK_CMD_RE = new RegExp('^คิว(?:\\s+|' + Q_KEYS + '|$)|^(?:' + Q_KEYS + '|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+)$', 'i');
+var Q_KEYS = 'ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ', C_KW = '(?:สร้างนัด|เพิ่มนัด|นัดใหม่)', WEBHOOK_CMD_RE = new RegExp('^คิว(?:\\s+|' + Q_KEYS + '|' + C_KW + '|$)|^(?:' + Q_KEYS + '|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+|' + C_KW + '(?:\\s+[\\s\\S]+)?)$', 'i');
 function sanitizeNoEmoji(s) { if (s == null) return ''; var str = String(s); return (FAST_SAFE_RE.test(str) ? str : str.replace(EMOJI_EXT_RE, '').replace(EMOJI_MOD_RE, '')).replace(/[ \t]{2,}/g, ' ').trim(); }
 function normalizeStatus_(st) { if (st === S_CF || st === S_CP || st === S_CN) return st; var s = _sn(st || S_CF); return (s === S_CP || s === S_CN) ? s : S_CF; }
 function cmpSlot_(x, y) { var xd = x.appointmentDate || '', yd = y.appointmentDate || '';
@@ -265,7 +265,7 @@ function buildNoticeFlex_(id, title, desc, curStatus, actor, reason) { var rows 
 function buildQuotaFlex_(used, limit, webAppUrl) { var uUsed = Math.max(0, Number(used) || 0), uLim = Math.max(1, Number(limit) || 300), rem = Math.max(0, uLim - uUsed), pct = Math.min(100, Math.round((uUsed / uLim) * 100));
   var t = pct >= 90 ? { bg: '#fef2f2', hc: '#991b1b', sc: '#dc2626', bc: '#ef4444', sep: '#fecaca', st: '[วิกฤต - ใกล้เต็มโควตา]' } : (pct >= 80 ? { bg: '#fffbeb', hc: '#92400e', sc: '#d97706', bc: '#f59e0b', sep: '#fde68a', st: '[เฝ้าระวัง - ใช้ไปเกิน 80%]' } : { bg: '#ecfdf5', hc: '#065f46', sc: '#047857', bc: '#10b981', sep: '#a7f3d0', st: '[สถานะปกติ - พร้อมใช้งาน]' });
   return wrapFlex_('[โควตา LINE] ใช้ไปแล้ว ' + uUsed + '/' + uLim + ' (' + pct + '%)', fBubble(t.bg, [fTxt('[สถานะโควตาข้อความ LINE]', { weight: 'bold', color: t.hc, size: 'sm' }), fTxt('โควตาการส่งข้อความแจ้งเตือนประจำเดือน', { size: 'xs', color: t.sc, margin: 'xs' })], [fTxt('อัตราการใช้งาน: ' + pct + '%', { weight: 'bold', size: 'md', color: '#0f172a' }), fBar(pct, t.bc), fSep(t.sep, 'md'), fBox('vertical', [fRow('ใช้ไปแล้ว', uUsed + ' / ' + uLim + ' ข้อความ (' + pct + '%)', true, '#0f172a'), fRow('คงเหลือ', rem + ' ข้อความ', true, t.sc), fRow('ระดับเตือน', t.st, true, t.sc)], { spacing: 'xs', margin: 'md' })], fLinkFt(webAppUrl, 'เปิดหน้าตั้งค่าและตารางงาน'))); }
-function buildHelpFlex_(webAppUrl) { var cmds = [['วันนี้', 'ดูนัดหมายเฉพาะวันนี้'], ['พรุ่งนี้', 'ดูนัดหมายวันพรุ่งนี้'], ['สัปดาห์นี้', 'ดูนัดหมาย 7 วันข้างหน้า'], ['ค้างอยู่', 'ดูนัดหมายที่เลยกำหนดเวลา'], ['ทั้งหมด', 'ดูนัดหมายรอพบทั้งหมด'], ['เดือนนี้', 'ดูรายการงานประจำเดือนนี้'], ['ปีนี้', 'สรุปผลงานและสถิติประจำปี'], ['โควตา', 'เช็คโควตาข้อความ LINE'], ['ค้นหา <คำ>', 'ค้นหาจากชื่อ งาน หรือสถานที่']];
+function buildHelpFlex_(webAppUrl) { var cmds = [['วันนี้', 'ดูนัดหมายเฉพาะวันนี้'], ['พรุ่งนี้', 'ดูนัดหมายวันพรุ่งนี้'], ['สัปดาห์นี้', 'ดูนัดหมาย 7 วันข้างหน้า'], ['ค้างอยู่', 'ดูนัดหมายที่เลยกำหนดเวลา'], ['ทั้งหมด', 'ดูนัดหมายรอพบทั้งหมด'], ['เดือนนี้', 'ดูรายการงานประจำเดือนนี้'], ['ปีนี้', 'สรุปผลงานและสถิติประจำปี'], ['โควตา', 'เช็คโควตาข้อความ LINE'], ['ค้นหา <คำ>', 'ค้นหาจากชื่อ งาน หรือสถานที่'], ['สร้างนัด ...', 'เช่น สร้างนัด พรุ่งนี้ 10:30 / ประชุม / ห้อง B / คุณสมชาย']];
   var rows = cmds.map(function (c) { return fBox('horizontal', [fTxt(c[0], { weight: 'bold', color: '#4f46e5', size: 'sm', flex: 4 }), fTxt(c[1], { color: '#64748b', size: 'sm', flex: 6, wrap: true })], { spacing: 'sm', margin: 'xs' }); });
   var qBtn = function (lbl, col) { return fBtn('primary', { type: 'message', label: lbl, text: lbl }, col || '#4f46e5'); }, ftItems = [fBox('horizontal', [qBtn('วันนี้', '#4f46e5'), qBtn('พรุ่งนี้', '#4f46e5')], { spacing: 'sm' }), fBox('horizontal', [qBtn('ค้างอยู่', '#dc2626'), qBtn('ทั้งหมด', '#0284c7')], { spacing: 'sm' }), fBox('horizontal', [qBtn('ปีนี้', '#059669'), qBtn('โควตา', '#334155')], { spacing: 'sm' })];
   if (webAppUrl) ftItems.push(fBtn('link', { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }));
@@ -333,6 +333,50 @@ function handleLinePostback_(ev, gid, uid) { var pbData = parseQueryString_((ev 
     if (action === 'quickCancel') { var cancelReason = 'ยกเลิกผ่าน LINE โดย ' + actingUser;
       updateApt_(id, { status: S_CN, statusChangedBy: actingUser, statusReason: cancelReason, updatedBy: actingUser }, targetApt.updatedAt, cancelReason, actingUser);
       return buildStatusResultFlex_(targetApt, 'CANCELLED', actingUser, cancelReason, _gb().timeStr); } return null; }); }
+function parseSmartCreateGas_(arg, now) {
+  var cm = arg.match(/^(?:สร้างนัด|เพิ่มนัด|นัดใหม่)(?:\s+([\s\S]+))?$/i); if (!cm) return null;
+  var body = (cm[1] || '').trim(); if (!body) return { help: true };
+  var pDt = function (r) { var s = _sn(r); if (!s) return null; if (s === 'วันนี้') return now.dateStr; if (s === 'พรุ่งนี้') return _gb(now.epochMs + 86400000).dateStr;
+    if (s === 'มะรืน' || s === 'มะรืนนี้') return _gb(now.epochMs + 172800000).dateStr;
+    var y = 0, mo = 0, dy = 0, dm = s.match(/^(\d{1,2})[-/](\d{1,2})$/), m1 = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/), m2 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+    if (dm) { y = now.year; mo = +dm[2]; dy = +dm[1]; } else if (m1) { y = +m1[1]; mo = +m1[2]; dy = +m1[3]; } else if (m2) { dy = +m2[1]; mo = +m2[2]; y = +m2[3]; } else return null;
+    if (y > 2400) y -= 543; var mx = (mo >= 1 && mo <= 12) ? new Date(Date.UTC(y, mo, 0)).getUTCDate() : 0;
+    return (!y || y < 1900 || y > 3000 || !mx || dy < 1 || dy > mx) ? null : (y + '-' + pad2_(mo) + '-' + pad2_(dy)); };
+  var pTm = function (r) { var m = String(r || '').trim().replace(/\s*น\.?$/, '').replace(/\./g, ':').match(/^(\d{1,2}):(\d{2})$/);
+    return (!m || +m[1] > 23 || +m[2] > 59) ? null : (pad2_(m[1]) + ':' + pad2_(m[2])); };
+  var pRem = function (s) { var dm = s.match(/(\d+)\s*(?:วัน|ว\.?|d)/i), hm = s.match(/(\d+)\s*(?:ชั่วโมง|ชม\.?|h)/i); return { d: dm ? +dm[1] : 0, h: hm ? +hm[1] : 0 }; };
+  var title = '', dateRaw = '', timeRaw = '', loc = '', contact = '', notes = '', mapUrl = '', rD = 0, rH = 0;
+  var kvRe = /^(หัวข้อ|งาน|เรื่อง|วันที่|วันนัด|วัน|วันเวลา|เวลา|เวลานัด|สถานที่|ที่นัดหมาย|ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ|เตือน|แจ้งเตือน|หมายเหตุ|รายละเอียด|แผนที่|พิกัด)\s*[:：]\s*(.+)$/i;
+  var lines = body.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean);
+  if (lines.length > 1 && lines.some(function (l) { return kvRe.test(l); })) {
+    lines.forEach(function (l) { var m = l.match(kvRe); if (!m) return; var k = m[1], v = m[2].trim();
+      if (/^(?:หัวข้อ|งาน|เรื่อง)$/.test(k)) title = v; else if (/^(?:วันที่|วันนัด|วัน)$/.test(k)) dateRaw = v; else if (k === 'วันเวลา') { var p = v.split(/\s+/); dateRaw = p[0] || ''; timeRaw = p[1] || ''; }
+      else if (/^(?:เวลา|เวลานัด)$/.test(k)) timeRaw = v; else if (/^(?:สถานที่|ที่นัดหมาย)$/.test(k)) loc = v; else if (/^(?:ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ)$/.test(k)) contact = v;
+      else if (/^(?:เตือน|แจ้งเตือน)$/.test(k)) { var r = pRem(v); rD = r.d; rH = r.h; } else if (/^(?:หมายเหตุ|รายละเอียด)$/.test(k)) notes = v; else if (/^(?:แผนที่|พิกัด)$/.test(k)) mapUrl = v; });
+    if (dateRaw && !timeRaw && /\s/.test(dateRaw)) { var ps = dateRaw.split(/\s+/); dateRaw = ps[0]; timeRaw = ps[1] || ''; }
+  } else { var segs = body.replace(/\r?\n/g, ' ').split(/\s*[\/|]\s*/).map(function (x) { return x.trim(); }).filter(Boolean);
+    var dtTmRe = /^(วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|\d{1,4}[-/]\d{1,2}(?:[-/]\d{2,4})?)\s+(\d{1,2}[:.]\d{2}(?:\s*น\.?)?)(?:\s+([\s\S]+))?$/i;
+    var m0 = segs[0] && segs[0].match(dtTmRe), m1 = !m0 && segs[1] && segs[1].match(dtTmRe), extraIdx = 4;
+    if (m0) { dateRaw = m0[1]; timeRaw = m0[2]; var r0 = (m0[3] || '').trim();
+      if (segs.length === 1) { title = r0; extraIdx = 1; } else { title = r0 ? (r0 + ' ' + segs[1]) : segs[1]; loc = segs[2] || ''; contact = segs[3] || ''; }
+    } else if (m1) { title = segs[0] || ''; dateRaw = m1[1]; timeRaw = m1[2]; loc = segs[2] || ''; contact = segs[3] || ''; }
+    var nList = []; segs.slice(extraIdx).forEach(function (s) { if (/^(?:เตือน|แจ้งเตือน)\s+/i.test(s)) { var r = pRem(s); rD = r.d; rH = r.h; } else nList.push(s); });
+    if (segs.length === 3 && m0 && /^(?:เตือน|แจ้งเตือน)\s+/i.test(loc)) { var r3 = pRem(loc); rD = r3.d; rH = r3.h; loc = ''; }
+    notes = nList.join(' / '); }
+  var aDate = pDt(dateRaw), aTime = pTm(timeRaw), cTitle = _sn(title);
+  if (!aDate || !aTime || !cTitle) return { error: 'รูปแบบไม่ครบ (ต้องมี วันที่ เวลา และหัวข้อ) เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมตรวจรับงาน / ห้อง B / คุณสมชาย' };
+  return { payload: { title: cTitle, appointmentDate: aDate, appointmentTime: aTime, location: _sn(loc) || 'ไม่ระบุสถานที่', contactPerson: _sn(contact), status: S_CF, remindDaysBefore: rD, remindHoursBefore: rH, notes: _sn(notes), mapUrl: _sn(mapUrl) } }; }
+function handleWebhookCreateApt_(arg, gid, uid, webAppUrl, mask) { var now = _gb(), parsed = parseSmartCreateGas_(arg, now); if (!parsed) return null;
+  if (parsed.help) return buildNoticeFlex_('-', 'วิธีพิมพ์สร้างนัดหมายในแชท', 'พิมพ์บรรทัดเดียวคั่นด้วย / เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมงาน / ห้อง B / คุณสมชาย\n(รองรับ วันนี้, พรุ่งนี้, มะรืน หรือ วว/ดด/ปปปป)', '', '', '');
+  if (parsed.error) return buildNoticeFlex_('-', 'รูปแบบการสร้างนัดไม่ถูกต้อง', parsed.error, '', '', '');
+  var actingUser = getLineUserName_(gid, uid, getProp_('LINE_CHANNEL_ACCESS_TOKEN')); parsed.payload.createdBy = actingUser;
+  if (!parsed.payload.contactPerson) parsed.payload.contactPerson = actingUser;
+  return withLock_(function () {
+    var conflicts = readAllApts_(false).filter(function (a) { return a.status !== S_CN && a.appointmentDate === parsed.payload.appointmentDate && a.appointmentTime === parsed.payload.appointmentTime; });
+    var apt = createApt_(parsed.payload); if (+apt.remindHoursBefore > 0) scheduleExactReminderForApt_(apt);
+    if (conflicts.length) { var cTtl = conflicts.map(function (c) { return c.title; }).join(', ');
+      return wrapFlex_('[แจ้งเตือนนัดหมายใหม่] [' + apt.id + '] ' + _sn(apt.title), buildAptBubble_(apt, { isUpdate: false, maskContact: mask, webAppUrl: webAppUrl, quotaWarnText: '[คำเตือนคิวชน] เวลานี้มีนัดหมายอื่นแล้ว ' + conflicts.length + ' งาน (' + cTtl + ')' })); }
+    return buildAptFlexMsg_(apt, false, mask, webAppUrl); }); }
 function handleLineWebhook_(body, qParams) { var expKey = getProp_('WEBHOOK_SECRET_KEY'); if (expKey && String(qParams.webhookKey || '') !== expKey) return jErr_('INVALID_KEY');
   var cache = CacheService.getScriptCache(), grps = getProp_('ALLOWED_GROUP_IDS').split(',').map(function (s) { return s.trim(); }).filter(Boolean), usrs = getProp_('ALLOWED_USER_IDS').split(',').map(function (s) { return s.trim(); }).filter(Boolean);
   (body.events || []).forEach(function (ev) { if (ev.webhookEventId && cache.get('WH_' + ev.webhookEventId)) return; if (ev.webhookEventId) cache.put('WH_' + ev.webhookEventId, '1', 600);
@@ -340,13 +384,14 @@ function handleLineWebhook_(body, qParams) { var expKey = getProp_('WEBHOOK_SECR
     if (ev.type === 'join') { appendPlainRow_(ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS), ['NLOG-' + Date.now(), _gb().isoStr, 'JOIN', '-', gid || uid, '200', '-', 'พบ ID สำหรับตั้งค่า: ' + (gid || uid)]); return; }
     if (grps.length && grps.indexOf(gid) === -1 && (!usrs.length || usrs.indexOf(uid) === -1)) return;
     if (ev.type === 'postback') { var pb = handleLinePostback_(ev, gid, uid); if (pb && ev.replyToken) sendLineReply_(ev.replyToken, pb); return; }
-    if (ev.type === 'message' && ev.message && ev.message.type === 'text') { var reply = parseWebhookCmd_(ev.message.text); if (reply && ev.replyToken) sendLineReply_(ev.replyToken, reply); } });
+    if (ev.type === 'message' && ev.message && ev.message.type === 'text') { var reply = parseWebhookCmd_(ev.message.text, gid, uid); if (reply && ev.replyToken) sendLineReply_(ev.replyToken, reply); } });
   return json_({ ok: true }); }
-function parseWebhookCmd_(raw) { var txt = _sn(raw); if (!WEBHOOK_CMD_RE.test(txt)) return null; var m = getMetaMap_(), webAppUrl = m.WEB_APP_URL || '';
+function parseWebhookCmd_(raw, gid, uid) { var txt = _sn(raw); if (!WEBHOOK_CMD_RE.test(txt)) return null; var m = getMetaMap_(), webAppUrl = m.WEB_APP_URL || '', mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE';
   if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return buildNoticeFlex_('-', 'ระบบปิดค้นหาชั่วคราว', 'ผู้ดูแลระบบปิดการค้นหาผ่านแชทชั่วคราว กรุณาดูบนเว็บแอป', '', '', '');
   var arg = txt.replace(/^คิว\s*/, '').trim(); if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') return buildHelpFlex_(webAppUrl);
   if (arg === 'โควตา') return buildQuotaFlex_(m.CACHED_QUOTA_USED || '0', m.CACHED_QUOTA_LIMIT || '300', webAppUrl);
-  var now = _gb(), list = readAllApts_(), mask = String(m.PRIVACY_MASK_CONTACT).toUpperCase() === 'TRUE', sendQ = function (title, arr, opts) { var s = arr.sort(cmpSlot_); return buildQueueFlex_(title, s.length, s.slice(0, 5), webAppUrl, mask, opts); };
+  if (/^(?:สร้างนัด|เพิ่มนัด|นัดใหม่)(?:\s|$)/.test(arg)) return handleWebhookCreateApt_(arg, gid, uid, webAppUrl, mask);
+  var now = _gb(), list = readAllApts_(), sendQ = function (title, arr, opts) { var s = arr.sort(cmpSlot_); return buildQueueFlex_(title, s.length, s.slice(0, 5), webAppUrl, mask, opts); };
   if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') return sendQ('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]', list.filter(function (a) { return a.status === S_CF && a.appointmentDate >= now.dateStr; }));
   if (arg === 'วันนี้' || arg === 'พรุ่งนี้') { var dt = arg === 'วันนี้' ? now.dateStr : _gb(now.epochMs + 86400000).dateStr; return sendQ('[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + ']', list.filter(function (a) { return a.appointmentDate === dt && a.status !== S_CN; }), arg === 'วันนี้' ? { variant: 'today' } : undefined); }
   if (arg === 'สัปดาห์นี้') { var maxDt = _gb(now.epochMs + 604800000).dateStr; return sendQ('[คิวงานใน 7 วันข้างหน้า]', list.filter(function (a) { return a.appointmentDate && a.status !== S_CN && a.appointmentDate >= now.dateStr && a.appointmentDate <= maxDt; })); }

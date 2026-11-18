@@ -180,6 +180,38 @@
     assert(instantMsg.includes('[แจ้งเตือนนัดหมายใหม่]') && instantMsg.includes('งานกำลังจะมาถึง 1') && instantMsg.includes('แผนที่:') && !Logic.hasEmoji(instantMsg), 'ข้อความนัดใหม่ต้องครบถ้วนและมีลิงก์แผนที่');
     assert(Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.COMPLETED }, true, {}).includes('[แจ้งเตือนสิ้นสุดการนัดหมาย]'), 'ข้อความสิ้นสุดต้องถูกต้อง');
     assert(Logic.formatInstantAppointmentMessage({ ...list[1], status: Logic.STATUS.CANCELLED }, true, {}).includes('[แจ้งเตือนยกเลิกการนัดหมาย]'), 'ข้อความยกเลิกต้องถูกต้อง');
+
+    // 5b. LINE Chat Create Appointment (Single-line, Shorthand, Multi-line, Help, Conflict & Chat ignore)
+    const b0 = Logic.getBangkokParts(), tdy = b0.dateStr;
+    const tmr = Logic.getBangkokParts(b0.epochMs + 86400000).dateStr;
+    const d2 = Logic.getBangkokParts(b0.epochMs + 172800000).dateStr;
+    const createdList = [];
+    const botCfg = { defaultCreator: 'แอดมิน', onCreate: (rec) => createdList.push(rec) };
+
+    const msg1 = Logic.parseAndExecuteLineCommand('สร้างนัด พรุ่งนี้ 10.30 / ประชุมตรวจรับงาน / ห้อง B / คุณสมชาย / เตรียมสัญญา', createdList, b0.isoStr, botCfg);
+    assert(createdList.length === 1 && createdList[0].appointmentDate === tmr && createdList[0].appointmentTime === '10:30', 'สร้างนัดแบบบรรทัดเดียว (วันที่/เวลา)');
+    assert(createdList[0].title === 'ประชุมตรวจรับงาน' && createdList[0].location === 'ห้อง B' && createdList[0].contactPerson === 'คุณสมชาย' && createdList[0].notes === 'เตรียมสัญญา', 'สร้างนัดแบบบรรทัดเดียว (รายละเอียด)');
+    assert(msg1 && msg1.includes('[แจ้งเตือนนัดหมายใหม่]') && !Logic.hasEmoji(msg1), 'ข้อความตอบกลับสร้างนัดสำเร็จ');
+
+    let conflictSeen = -1;
+    const msgDup = Logic.parseAndExecuteLineCommand('สร้างนัด พรุ่งนี้ 10:30 / งานซ้อน / ห้อง C / คุณเอ', createdList, b0.isoStr, { defaultCreator: 'แอดมิน', onCreate: (rec, cf) => { conflictSeen = cf.length; createdList.push(rec); } });
+    assert(conflictSeen === 1 && msgDup.includes('คำเตือน'), 'สร้างนัดเวลาชนต้องเตือนคิวชน');
+
+    const msgShort = Logic.parseAndExecuteLineCommand('เพิ่มนัด วันนี้ 14:00 / สรุปงานด่วน', createdList, b0.isoStr, botCfg);
+    const rShort = createdList[createdList.length - 1];
+    assert(msgShort && rShort.appointmentDate === tdy && rShort.appointmentTime === '14:00' && rShort.location === 'ไม่ระบุสถานที่' && rShort.contactPerson === 'แอดมิน', 'เพิ่มนัดแบบย่อต้องเติมค่าเริ่มต้น');
+
+    const msgBareShort = Logic.parseAndExecuteLineCommand('นัดใหม่ มะรืน 09.15 น. เยี่ยมลูกค้า', createdList, b0.isoStr, botCfg);
+    const rBareShort = createdList[createdList.length - 1];
+    assert(msgBareShort && rBareShort.appointmentDate === d2 && rBareShort.appointmentTime === '09:15' && rBareShort.title === 'เยี่ยมลูกค้า', 'นัดใหม่แบบไม่ใช้ / ต้องแยกหัวข้อได้');
+
+    const msgMulti = Logic.parseAndExecuteLineCommand('สร้างนัด\nหัวข้อ: ตรวจไซต์\nวันที่: 25/11/2569\nเวลา: 09:30\nสถานที่: พระราม 9\nผู้นัดพบ: คุณวิภาดา\nเตือน: 1วัน 2ชม', createdList, b0.isoStr, botCfg);
+    const rMulti = createdList[createdList.length - 1];
+    assert(msgMulti && rMulti.appointmentDate === '2026-11-25' && rMulti.appointmentTime === '09:30' && rMulti.title === 'ตรวจไซต์' && rMulti.location === 'พระราม 9' && rMulti.contactPerson === 'คุณวิภาดา' && rMulti.remindDaysBefore === 1 && rMulti.remindHoursBefore === 2, 'สร้างนัดหลายบรรทัดและแจ้งเตือนถูกต้อง');
+
+    assert(Logic.parseAndExecuteLineCommand('สร้างนัด', createdList, b0.isoStr, botCfg).includes('วิธีพิมพ์สร้างนัดหมาย'), 'พิมพ์ สร้างนัด เปล่าต้องแนะนำวิธีใช้');
+    assert(Logic.parseAndExecuteLineCommand('สร้างนัด วันนี้', createdList, b0.isoStr, botCfg).includes('รูปแบบคำสั่งสร้างนัดไม่ถูกต้อง'), 'พิมพ์ข้อมูลไม่ครบต้องแจ้งวิธีแก้');
+    assert(Logic.parseAndExecuteLineCommand('พรุ่งนี้ค่อยสร้างนัดกันใหม่นะครับ', createdList, b0.isoStr, botCfg) === null, 'ประโยคสนทนาทั่วไปต้องไม่ถูกตีความเป็นคำสั่ง');
   });
 
   // --- Suite 6: Patch Notes Integrity ---
@@ -409,6 +441,47 @@
       assert(remC.contents.type === 'carousel' && remC.contents.contents.length === 10 && JSON.stringify(remC).includes('เตือนโควตา LINE') && !Logic.hasEmoji(JSON.stringify(remC)), 'Reminder Carousel ถูกต้อง');
 
       ['buildReminderNotificationFlex_(', 'buildQuotaFlex_(', 'if (reop) up.reopened = true;'].forEach(s => assert(codeGs.includes(s), `Code.gs ต้องมี ${s}`));
+    });
+
+    runTest('13. GAS Guard Audit', 'LINE Webhook สร้างนัดหมายผ่านแชท (Single-line, Multi-line, Conflict & Zero-Emoji)', () => {
+      const fs = require('fs'), path = require('path'), vm = require('vm');
+      const cg = fs.readFileSync(path.join(__dirname, 'gas', 'Code.gs'), 'utf8');
+      const gasSb = {
+        Utilities: { getUuid: () => 'uuid-test-1' },
+        CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
+        PropertiesService: { getScriptProperties: () => ({ getProperty: () => '', getProperties: () => ({}) }) },
+        LockService: { getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }) },
+        SpreadsheetApp: { getActiveSpreadsheet: () => null },
+        UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => '{}' }) },
+        ScriptApp: { getProjectTriggers: () => [], newTrigger: () => ({ timeBased: () => ({ at: () => ({ create: () => {} }) }) }) },
+        Session: { getScriptTimeZone: () => 'Asia/Bangkok' }
+      };
+      vm.runInNewContext(cg, gasSb);
+      const saved = [], scheduled = []; let existing = [];
+      gasSb.getMetaMap_ = () => ({ ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', WEB_APP_URL: 'https://example.com', CACHED_QUOTA_USED: '10', CACHED_QUOTA_LIMIT: '300' });
+      gasSb.getProp_ = k => (k === 'LINE_CHANNEL_ACCESS_TOKEN' ? 'tok' : '');
+      gasSb.getLineUserName_ = () => 'คุณสมชาย LINE';
+      gasSb.withLock_ = fn => fn();
+      gasSb.readAllApts_ = () => existing;
+      gasSb.createApt_ = p => { const r = { id: 'APT-20261120-00' + (saved.length + 1), ...p, updatedAt: new Date().toISOString() }; saved.push(r); return r; };
+      gasSb.scheduleExactReminderForApt_ = a => scheduled.push(a.id);
+
+      const helpCmd = gasSb.parseWebhookCmd_('ช่วยเหลือ', 'G1', 'U1');
+      assert(JSON.stringify(helpCmd).includes('สร้างนัด') && !Logic.hasEmoji(JSON.stringify(helpCmd)), 'Help Flex ต้องมีคำสั่งสร้างนัดและไร้ Emoji');
+
+      const helpCreate = gasSb.parseWebhookCmd_('สร้างนัด', 'G1', 'U1');
+      assert(helpCreate.type === 'flex' && JSON.stringify(helpCreate).includes('วิธีพิมพ์สร้างนัดหมาย') && !Logic.hasEmoji(JSON.stringify(helpCreate)), 'Webhook สร้างนัดเปล่าต้องคืน Notice Flex');
+
+      const okRes = gasSb.parseWebhookCmd_('สร้างนัด พรุ่งนี้ 10:30 / ประชุมทีม / ห้อง A / คุณสมชาย', 'G1', 'U1');
+      assert(saved.length === 1 && saved[0].title === 'ประชุมทีม' && saved[0].location === 'ห้อง A' && saved[0].contactPerson === 'คุณสมชาย', 'Webhook สร้างนัดบรรทัดเดียวบันทึกสำเร็จ');
+      assert(okRes.type === 'flex' && okRes.contents.type === 'bubble' && !Logic.hasEmoji(JSON.stringify(okRes)), 'Webhook คืน Flex Bubble ไร้ Emoji');
+
+      const mlRes = gasSb.parseWebhookCmd_('สร้างนัด\nหัวข้อ: ตรวจงาน\nวันที่: 25/11/2569\nเวลา: 15:00\nเตือน: 1วัน 2ชม', 'G1', 'U1');
+      assert(saved.length === 2 && saved[1].title === 'ตรวจงาน' && saved[1].appointmentDate === '2026-11-25' && saved[1].appointmentTime === '15:00' && saved[1].remindHoursBefore === 2 && scheduled.includes(saved[1].id), 'Webhook สร้างนัดหลายบรรทัดและตั้ง Trigger สำเร็จ');
+
+      existing = [{ ...saved[0], id: 'APT-OLD-1', title: 'งานเดิม' }];
+      const dupRes = gasSb.parseWebhookCmd_('คิว สร้างนัด พรุ่งนี้ 10:30 / งานซ้อน', 'G1', 'U1');
+      assert(JSON.stringify(dupRes).includes('คำเตือนคิวชน') && !Logic.hasEmoji(JSON.stringify(dupRes)), 'Webhook เวลาซ้อนต้องมีคำเตือนคิวชน');
     });
 
     runTest('14. Performance & Compaction Guard', 'ระบบ O(N) Bucketing, Lazy Webhook Read, ฟีเจอร์ F1-F5 และความกระชับของโค้ดทำงานสมบูรณ์', () => {

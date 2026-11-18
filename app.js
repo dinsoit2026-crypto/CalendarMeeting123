@@ -558,6 +558,9 @@
     window.addEventListener('appinstalled', () => { state.deferredPwaPrompt = null; state.isStandalone = true; updatePwaAndNotifyUI(); showToast('ติดตั้งเว็บแอปลงเครื่องเรียบร้อยแล้ว', 'success'); });
     updatePwaAndNotifyUI(); }
   function runBotSim() { const val = $('botSimInput').value; txt($('botSimUserEcho'), val || '...');
-    const res = Logic.parseAndExecuteLineCommand(val, state.appointments, gb().isoStr, { enableLineBotQuery: String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE', privacyMaskContact: metaTrue('PRIVACY_MASK_CONTACT'), quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0 });
+    const res = Logic.parseAndExecuteLineCommand(val, state.appointments, gb().isoStr, { enableLineBotQuery: String(state.meta.ENABLE_LINE_BOT_QUERY).toUpperCase() !== 'FALSE', privacyMaskContact: metaTrue('PRIVACY_MASK_CONTACT'), quotaLimit: +state.meta.CACHED_QUOTA_LIMIT || 300, quotaUsed: +state.meta.CACHED_QUOTA_USED || 0, defaultCreator: curUserDisp(),
+      onCreate: rec => { const prevApts = [...state.appointments], prevLogs = [...state.rescheduleLogs]; state.appointments.push(rec); if (state.isLive) pendingIds.add(rec.id); else saveDemoData();
+        renderActiveTab(); notifyWebPushForApt(rec, 'CREATE'); showToast('สร้างนัดหมายใหม่ผ่านคำสั่งบอทแล้ว', 'success');
+        if (state.isLive) syncAptMutation(rec.id, prevApts, prevLogs, rec, () => callGasApi('create', { payload: rec, notifyLine: false }), 'บันทึกนัดจากบอทไม่สำเร็จ'); } });
     txt($('botSimOutput'), res === null ? '[บอทเงียบ]\nเนื่องจากข้อความไม่ตรงกับคำสั่งบอท (ลองพิมพ์ "วันนี้", "ทั้งหมด" หรือ "ช่วยเหลือ")' : res); }
   window.addEventListener('DOMContentLoaded', initApp); })();
