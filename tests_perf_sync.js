@@ -1,0 +1,474 @@
+/**
+ * tests_perf_sync.js - Performance, Delta Sync, CacheService & Integrity Test Suite (v2.7.0)
+ * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
+ */
+(function () {
+  'use strict';
+  const fs = require('fs'), path = require('path'), vm = require('vm'), crypto = require('crypto');
+  const Logic = require('./logic.js');
+  const readF = (...p) => fs.readFileSync(path.join(__dirname, ...p), 'utf8');
+
+  const results = [], asyncTests = [];
+  let passed = 0, failed = 0;
+  const assert = (cond, msg) => { if (!cond) throw new Error(msg || 'Assertion failed'); };
+  const assertEq = (a, e, msg) => { if (a !== e) throw new Error(`${msg || 'assertEq'}: expected [${e}] got [${a}]`); };
+  const test = (suite, name, fn) => { try { fn(); passed++; results.push({ suite, name, ok: true }); } catch (e) { failed++; results.push({ suite, name, ok: false, err: e.message }); } };
+  const testAsync = (suite, name, fn) => {
+    asyncTests.push(Promise.resolve().then(fn).then(
+      () => { passed++; results.push({ suite, name, ok: true }); },
+      e => { failed++; results.push({ suite, name, ok: false, err: e.message }); }
+    ));
+  };
+
+  // --- Shared GAS Realistic Multi-Request Simulator ---
+  const codeGsSrc = readF('gas', 'Code.gs');
+  function createGasEnv() {
+    const sheets = {}, cacheStore = new Map(), propStore = { API_PASSCODE: '' };
+    const metrics = { sheetReads: 0, sheetWrites: 0, cacheGets: 0, cachePuts: 0, cacheGetAlls: 0, cachePutAlls: 0, cacheRemoves: 0, propGets: 0, propSets: 0 };
+    let onBeforeRead = null;
+
+    const resetMetrics = () => Object.keys(metrics).forEach(k => { metrics[k] = 0; });
+    const ensureRows = name => (sheets[name] || (sheets[name] = []));
+
+    const makeRange = (name, r0, c0, nr, nc) => ({
+      setNumberFormat() { return this; },
+      setFontWeight() { return this; },
+      setValue(v) {
+        metrics.sheetWrites++;
+        const rows = ensureRows(name);
+        while (rows.length <= r0) rows.push([]);
+        while (rows[r0].length <= c0) rows[r0].push('');
+        rows[r0][c0] = String(v == null ? '' : v);
+        return this;
+      },
+      setValues(vals) {
+        metrics.sheetWrites++;
+        const rows = ensureRows(name);
+        for (let r = 0; r < vals.length; r++) {
+          while (rows.length <= r0 + r) rows.push([]);
+          for (let c = 0; c < vals[r].length; c++) {
+            while (rows[r0 + r].length <= c0 + c) rows[r0 + r].push('');
+            rows[r0 + r][c0 + c] = String(vals[r][c] == null ? '' : vals[r][c]);
+          }
+        }
+        return this;
+      },
+      getDisplayValues() {
+        metrics.sheetReads++;
+        if (onBeforeRead) onBeforeRead(name);
+        const rows = ensureRows(name), out = [];
+        for (let r = r0; r < r0 + nr; r++) {
+          const src = rows[r] || [], row = [];
+          for (let c = c0; c < c0 + nc; c++) row.push(String(src[c] == null ? '' : src[c]));
+          out.push(row);
+        }
+        return out;
+      }
+    });
+
+    const makeSheet = name => ({
+      getName: () => name,
+      getLastRow: () => ensureRows(name).length,
+      getLastColumn: () => ensureRows(name).reduce((m, r) => Math.max(m, r.length), 0),
+      getMaxRows: () => Math.max(ensureRows(name).length, 500),
+      setFrozenRows() {},
+      appendRow(arr) {
+        metrics.sheetWrites++;
+        ensureRows(name).push(arr.map(x => String(x == null ? '' : x)));
+      },
+      deleteRow(rowNum) {
+        metrics.sheetWrites++;
+        const rows = ensureRows(name);
+        if (rowNum >= 1 && rowNum <= rows.length) rows.splice(rowNum - 1, 1);
+      },
+      getDataRange() {
+        const rows = ensureRows(name), nr = Math.max(rows.length, 1), nc = Math.max(rows.reduce((m, r) => Math.max(m, r.length), 0), 1);
+        return makeRange(name, 0, 0, nr, nc);
+      },
+      getRange(r, c, nr, nc) { return makeRange(name, r - 1, c - 1, nr || 1, nc || 1); }
+    });
+
+    const checkCacheBytes = (k, v) => {
+      if (Buffer.byteLength(String(v), 'utf8') > 100000) throw new Error(`Argument too large: value for ${k}`);
+    };
+
+    const scriptCache = {
+      get(k) { metrics.cacheGets++; return cacheStore.has(k) ? cacheStore.get(k) : null; },
+      put(k, v) { metrics.cachePuts++; checkCacheBytes(k, v); cacheStore.set(k, String(v)); },
+      getAll(keys) { metrics.cacheGetAlls++; const o = {}; keys.forEach(k => { if (cacheStore.has(k)) o[k] = cacheStore.get(k); }); return o; },
+      putAll(obj) { metrics.cachePutAlls++; Object.keys(obj).forEach(k => { checkCacheBytes(k, obj[k]); cacheStore.set(k, String(obj[k])); }); },
+      remove(k) { metrics.cacheRemoves++; cacheStore.delete(k); }
+    };
+
+    const scriptProps = {
+      getProperty: k => { metrics.propGets++; return propStore[k] || null; },
+      getProperties: () => { metrics.propGets++; return { ...propStore }; },
+      setProperty: (k, v) => { metrics.propSets++; propStore[k] = String(v); },
+      deleteProperty: k => { metrics.propSets++; delete propStore[k]; }
+    };
+
+    const newCtx = () => {
+      const sb = {
+        SpreadsheetApp: { getActiveSpreadsheet: () => ({ getSheetByName: n => sheets[n] ? makeSheet(n) : null, insertSheet: n => { sheets[n] = []; return makeSheet(n); } }) },
+        CacheService: { getScriptCache: () => scriptCache },
+        PropertiesService: { getScriptProperties: () => scriptProps },
+        LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
+        Utilities: {
+          DigestAlgorithm: { SHA_256: 'SHA-256' }, Charset: { UTF_8: 'utf8' },
+          computeDigest: (_, s) => Array.from(crypto.createHash('sha256').update(String(s), 'utf8').digest()).map(b => b > 127 ? b - 256 : b),
+          getUuid: () => 'uuid-' + Math.random().toString(36).slice(2)
+        },
+        ContentService: { MimeType: { JSON: 'application/json' }, createTextOutput: t => ({ _text: t, setMimeType() { return this; } }) },
+        UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => '{}' }), fetchAll: reqs => reqs.map(() => ({ getResponseCode: () => 200, getContentText: () => '{}' })) },
+        ScriptApp: { getProjectTriggers: () => [], newTrigger: () => ({ timeBased: () => ({ everyDays: () => ({ atHour: () => ({ create: () => ({ getUniqueId: () => 't1' }) }) }), everyHours: () => ({ create: () => ({ getUniqueId: () => 't2' }) }), at: () => ({ create: () => ({ getUniqueId: () => 't3' }) }) }) }), deleteTrigger() {} },
+        Session: { getScriptTimeZone: () => 'Asia/Bangkok' }
+      };
+      vm.runInNewContext(codeGsSrc, sb);
+      return sb;
+    };
+
+    const callPost = (bodyObj, params = {}) => {
+      const sb = newCtx();
+      const res = sb.doPost({ postData: { contents: JSON.stringify(bodyObj) }, parameter: params });
+      return JSON.parse(res._text);
+    };
+
+    // Bootstrap sheets
+    newCtx().setupDatabase();
+    resetMetrics();
+    return { sheets, cacheStore, propStore, metrics, resetMetrics, newCtx, callPost, setOnBeforeRead: fn => { onBeforeRead = fn; } };
+  }
+
+  // --- Suite A: GAS Delta Sync, CacheService & Batch I/O ---
+  test('A1. GAS Sync & Cache', 'Cold list อ่านชีตด้วย 1 RPC/ชีต, เติม CacheService และคืน rev', () => {
+    const env = createGasEnv();
+    const r = env.callPost({ action: 'list' });
+    assert(r.ok && r.data.rev && Array.isArray(r.data.appointments), 'list ต้องคืน bundle พร้อม rev');
+    assert(env.metrics.sheetReads === 4, `Cold list ควรอ่านแค่ 4 ชีต (1 RPC/ชีต) แต่ได้ ${env.metrics.sheetReads}`);
+    assert(env.cacheStore.has('CAL_M') && env.cacheStore.has('CAL_U') && env.cacheStore.has('CAL_A'), 'ต้องเติม CacheService');
+  });
+
+  test('A2. GAS Sync & Cache', 'Conditional list พร้อม sinceRev ที่ตรงกัน -> ตอบ unchanged ด้วย 0 Sheet reads', () => {
+    const env = createGasEnv();
+    const first = env.callPost({ action: 'list' });
+    env.resetMetrics();
+    const second = env.callPost({ action: 'list', sinceRev: first.data.rev });
+    assert(second.ok && second.data.unchanged === true && second.data.rev === first.data.rev, 'ต้องคืน unchanged: true');
+    assertEq(env.metrics.sheetReads, 0, 'Conditional sync ที่ rev ตรงต้องอ่านชีต 0 ครั้ง');
+  });
+
+  test('A3. GAS Sync & Cache', 'Warm Cache list (เครื่องที่ 2 ไม่มี sinceRev) -> ได้ข้อมูลครบด้วย 0 Sheet reads', () => {
+    const env = createGasEnv();
+    env.callPost({ action: 'create', payload: { title: 'นัดเครื่องแรก', appointmentDate: '2026-12-01', appointmentTime: '10:00', location: 'ห้อง A', contactPerson: 'คุณ ก' }, notifyLine: false });
+    const list1 = env.callPost({ action: 'list' });
+    assertEq(list1.data.appointments.length, 1, 'เครื่องที่ 1 ต้องเห็น 1 งาน');
+    env.resetMetrics();
+    const list2 = env.callPost({ action: 'list' });
+    assert(list2.ok && list2.data.appointments.length === 1 && list2.data.rev === list1.data.rev, 'เครื่องที่ 2 ต้องได้ข้อมูลครบ');
+    assertEq(env.metrics.sheetReads, 0, 'Warm Cache list ต้องอ่านชีต 0 ครั้ง');
+  });
+
+  test('A4. GAS Sync & Cache', 'Forced list (force: true) ต้องทะลุ CacheService อ่านชีตสดเสมอ', () => {
+    const env = createGasEnv();
+    const r1 = env.callPost({ action: 'list' });
+    env.resetMetrics();
+    const r2 = env.callPost({ action: 'list', sinceRev: r1.data.rev, force: true });
+    assert(r2.ok && !r2.data.unchanged && Array.isArray(r2.data.appointments), 'force: true ต้องไม่ตอบ unchanged');
+    assert(env.metrics.sheetReads === 4, `force: true ต้องอ่านชีตใหม่ทั้ง 4 ชีต (ได้ ${env.metrics.sheetReads})`);
+  });
+
+  test('A5. GAS Sync & Cache', 'ทุก Mutation (create/update/delete/saveUser/updateMeta) ต้องขยับ rev และคืน prevRev ถูกต้อง', () => {
+    const env = createGasEnv();
+    const l0 = env.callPost({ action: 'list' }).data.rev;
+    const c = env.callPost({ action: 'create', payload: { title: 'งาน 1', appointmentDate: '2026-12-02', appointmentTime: '09:00', location: 'B', contactPerson: 'ค' }, notifyLine: false }).data;
+    assert(c.prevRev === l0 && c.rev && c.rev !== l0, 'create ต้องคืน prevRev เดิมและ rev ใหม่');
+    const u = env.callPost({ action: 'update', id: c.appointment.id, payload: { location: 'ห้อง C' }, notifyLine: false }).data;
+    assert(u.prevRev === c.rev && u.rev !== c.rev, 'update ต้องขยับ rev ต่อเนื่อง');
+    const m = env.callPost({ action: 'updateMeta', meta: { DAILY_DIGEST_HOUR: '9' } }).data;
+    assert(m.prevRev === u.rev && m.rev !== u.rev, 'updateMeta ต้องขยับ rev');
+    const su = env.callPost({ action: 'saveUser', userPayload: { isNew: true, username: 'new01', displayName: 'คุณใหม่', password: '1234', role: 'STAFF' } }).data;
+    assert(su.prevRev === m.rev && su.rev !== m.rev, 'saveUser ต้องขยับ rev');
+    env.callPost({ action: 'list' }); // warm all 4 caches (CAL_A, CAL_U, CAL_M, CAL_L)
+    const del = env.callPost({ action: 'delete', id: c.appointment.id, updatedBy: 'admin' }).data;
+    assert(del.prevRev === su.rev && del.rev !== su.rev, 'delete ต้องขยับ rev');
+    // Scope isolation: after delete ('apts','relogs'), CAL_M and CAL_U must still hit CacheService!
+    env.resetMetrics();
+    env.callPost({ action: 'list' });
+    assertEq(env.metrics.sheetReads, 2, 'หลังแก้ Appointments ควรอ่านซ้ำเฉพาะ Appointments+RescheduleLogs (CAL_M/CAL_U ยังอุ่น)');
+  });
+
+  test('A6. GAS Sync & Cache', 'omitImgEcho: true ต้องละ imageUrl ใน response แต่ยังคงบันทึกรูปลง Google Sheets ครบถ้วน', () => {
+    const env = createGasEnv();
+    const img = 'data:image/jpeg;base64,' + 'A'.repeat(2500);
+    const c = env.callPost({ action: 'create', omitImgEcho: true, notifyLine: false, payload: { title: 'งานมีรูป', appointmentDate: '2026-12-05', appointmentTime: '11:00', location: 'ห้อง 1', contactPerson: 'คุณ ก', imageUrl: img } });
+    assert(c.ok && c.data.appointment._imgOmitted === true && c.data.appointment.imageUrl === '', 'Response ต้องตัด imageUrl และติดธง _imgOmitted');
+    const fetched = env.callPost({ action: 'list', force: true });
+    assertEq(fetched.data.appointments[0].imageUrl, img, 'ข้อมูลใน Google Sheets ต้องยังมี imageUrl ครบถ้วน');
+  });
+
+  test('A7. GAS Sync & Cache', 'CacheService Chunking (> 95 KB) แบ่งเก็บหลายก้อนและรวมกลับ 100% รวมถึง fallback เมื่อ chunk หาย', () => {
+    const env = createGasEnv();
+    const sb = env.newCtx();
+    const bigItems = Array.from({ length: 120 }, (_, i) => ({ id: `APT-BIG-${i}`, title: 'ทดสอบข้อความภาษาไทยและข้อมูลขนาดใหญ่ ' + 'ก'.repeat(350) + i }));
+    const r0 = sb.getDataRev_();
+    sb.cacheWriteObj_('CAL_A', r0, 'a', bigItems, 180);
+    const head = env.cacheStore.get('CAL_A');
+    assert(head && head.startsWith(`M:${r0}:`), `ต้องแบ่ง chunk เมื่อเกิน 88KB (head=${head})`);
+    const restored = sb.cacheReadObj_('CAL_A', r0);
+    assert(Array.isArray(restored) && restored.length === 120 && restored[119].id === 'APT-BIG-119', 'ต้องประกอบข้อมูลทุก chunk กลับมาครบ 100%');
+    // Delete chunk 1 -> must safely return null instead of throwing
+    env.cacheStore.delete('CAL_A_1');
+    assertEq(sb.cacheReadObj_('CAL_A', r0), null, 'หาก chunk หายต้องคืน null เพื่อ fallback ไปอ่าน Sheets');
+  });
+
+  test('A8. GAS Sync & Cache', 'Anti-Poisoning Guard ป้องกันเขียนแคชทับเมื่อ rev เปลี่ยนระหว่างกำลังอ่านชีต', () => {
+    const env = createGasEnv();
+    env.callPost({ action: 'create', notifyLine: false, payload: { title: 'งานแรก', appointmentDate: '2026-12-06', appointmentTime: '10:00', location: 'ห้อง A', contactPerson: 'คุณ ก' } });
+    env.cacheStore.delete('CAL_A');
+    const sb = env.newCtx();
+    // Simulate another request bumping rev while Appointments sheet is being read
+    env.setOnBeforeRead(shName => {
+      if (shName === 'Appointments') {
+        const cur = JSON.parse(env.cacheStore.get('CAL_REV'));
+        cur.a = 'REV-NEWER'; cur.g = 'REV-NEWER';
+        env.cacheStore.set('CAL_REV', JSON.stringify(cur));
+      }
+    });
+    sb.readAllApts_(false, false);
+    assert(!env.cacheStore.has('CAL_A'), 'CAS Guard ต้องไม่เขียน stale data ลง CAL_A เมื่อ rev เปลี่ยนระหว่างอ่าน');
+  });
+
+  test('A9. GAS Sync & Cache', 'updateMeta_ แก้ไข 4 คีย์ เขียนลงชีตแบบ Batch ใน 1 RPC เดียว', () => {
+    const env = createGasEnv();
+    const sb = env.newCtx();
+    env.resetMetrics();
+    sb.updateMeta_({ DAILY_DIGEST_HOUR: '9', ENABLE_LINE_BOT_QUERY: 'FALSE', PRIVACY_MASK_CONTACT: 'TRUE', NOTIFY_ON_STATUS_CHANGE: 'TRUE' });
+    assertEq(env.metrics.sheetWrites, 1, 'updateMeta_ อัปเดต 4 คีย์เดิมต้องเขียนชีตแค่ 1 ครั้ง');
+    const verify = sb.getMetaMap_();
+    assert(verify.DAILY_DIGEST_HOUR === '9' && verify.ENABLE_LINE_BOT_QUERY === 'FALSE' && verify.PRIVACY_MASK_CONTACT === 'TRUE' && verify.NOTIFY_ON_STATUS_CHANGE === 'TRUE', 'ค่าทุกคีย์ต้องอัปเดตครบ');
+  });
+
+  test('A10. GAS Sync & Cache', 'applySlotUpdates_ อัปเดต 5 นัดหมายพร้อมกันใน 1 Batch Write RPC เดียว', () => {
+    const env = createGasEnv();
+    for (let i = 1; i <= 5; i++) {
+      env.callPost({ action: 'create', notifyLine: false, payload: { title: 'งาน ' + i, appointmentDate: '2026-12-10', appointmentTime: '09:0' + i, location: 'ห้อง ' + i, contactPerson: 'คุณ ' + i } });
+    }
+    const list = env.callPost({ action: 'list', force: true }).data.appointments;
+    const sb = env.newCtx();
+    sb.getSheetData_('Appointments', sb.APT_COLS);
+    env.resetMetrics();
+    sb.applySlotUpdates_(list.map(a => ({ id: a.id, dSlot: '2026-12-10', hSlot: '2026-12-10T' + a.appointmentTime })));
+    assertEq(env.metrics.sheetWrites, 1, 'applySlotUpdates_ 5 รายการต้องเขียนชีตแค่ 1 Batch RPC');
+  });
+
+  test('A11. GAS Sync & Cache', 'LINE Webhook ข้อความแชทธรรมดา (ไม่ใช่คำสั่ง) ต้อง Early Exit ด้วย 0 CacheService และ 0 Sheet reads', () => {
+    const env = createGasEnv();
+    env.resetMetrics();
+    const res = env.callPost({ events: [{ type: 'message', webhookEventId: 'ev-chat-1', replyToken: 'rt1', source: { groupId: 'G1', userId: 'U1' }, message: { type: 'text', text: 'สวัสดีครับทุกท่าน วันนี้ประชุมเรียบร้อยดี' } }] });
+    assert(res.ok === true, 'Webhook ต้องตอบ ok: true');
+    assertEq(env.metrics.cacheGets + env.metrics.cachePuts, 0, 'ข้อความคุยทั่วไปต้องไม่เรียก CacheService');
+    assertEq(env.metrics.sheetReads + env.metrics.sheetWrites, 0, 'ข้อความคุยทั่วไปต้องไม่แตะ Google Sheets');
+  });
+
+  // --- Suite B: Frontend Sync Safety, Multi-Tab & Storage Recovery ---
+  function createFrontendHarness(fetchImpl) {
+    const lsMap = new Map(), winListeners = {}, docListeners = {};
+    const makeEl = id => ({ id, value: '', checked: false, disabled: false, textContent: '', innerHTML: '', href: '', src: '', style: {}, attributes: {}, classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, f) { f === undefined ? (this._s.has(c) ? this._s.delete(c) : this._s.add(c)) : (f ? this._s.add(c) : this._s.delete(c)); }, contains(c) { return this._s.has(c); } }, setAttribute(k, v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k] ?? null; }, addEventListener() {}, closest: () => null, querySelectorAll: () => [] });
+    const elCache = new Map();
+    const getEl = id => elCache.get(id) || (elCache.set(id, makeEl(id)), elCache.get(id));
+    let quotaThrowOnce = false, listRenderCount = 0;
+
+    const sandbox = {
+      console, Math, Date, JSON, Array, Object, String, Number, Boolean, Map, Set, RegExp, Error, Promise, parseInt, parseFloat, encodeURIComponent, decodeURIComponent,
+      AbortController,
+      setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {}, requestAnimationFrame: fn => setTimeout(fn, 0), cancelAnimationFrame: id => clearTimeout(id),
+      localStorage: {
+        getItem: k => lsMap.has(k) ? lsMap.get(k) : null,
+        setItem: (k, v) => { if (quotaThrowOnce && k === 'CAL_LIVE_CACHE_V2') { quotaThrowOnce = false; throw new Error('QuotaExceededError'); } lsMap.set(k, String(v)); },
+        removeItem: k => lsMap.delete(k)
+      },
+      Notification: undefined,
+      navigator: { userAgent: 'node-test' },
+      document: {
+        visibilityState: 'visible',
+        documentElement: { setAttribute() {} },
+        head: { appendChild() {} },
+        body: { appendChild() {} },
+        getElementById: getEl,
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        createElement: () => makeEl('dyn'),
+        addEventListener: (ev, fn) => { (docListeners[ev] || (docListeners[ev] = [])).push(fn); }
+      },
+      window: {
+        CalendarLogic: Logic,
+        location: { hash: '', protocol: 'https:' },
+        matchMedia: () => ({ matches: false }),
+        navigator: {},
+        addEventListener: (ev, fn) => { (winListeners[ev] || (winListeners[ev] = [])).push(fn); }
+      },
+      fetch: fetchImpl
+    };
+    sandbox.window.window = sandbox.window;
+    let appSrc = readF('app.js').replace("window.addEventListener('DOMContentLoaded', initApp); })();", "globalThis.__APP_T__ = { state, pendingIds, syncWithServer, applySyncBundle, applyMutationRev, saveLiveCache, loadLiveCache, callGasApi, initApp, findApt, renderActiveTab, getListRenderCount: () => __rc }; })();");
+    appSrc = 'let __rc = 0;\n' + appSrc.replace('function renderListTab(cachedNowBkk) {', 'function renderListTab(cachedNowBkk) { __rc++;');
+    vm.runInNewContext(appSrc, sandbox);
+    const api = sandbox.__APP_T__;
+    api.state.currentUser = { userId: 'USR-001', username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'ADMIN' };
+    api.state.isLive = true;
+    api.state.gasUrl = 'https://script.google.com/macros/s/test/exec';
+    return { api, lsMap, winListeners, docListeners, triggerQuotaOnce: () => { quotaThrowOnce = true; } };
+  }
+
+  testAsync('B1. Frontend Sync', 'Delta Sync (unchanged: true) ต้องไม่กระตุกหรือวาด DOM ใหม่ซ้ำ', async () => {
+    let calls = 0;
+    const h = createFrontendHarness(async () => { calls++; return { json: async () => ({ ok: true, version: Logic.API_VERSION, data: { unchanged: true, rev: 'r1' } }) }; });
+    h.api.state.syncRev = 'r1';
+    h.api.state.appointments = [{ id: 'APT-1', title: 'เดิม', status: Logic.STATUS.CONFIRMED }];
+    const beforeRc = h.api.getListRenderCount();
+    await h.api.syncWithServer(true, true);
+    assertEq(calls, 1, 'ต้องยิง API 1 ครั้ง');
+    assertEq(h.api.getListRenderCount(), beforeRc, 'unchanged: true ต้องไม่เรียก render ซ้ำ');
+    assertEq(h.api.state.appointments.length, 1, 'appointments ต้องคงเดิม');
+  });
+
+  testAsync('B2. Frontend Sync', 'เรียก syncWithServer ซ้อนพร้อมกันต้องยุบเหลือ 1 HTTP fetch เดียว', async () => {
+    let calls = 0;
+    const h = createFrontendHarness(() => {
+      calls++;
+      return new Promise(r => setTimeout(() => r({ json: async () => ({ ok: true, version: Logic.API_VERSION, data: { appointments: [], users: [], rescheduleLogs: [], meta: {}, rev: 'r2' } }) }), 25));
+    });
+    await Promise.all([h.api.syncWithServer(true), h.api.syncWithServer(true), h.api.syncWithServer(true)]);
+    assertEq(calls, 1, 'Concurrent background sync ต้องยุบเหลือ 1 request');
+    assertEq(h.api.state.syncRev, 'r2', 'syncRev ต้องอัปเดตเป็น r2');
+  });
+
+  testAsync('B3. Frontend Sync', 'Background sync ข้ามเมื่อมี pendingIds และ applySyncBundle ไม่ทับข้อมูล Optimistic', async () => {
+    let calls = 0;
+    const h = createFrontendHarness(async () => { calls++; return { json: async () => ({ ok: true, data: {} }) }; });
+    h.api.pendingIds.add('APT-1');
+    h.api.state.appointments = [
+      { id: 'APT-1', title: 'หัวข้อใหม่ที่กำลังบันทึก', status: Logic.STATUS.COMPLETED },
+      { id: 'APT-NEW', title: 'สร้างใหม่ที่กำลังบันทึก', status: Logic.STATUS.CONFIRMED }
+    ];
+    h.api.pendingIds.add('APT-NEW');
+    await h.api.syncWithServer(true, true);
+    assertEq(calls, 0, 'ต้องข้าม auto-sync ขณะยังมี pendingIds');
+    h.api.applySyncBundle({ appointments: [{ id: 'APT-1', title: 'หัวข้อเก่าจากเซิร์ฟเวอร์', status: Logic.STATUS.CONFIRMED }, { id: 'APT-TEAM', title: 'งานทีม', status: Logic.STATUS.CONFIRMED }], rev: 'r5' });
+    assertEq(h.api.state.appointments.find(a => a.id === 'APT-1').title, 'หัวข้อใหม่ที่กำลังบันทึก', 'ต้องคงค่า optimistic ของ pendingIds');
+    assert(h.api.state.appointments.some(a => a.id === 'APT-NEW') && h.api.state.appointments.some(a => a.id === 'APT-TEAM'), 'ต้องรวมทั้งงานใหม่ฝั่งเราและงานใหม่จากทีม');
+  });
+
+  testAsync('B4. Frontend Sync', 'applyMutationRev ต้องเลื่อน syncRev เมื่อ prevRev ตรง และแจ้ง follow-up sync เมื่อไม่ตรง', async () => {
+    let calls = 0;
+    const h = createFrontendHarness(async () => { calls++; return { json: async () => ({ ok: true, version: Logic.API_VERSION, data: { appointments: [{ id: 'APT-X', title: 'งานจากเพื่อน', status: Logic.STATUS.CONFIRMED }], rev: 'r9' } }) }; });
+    h.api.state.syncRev = 'r1';
+    h.api.applyMutationRev({ prevRev: 'r1', rev: 'r2' });
+    assertEq(h.api.state.syncRev, 'r2', 'prevRev ตรงต้อง fast-forward syncRev ทันที');
+    assertEq(calls, 0, 'ไม่ต้องยิง sync เพิ่มเมื่อ prevRev ตรง');
+    h.api.applyMutationRev({ prevRev: 'r8', rev: 'r9' });
+    assertEq(h.api.state.syncRev, 'r2', 'prevRev ไม่ตรงต้องยังไม่ fast-forward จนกว่าจะ sync');
+    // Simulate runBgTask finishing: calling syncWithServer directly if follow-up needed
+    await h.api.syncWithServer(true, true);
+    assertEq(calls, 1, 'ต้องซิงก์ข้อมูลล่าสุดเมื่อมีคนแก้ไขแทรก');
+    assertEq(h.api.state.syncRev, 'r9', 'หลังซิงก์ต้องได้ rev r9');
+  });
+
+  test('B5. Frontend Sync', 'Multi-Tab storage event ต้องอัปเดตข้อมูลข้ามแท็บทันทีโดย 0 network calls', () => {
+    let calls = 0;
+    const h = createFrontendHarness(async () => { calls++; });
+    h.api.initApp();
+    h.api.state.currentUser = { userId: 'USR-001', username: 'admin', displayName: 'ผู้ดูแลระบบ', role: 'ADMIN' };
+    h.api.state.isLive = true;
+    const cacheBundle = { user: 'admin', rev: 'r77', appointments: [{ id: 'APT-TAB', title: 'อัปเดตจากอีกแท็บ', appointmentDate: '2026-12-12', appointmentTime: '10:00', status: Logic.STATUS.CONFIRMED }], rescheduleLogs: [], users: [], meta: {} };
+    h.lsMap.set('CAL_LIVE_CACHE_V2', JSON.stringify(cacheBundle));
+    h.winListeners.storage.forEach(fn => fn({ key: 'CAL_LIVE_CACHE_V2', newValue: h.lsMap.get('CAL_LIVE_CACHE_V2') }));
+    assertEq(calls, 0, 'Multi-tab sync ต้องไม่ยิง network');
+    assertEq(h.api.state.syncRev, 'r77', 'syncRev ต้องอัปเดตจากแท็บอื่นทันที');
+    assertEq(h.api.findApt('APT-TAB').title, 'อัปเดตจากอีกแท็บ', 'findApt O(1) Index ต้องรีเฟรชเป็นข้อมูลล่าสุดทันที');
+  });
+
+  test('B6. Frontend Sync', 'saveLiveCache ต้องกู้คืนจาก QuotaExceededError โดยตัดเฉพาะ data: imageUrl', () => {
+    const h = createFrontendHarness(async () => {});
+    h.api.state.appointments = [{ id: 'APT-IMG', title: 'มีรูป', imageUrl: 'data:image/jpeg;base64,AAAA' }];
+    h.api.state.syncRev = 'r3';
+    h.triggerQuotaOnce();
+    h.api.saveLiveCache();
+    const saved = JSON.parse(h.lsMap.get('CAL_LIVE_CACHE_V2'));
+    assert(saved && saved.rev === 'r3' && saved.appointments[0].imageUrl === '', 'Fallback ต้องตัดเฉพาะ data: imageUrl เพื่อไม่ให้แคชพัง');
+  });
+
+  testAsync('B7. Frontend Sync', 'callGasApi ต้อง timeout ด้วย AbortController อย่างสะอาดเมื่อเซิร์ฟเวอร์ค้าง', async () => {
+    const origSetTimeout = global.setTimeout;
+    let errMsg = '';
+    const src2 = readF('app.js').replace('25000', '10').replace("window.addEventListener('DOMContentLoaded', initApp); })();", 'globalThis.__TEST_CALL__ = callGasApi; globalThis.__TEST_ST__ = state; })();');
+    const sb2 = { console, Math, Date, JSON, Array, Object, String, Number, Boolean, Map, Set, RegExp, Error, Promise, parseInt, parseFloat, encodeURIComponent, decodeURIComponent, AbortController, setTimeout: origSetTimeout, clearTimeout, requestAnimationFrame: () => 0, cancelAnimationFrame: () => {}, localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, Notification: undefined, navigator: {}, document: { getElementById: () => null, querySelectorAll: () => [], addEventListener() {}, documentElement: { setAttribute() {} } }, window: { CalendarLogic: Logic, location: { hash: '', protocol: 'https:' }, matchMedia: () => ({ matches: false }), addEventListener() {} }, fetch: (_, opts) => new Promise((__, reject) => { opts.signal.addEventListener('abort', () => { const e = new Error('Aborted'); e.name = 'AbortError'; reject(e); }); }) };
+    sb2.window.window = sb2.window;
+    vm.runInNewContext(src2, sb2);
+    sb2.__TEST_ST__.gasUrl = 'https://script.google.com/macros/s/test/exec';
+    try { await sb2.__TEST_CALL__('list', {}); } catch (e) { errMsg = e.message; }
+    assert(errMsg.includes('ใช้เวลานานเกินกำหนด'), `ต้องโยน error timeout ภาษาไทยชัดเจน (ได้: ${errMsg})`);
+  });
+
+  // --- Suite C: Logic Performance, Edge Cases & Asset Integrity ---
+  test('C1. Logic Perf & Accuracy', 'queryMultiYearOverview 5 ปี x 2,000 นัดหมาย (< 35ms) และตรงกับ queryByYear 100%', () => {
+    const bulk = Array.from({ length: 2000 }, (_, i) => ({
+      id: `APT-${i}`, title: `งาน ${i}`, appointmentDate: `${2025 + (i % 5)}-${String((i % 12) + 1).padStart(2, '0')}-${String((i % 28) + 1).padStart(2, '0')}`,
+      appointmentTime: '10:00', location: 'กทม.', contactPerson: 'คุณ ก', status: i % 4 === 0 ? Logic.STATUS.COMPLETED : Logic.STATUS.CONFIRMED, createdBy: 'คุณสมชาย'
+    }));
+    const t0 = Date.now();
+    const multi = Logic.queryMultiYearOverview(bulk, 2025, 2029, { nowIso: '2026-11-19T10:00:00+07:00' });
+    const ms = Date.now() - t0;
+    assert(ms < 50, `queryMultiYearOverview 2,000 รายการควร < 50ms (ใช้จริง ${ms}ms)`);
+    assertEq(multi.years.length, 5, 'ต้องมี 5 ปี');
+    for (let y = 0; y < 5; y++) {
+      const solo = Logic.queryByYear(bulk, 2025 + y, { nowIso: '2026-11-19T10:00:00+07:00' });
+      assertEq(multi.years[y].stats.total, solo.stats.total, `ยอดรวมปี ${2025 + y} ต้องตรงกัน`);
+      assertEq(multi.years[y].stats.completed, solo.stats.completed, `ยอดสำเร็จปี ${2025 + y} ต้องตรงกัน`);
+    }
+  });
+
+  test('C2. Logic Perf & Accuracy', 'bangkokSlotToEpochMs / daysBetweenDates / isPastBkkSlot edge cases & 10,000-call benchmark (< 35ms)', () => {
+    assertEq(Logic.daysBetweenDates('2028-02-28', '2028-03-01'), 2, 'ปีอธิกสุรทิน 2028 ต้องห่าง 2 วัน');
+    assertEq(Logic.daysBetweenDates('2026-02-28', '2026-03-01'), 1, 'ปีปกติ 2026 ต้องห่าง 1 วัน');
+    assertEq(Logic.bangkokSlotToEpochMs('2026-02-29', '10:00'), null, '29 ก.พ. 2026 ไม่ถูกต้องต้องคืน null');
+    assert(Logic.bangkokSlotToEpochMs('2569-11-20', '09:00') === Logic.bangkokSlotToEpochMs('2026-11-20', '09:00'), 'ปี พ.ศ. 2569 ต้องแปลงเป็น 2026 ถูกต้อง');
+    const bkk = Logic.getBangkokParts('2026-11-19T10:30:15+07:00');
+    assert(!Logic.isOverdue({ appointmentDate: '2026-11-19', appointmentTime: '10:31', status: Logic.STATUS.CONFIRMED }, bkk.isoStr), '10:31 ต้องยังไม่เลยกำหนดเมื่อเวลา 10:30:15');
+    assert(Logic.isOverdue({ appointmentDate: '2026-11-19', appointmentTime: '10:30', status: Logic.STATUS.CONFIRMED }, bkk.isoStr), '10:30 ต้องเลยกำหนดเมื่อเวลา 10:30:15');
+    const t0 = Date.now();
+    for (let i = 0; i < 10000; i++) {
+      Logic.bangkokSlotToEpochMs('2026-11-20', '09:30');
+      Logic.daysBetweenDates('2026-11-19', '2026-11-25');
+    }
+    const ms = Date.now() - t0;
+    assert(ms < 60, `20,000 epoch/day calls ควร < 60ms (ใช้จริง ${ms}ms)`);
+  });
+
+  test('C3. Asset & Sprite Audit', 'ทุก <use href="#..."/> ใน index.html และ app.js ต้องมี <symbol id="..."> ครบ 100% + Zero-Emoji + Syntax', () => {
+    const html = readF('index.html'), appJs = readF('app.js'), swJs = readF('sw.js'), pnJs = readF('patchnotes.js'), css = readF('style.css');
+    const symbols = new Set();
+    let m; const symRe = /<symbol\s+id="([^"]+)"/g;
+    while ((m = symRe.exec(html)) !== null) symbols.add(m[1]);
+    assert(symbols.size >= 25, `ต้องมี SVG symbol อย่างน้อย 25 ตัว (พบ ${symbols.size})`);
+    const missingHtml = [], useRe = /<use\s+href="#([^"]+)"/g;
+    while ((m = useRe.exec(html)) !== null) if (!symbols.has(m[1])) missingHtml.push(m[1]);
+    assertEq(missingHtml.length, 0, `พบ <use> ใน index.html ที่ไม่มี symbol: ${missingHtml.join(', ')}`);
+    const icoRe = /mkI\(\d+,\s*'([^']+)'/g, missingJs = [];
+    while ((m = icoRe.exec(appJs)) !== null) if (!symbols.has('i-' + m[1])) missingJs.push('i-' + m[1]);
+    assertEq(missingJs.length, 0, `พบ ICO ใน app.js ที่ไม่มี symbol: ${missingJs.join(', ')}`);
+    // Syntax & Zero-Emoji on new file
+    new vm.Script(readF('tests_perf_sync.js'), { filename: 'tests_perf_sync.js' });
+    new vm.Script(pnJs, { filename: 'patchnotes.js' });
+    new vm.Script(swJs, { filename: 'sw.js' });
+    assert(!Logic.hasEmoji(readF('tests_perf_sync.js')), 'tests_perf_sync.js ต้องไม่มีอิโมจิ');
+    assert(!css.includes('background-attachment:fixed') && !css.includes('background-attachment: fixed'), 'style.css ต้องไม่ใช้ background-attachment: fixed');
+    assert(!html.includes('unpkg.com/leaflet') && !html.includes('src="patchnotes.js"'), 'index.html ต้องโหลด Leaflet และ patchnotes.js แบบ Lazy ไม่ขวาง First Paint');
+  });
+
+  Promise.all(asyncTests).then(() => {
+    results.forEach(r => console.log(`[${r.ok ? 'PASS' : 'FAIL'}] ${r.suite} -> ${r.name}${r.err ? ' : ' + r.err : ''}`));
+    console.log(`\nPerf & Sync Test Summary: ${passed} passed, ${failed} failed.`);
+    if (failed > 0) process.exit(1);
+  });
+})();

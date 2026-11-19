@@ -4,6 +4,26 @@
 
 ---
 
+## เวอร์ชัน 2.7.0 (19 พฤศจิกายน 2569) - Delta Sync Engine, Cross-Request GAS Cache, Multi-Tab Sync & Full Codebase Compaction
+> **จุดเด่น:** ยกระดับความเร็วการซิงก์ข้อมูลจากทุกช่องทาง (เว็บ มือถือ แท็บเบราว์เซอร์ Google Sheets และ LINE Bot) ด้วยโปรโตคอล `sinceRev` Delta Sync + `CacheService` แบบแยก Scope และป้องกัน Cache Poisoning พร้อม Lazy Loading ทรัพยากรหนักและ Compact โค้ดทั้งโปรเจกต์
+
+### 1. สถาปัตยกรรมการซิงก์หลายช่องทางความเร็วสูง (`gas/Code.gs`, `app.js`)
+- **Delta Sync (`sinceRev`) & Linearizable Revision (`rev` / `prevRev`):** รอบซิงก์อัตโนมัติส่ง `sinceRev` ตรวจสอบการเปลี่ยนแปลง; หากไม่มีข้อมูลใหม่ เซิร์ฟเวอร์ตอบ `{ unchanged: true }` ด้วย **0 Sheet reads** และ payload ~90 ไบต์ ข้ามการวาดหน้าจอซ้ำโดยไม่กระตุก และหากมีอุปกรณ์อื่นหรือบอท LINE แก้ไขแทรก `prevRev` จะแจ้งเตือนให้ซิงก์ข้อมูลล่าสุดทันที
+- **Cross-Request Read-Through `CacheService` พร้อม Chunking > 88KB:** แคช `Appointments`, `Users`, `SystemMeta` และ `RescheduleLogs` แยกตาม Scope พร้อม `CAL_REV` Anti-Poisoning CAS Guard ป้องกันการเขียนแคชทับเมื่อมี Mutation ระหว่างอ่าน และรองรับ `force: true` เพื่อทะลุแคชเมื่อกดซิงก์ด้วยมือ
+- **Single-RPC Sheet Read & Batch Writes (`gas/Code.gs`):** ปรับ `getSheetData_` ให้อ่านทั้งชีตใน 1 RPC (`getDataRange().getDisplayValues()`), รวบการเขียนใน `updateMeta_` และ `applySlotUpdates_` เหลือ 1 Batch Write, เพิ่ม `omitImgEcho` ลด payload ขากลับได้สูงสุด 48KB/งาน และ Early Exit ข้อความแชททั่วไปใน `handleLineWebhook_` ด้วย **0 CacheService calls**
+- **Instant Multi-Tab & Resume Sync + Zero Race-Condition (`app.js`):** ซิงก์ข้ามแท็บทันทีผ่าน `storage` event (< 5ms), ซิงก์ทันทีเมื่อสลับกลับมาเปิดแอปหรือเน็ตกลับมา (`visibilitychange` / `online`), รวมคำขอซิงก์ซ้อน (`_syncPromise`), ป้องกันข้อมูลเก่าทับ Optimistic Mutation (`pendingIds`), กู้คืนแคชอัตโนมัติเมื่อเจอ `QuotaExceededError` และเพิ่ม `AbortController` Timeout (25 วินาที)
+
+### 2. ประสิทธิภาพหน้าเว็บ, PWA และ Domain Engine (`index.html`, `style.css`, `sw.js`, `logic.js`, `patchnotes.js`)
+- **Lazy Assets & SVG Sprite (`index.html`, `app.js`, `patchnotes.js`):** โหลด Leaflet CSS/JS และ `patchnotes.js` แบบ On-Demand เฉพาะเมื่อเปิดใช้งานแผนที่หรือประวัติอัปเดต, เพิ่ม `preconnect` ไปยัง Google Apps Script และรวมไอคอนซ้ำไว้ใน SVG `<symbol>` Sprite เดียว
+- **Stale-While-Revalidate PWA & Fast Rendering (`sw.js`, `style.css`, `app.js`):** แคช Static Assets แบบ SWR เปิดแอปซ้ำทันที, ถอด `background-attachment: fixed`, เพิ่ม `content-visibility: auto`, แคชผลคำนวณสถิติคิวงาน/พิกัดวัน และบีบอัดรูปภาพด้วย `URL.createObjectURL` + canvas เดียว
+- **O(N) Multi-Year Bucketing & Parser Hoisting (`logic.js`):** ปรับ `queryMultiYearOverview` เป็น single-pass $O(N)$, แคชผลแปลงเวลาและวันแบบ Bounded Map (512 รายการ) และคง API Contract ครบ 43 รายการ 100%
+
+### 3. การทดสอบเพิ่มเติม (`tests.js`, `tests_perf_sync.js`)
+- คงชุดทดสอบหลัก [tests.js](file:///c:/Calendar/tests.js) ครบ 28/28 รายการ (Zero-Emoji Policy 100%)
+- เพิ่มชุดทดสอบเชิงลึก [tests_perf_sync.js](file:///c:/Calendar/tests_perf_sync.js) ตรวจสอบ Delta Sync, Chunked CacheService, Anti-Poisoning Guard, Batch Writes, Multi-Tab Storage Sync, Optimistic Merge, Timeout, Multi-Year O(N) Benchmark และความสมบูรณ์ของ SVG Sprite
+
+---
+
 ## เวอร์ชัน 2.6.8 (18 พฤศจิกายน 2569) - LINE Group & Direct Chat Creation & Flexible Thai Parser
 > **จุดเด่น:** พิมพ์สร้างนัดหมายและสร้างงานผ่านกลุ่ม LINE หรือแชท 1-on-1 ได้หลายรูปแบบอย่างเป็นธรรมชาติ พร้อมระบบเตือนเมื่อ GAS Backend ยังไม่ถูก Deploy เวอร์ชันล่าสุด
 
