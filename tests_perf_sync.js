@@ -145,6 +145,7 @@
     const r = env.callPost({ action: 'list' });
     assert(r.ok && r.data.rev && Array.isArray(r.data.appointments), 'list ต้องคืน bundle พร้อม rev');
     assert(env.metrics.sheetReads === 4, `Cold list ควรอ่านแค่ 4 ชีต (1 RPC/ชีต) แต่ได้ ${env.metrics.sheetReads}`);
+    assert(env.metrics.cacheGetAlls === 1 && env.metrics.cacheGets <= 4, `prewarmSc_ ต้องไม่ยิง c.get ซ้ำเมื่อ cache miss (getAll=${env.metrics.cacheGetAlls}, get=${env.metrics.cacheGets})`);
     assert(env.cacheStore.has('CAL_M') && env.cacheStore.has('CAL_U') && env.cacheStore.has('CAL_A'), 'ต้องเติม CacheService');
   });
 
@@ -463,7 +464,36 @@
     new vm.Script(swJs, { filename: 'sw.js' });
     assert(!Logic.hasEmoji(readF('tests_perf_sync.js')), 'tests_perf_sync.js ต้องไม่มีอิโมจิ');
     assert(!css.includes('background-attachment:fixed') && !css.includes('background-attachment: fixed'), 'style.css ต้องไม่ใช้ background-attachment: fixed');
+    assert(css.includes('.settings-toggles') && /[^\}]*\.settings-toggles[^\{]*\{display:flex;flex-direction:column\}/.test(css), 'style.css ต้องคง display:flex;flex-direction:column ให้ .settings-toggles');
+    assert(codeGsSrc.includes('อย่างน้อย 4 ตัวอักษร') && codeGsSrc.includes('แล้ว กรุณาใช้ชื่ออื่น'), 'gas/Code.gs ต้องคงช่องว่างข้อความภาษาไทย E_PW4 และ E_DUP_UN ครบถ้วน');
     assert(!html.includes('unpkg.com/leaflet') && !html.includes('src="patchnotes.js"'), 'index.html ต้องโหลด Leaflet และ patchnotes.js แบบ Lazy ไม่ขวาง First Paint');
+  });
+
+  testAsync('B8. Frontend Sync', 'renderPatchNotes เมื่อโหลด patchnotes.js ล้มเหลวต้องไม่วนโหลดซ้ำไม่รู้จบ', async () => {
+    let scriptAppends = 0;
+    const container = { innerHTML: '' };
+    const src = readF('app.js').replace("window.addEventListener('DOMContentLoaded', initApp); })();", 'globalThis.__TEST_PN__ = renderPatchNotes; })();');
+    const sb = {
+      console, Math, Date, JSON, Array, Object, String, Number, Boolean, Map, Set, RegExp, Error, Promise, parseInt, parseFloat, encodeURIComponent, decodeURIComponent,
+      setTimeout, clearTimeout, setInterval: () => 0, clearInterval: () => {}, requestAnimationFrame: () => 0, cancelAnimationFrame: () => {},
+      localStorage: { getItem: () => null, setItem() {}, removeItem() {} }, Notification: undefined, navigator: {},
+      document: {
+        documentElement: { setAttribute() {} },
+        head: { appendChild: el => { scriptAppends++; setTimeout(() => { if (typeof el.onerror === 'function') el.onerror(); }, 5); } },
+        body: { appendChild() {} },
+        getElementById: id => id === 'patchNotesContainer' ? container : null,
+        querySelector: () => null, querySelectorAll: () => [],
+        createElement: () => ({ src: '', onload: null, onerror: null }),
+        addEventListener() {}
+      },
+      window: { CalendarLogic: Logic, location: { hash: '', protocol: 'https:' }, matchMedia: () => ({ matches: false }), addEventListener() {} }
+    };
+    sb.window.window = sb.window;
+    vm.runInNewContext(src, sb);
+    sb.__TEST_PN__();
+    await new Promise(r => setTimeout(r, 40));
+    assertEq(scriptAppends, 1, `ต้องพยายามโหลด patchnotes.js แค่ 1 ครั้งเมื่อ error (โหลดไป ${scriptAppends} ครั้ง)`);
+    assert(container.innerHTML.includes('ไม่สามารถโหลดประวัติการอัปเดตได้'), 'ต้องแสดงข้อความแจ้งเตือนเมื่อโหลดไม่สำเร็จ');
   });
 
   Promise.all(asyncTests).then(() => {

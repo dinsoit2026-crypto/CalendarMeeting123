@@ -3,7 +3,7 @@ const CACHE_NAME = 'cal-pwa-v2.7.0', ASSETS = ['./', './index.html', './style.cs
 const BYP = ['script.google.com', 'script.googleusercontent.com', 'nominatim.openstreetmap.org', 'api.line.me'];
 const DEF_T = 'แจ้งเตือนนัดคิวทำงาน', on = (ev, fn) => self.addEventListener(ev, fn);
 const cln = s => String(s || '').replace(/\p{Extended_Pictographic}/gu, '').replace(/[ \t]{2,}/g, ' ').trim();
-const putC = (q, r) => { if (r && r.status === 200 && r.type === 'basic') { const c = r.clone(); caches.open(CACHE_NAME).then(x => x.put(q, c)).catch(() => {}); } return r; };
+const putC = (q, r) => (r && r.status === 200 && r.type === 'basic') ? caches.open(CACHE_NAME).then(x => x.put(q, r.clone())).catch(() => {}).then(() => r) : r;
 on('install', e => e.waitUntil(caches.open(CACHE_NAME).then(c => c.addAll(ASSETS)).catch(() => {}).then(() => self.skipWaiting())));
 on('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 on('fetch', e => { const q = e.request; if (q.method !== 'GET') return; let u; try { u = new URL(q.url); } catch (_) { return; }
