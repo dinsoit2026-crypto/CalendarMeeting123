@@ -637,6 +637,23 @@
     assertEq(h.api.state.currentUser, null, 'เมื่อบัญชีถูกลบระหว่างใช้งาน ต้องบังคับออกจากระบบทันที');
   });
 
+  test('B9. Frontend Sync', 'initApp ต้องอัปเกรดลิงก์ GAS เก่าใน localStorage เป็นลิงก์ปัจจุบันอัตโนมัติ และคงลิงก์กำหนดเองไว้', () => {
+    const h = createFrontendHarness(async () => {});
+    const oldUrl = 'https://script.google.com/macros/s/AKfycbyNCnQTj5goMgIru7OgSVj625AiVDptWPQnYAvYxKj_1r0BzgfLPLES9T51ph3DSYbS/exec';
+    h.lsMap.set('CAL_CONN_CFG_V2', JSON.stringify({ gasUrl: oldUrl, passcode: 'CALL1234', isLive: true }));
+    h.lsMap.set('CAL_LIVE_CACHE_V2', JSON.stringify({ user: 'admin', rev: 'old', appointments: [] }));
+    h.api.initApp();
+    assert(h.api.state.gasUrl !== oldUrl && h.api.state.gasUrl.includes('AKfycbwV6eELAM3SjyYI2dxUA2tY879qNfI_7ucl2qeXo5yNEw41YAKAYR5h_KXPX8YBtmQg'), 'ต้องย้ายลิงก์เก่าเป็น DEFAULT_GAS_URL ล่าสุดอัตโนมัติ');
+    assertEq(JSON.parse(h.lsMap.get('CAL_CONN_CFG_V2')).gasUrl, h.api.state.gasUrl, 'ต้องบันทึกลิงก์ใหม่ลง localStorage ทันที');
+    assert(!h.lsMap.has('CAL_LIVE_CACHE_V2'), 'ต้องล้างแคชเก่าหลังอัปเกรดลิงก์');
+
+    const hCustom = createFrontendHarness(async () => {});
+    const customUrl = 'https://script.google.com/macros/s/CUSTOM_TEAM_URL/exec';
+    hCustom.lsMap.set('CAL_CONN_CFG_V2', JSON.stringify({ gasUrl: customUrl, passcode: 'TEAM99', isLive: true }));
+    hCustom.api.initApp();
+    assertEq(hCustom.api.state.gasUrl, customUrl, 'ต้องไม่เขียนทับลิงก์ที่ผู้ใช้กำหนดเอง');
+  });
+
   Promise.all(asyncTests).then(() => {
     results.forEach(r => console.log(`[${r.ok ? 'PASS' : 'FAIL'}] ${r.suite} -> ${r.name}${r.err ? ' : ' + r.err : ''}`));
     console.log(`\nPerf & Sync Test Summary: ${passed} passed, ${failed} failed.`);

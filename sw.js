@@ -1,5 +1,5 @@
 'use strict';
-const CACHE_NAME = 'cal-pwa-v2.8.0', ASSETS = ['./', './index.html', './style.css', './app.js', './logic.js', './patchnotes.js', './manifest.json', './icon.svg'];
+const CACHE_NAME = 'cal-pwa-v2.8.1', ASSETS = ['./', './index.html', './style.css', './app.js', './logic.js', './patchnotes.js', './manifest.json', './icon.svg'];
 const BYP = ['script.google.com', 'script.googleusercontent.com', 'nominatim.openstreetmap.org', 'api.line.me'];
 const DEF_T = 'แจ้งเตือนนัดคิวทำงาน', on = (ev, fn) => self.addEventListener(ev, fn);
 const cln = s => String(s || '').replace(/\p{Extended_Pictographic}/gu, '').replace(/[ \t]{2,}/g, ' ').trim();
