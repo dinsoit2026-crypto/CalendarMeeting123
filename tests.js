@@ -1,5 +1,5 @@
 /**
- * tests.js - Automated Test Suite for Calendar System (v2.7.0)
+ * tests.js - Automated Test Suite for Calendar System (v2.8.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -240,9 +240,9 @@
   });
 
   // --- Suite 6: Patch Notes Integrity ---
-  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.7.0 ครบถ้วน', () => {
-    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 18, 'ต้องมีประวัติอย่างน้อย 18 เวอร์ชัน');
-    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5', '2.6.6', '2.6.7', '2.6.8', '2.7.0'].forEach(ver => {
+  runTest('6. Patch Notes', 'โครงสร้าง patchnotes.js ถูกต้องและมีเวอร์ชัน 2.4.0 ถึง 2.8.0 ครบถ้วน', () => {
+    assert(Array.isArray(PatchNotes) && PatchNotes.length >= 19, 'ต้องมีประวัติอย่างน้อย 19 เวอร์ชัน');
+    ['2.4.0', '2.5.0', '2.5.1', '2.5.2', '2.5.3', '2.6.0', '2.6.1', '2.6.2', '2.6.3', '2.6.4', '2.6.5', '2.6.6', '2.6.7', '2.6.8', '2.7.0', '2.8.0'].forEach(ver => {
       const p = PatchNotes.find(x => x.version === ver);
       assert(p && p.changes && p.changes.length > 0, `ต้องมีบันทึกเวอร์ชัน ${ver}`);
     });
@@ -310,10 +310,10 @@
   });
 
   // --- Suite 11: API Contract Parity ---
-  runTest('11. API Contract Parity', 'ตรวจสอบว่า CalendarLogic มีฟังก์ชันและค่าคงที่ครบ 43 รายการ', () => {
+  runTest('11. API Contract Parity', 'ตรวจสอบว่า CalendarLogic มีฟังก์ชันและค่าคงที่ครบ 48 รายการ', () => {
     const expectedKeys = [
-      'API_VERSION', 'STATUS', 'VALID_STATUSES', 'USER_ROLES', 'DEFAULT_USERS', 'THAI_MONTHS_SHORT', 'THAI_MONTHS_FULL', 'LINE_MAX_TEXT_LENGTH',
-      'hasEmoji', 'sanitizeNoEmoji', 'normalizeStatus', 'hashPassword', 'authenticateUser', 'validateUserInput', 'registerUserAccount',
+      'API_VERSION', 'STATUS', 'VALID_STATUSES', 'USER_ROLES', 'DEFAULT_USERS', 'SUSPEND_DURATIONS', 'THAI_MONTHS_SHORT', 'THAI_MONTHS_FULL', 'LINE_MAX_TEXT_LENGTH',
+      'hasEmoji', 'sanitizeNoEmoji', 'normalizeStatus', 'hashPassword', 'computeSuspendedUntil', 'evaluateUserSuspension', 'authenticateUser', 'applyUserSuspension', 'deleteUserAccount', 'validateUserInput', 'registerUserAccount',
       'normalizeYearToCE', 'toBuddhistYear', 'isLeapYearCE', 'getDaysInMonth', 'parseFlexibleDateInput', 'parseTimeInput', 'bangkokSlotToEpochMs',
       'getBangkokParts', 'daysBetweenDates', 'formatThaiDateDisplay', 'isActiveStatus', 'isOverdue', 'buildAppointmentSlot', 'findTimeConflicts',
       'validateAppointmentInput', 'generateAppointmentId', 'createAppointmentRecord', 'updateAppointmentRecord', 'isInQuietHours',
@@ -340,7 +340,7 @@
     runTest('13. GAS Guard Audit', 'gas/Code.gs มีฟังก์ชันครบถ้วน ไวยากรณ์ถูกต้อง และมีระบบ Low-Latency Cache ครบถ้วน', () => {
       const codeGs = readF('gas', 'Code.gs');
       new vm.Script(codeGs, { filename: 'Code.gs' });
-      ['setupDatabase', 'installTriggerAuto', 'installTriggerEvery15Minutes', 'installTriggerDailyAt8AM', 'removeNotificationTriggers', 'runNotificationEngine', 'doGet', 'doPost', 'readAllApts_', 'createApt_', 'updateApt_', 'deleteApt_', 'handleUserLogin_', 'handleUserRegister_', 'saveUser_', 'buildSyncBundle_', 'appendPlainRow_', 'buildAptFlexMsg_', 'handleLinePostback_', 'sendLineReply_']
+      ['setupDatabase', 'installTriggerAuto', 'installTriggerEvery15Minutes', 'installTriggerDailyAt8AM', 'removeNotificationTriggers', 'runNotificationEngine', 'doGet', 'doPost', 'readAllApts_', 'createApt_', 'updateApt_', 'deleteApt_', 'handleUserLogin_', 'handleUserRegister_', 'saveUser_', 'suspendUser_', 'deleteUser_', 'requestPasswordReset_', 'confirmPasswordReset_', 'createLineLinkCode_', 'adminGenerateResetOtp_', 'resetAdminPassword', 'buildOtpFlex_', 'buildSyncBundle_', 'appendPlainRow_', 'buildAptFlexMsg_', 'handleLinePostback_', 'sendLineReply_']
         .forEach(fn => assert(codeGs.includes(`function ${fn}`), `Code.gs ต้องมีฟังก์ชัน ${fn}`));
 
       const getSheetDataDef = codeGs.substring(codeGs.indexOf('function getSheetData_'), codeGs.indexOf('function setupDatabase'));
@@ -575,7 +575,58 @@
         }
       });
     });
+
+    runTest('16. Optional Contact DOM Audit', 'ช่อง #formContactPerson ใน index.html ต้องไม่บังคับ required', () => {
+      const html = readF('index.html');
+      const m = html.match(/<input[^>]*id="formContactPerson"[^>]*>/);
+      assert(m && !/\brequired\b/i.test(m[0]), 'input #formContactPerson ต้องไม่มี required');
+    });
   }
+
+  // --- Suite 16: Optional Contact Person ---
+  runTest('16. Optional Contact Person', 'สร้างและแก้ไขนัดหมายโดยเว้นว่างชื่อผู้นัดพบได้', () => {
+    const v = Logic.validateAppointmentInput({ title: 'งานประชุมภายในทีม', appointmentDate: '2026-11-25', appointmentTime: '10:00', location: 'ห้องประชุม 1' });
+    assert(v.valid && v.sanitized.contactPerson === '', 'ไม่ระบุ contactPerson ต้องผ่านและเป็นสตริงว่าง');
+    const rec = Logic.createAppointmentRecord({ title: 'งานประชุมภายในทีม', appointmentDate: '2026-11-25', appointmentTime: '10:00', location: 'ห้องประชุม 1' }, [], '2026-11-23T09:00:00+07:00');
+    assertEqual(rec.contactPerson, '', 'createAppointmentRecord ต้องเก็บ contactPerson ว่างได้');
+    const upd = Logic.updateAppointmentRecord(rec, { contactPerson: 'คุณเอก' }, { nowIso: '2026-11-23T09:30:00+07:00' });
+    assertEqual(upd.record.contactPerson, 'คุณเอก', 'อัปเดตเพิ่มชื่อผู้นัดพบภายหลังได้');
+    const clr = Logic.updateAppointmentRecord(upd.record, { contactPerson: '' }, { nowIso: '2026-11-23T09:45:00+07:00' });
+    assertEqual(clr.record.contactPerson, '', 'ล้างชื่อผู้นัดพบกลับเป็นว่างได้');
+  });
+
+  // --- Suite 17: Timed Suspension & Hard Account Deletion ---
+  runTest('17. User Suspension & Deletion', 'คำนวณเวลาระงับ 1/3/7/15 วัน/ถาวร, ปลดระงับอัตโนมัติ และลบบัญชีถูกต้อง', () => {
+    const baseIso = '2026-11-23T10:00:00+07:00';
+    assertEqual(Logic.computeSuspendedUntil('1d', baseIso), '2026-11-24T10:00:00+07:00', 'ระงับ 1 วัน');
+    assertEqual(Logic.computeSuspendedUntil('3d', baseIso), '2026-11-26T10:00:00+07:00', 'ระงับ 3 วัน');
+    assertEqual(Logic.computeSuspendedUntil('7d', baseIso), '2026-11-30T10:00:00+07:00', 'ระงับ 7 วัน');
+    assertEqual(Logic.computeSuspendedUntil('15d', baseIso), '2026-12-08T10:00:00+07:00', 'ระงับ 15 วัน');
+    assertEqual(Logic.computeSuspendedUntil('PERMANENT', baseIso), '', 'ระงับถาวรไม่มีวันหมดอายุ');
+
+    const adminActor = { userId: 'USR-001', username: 'admin', role: 'ADMIN' };
+    const staffActor = { userId: 'USR-002', username: 'somchai', role: 'STAFF' };
+    const list = Logic.DEFAULT_USERS.map(u => ({ ...u }));
+
+    assert(!Logic.applyUserSuspension(list, 'USR-003', '3d', 'ทดสอบ', staffActor, baseIso).ok, 'STAFF ต้องระงับไม่ได้');
+    assert(!Logic.applyUserSuspension(list, 'USR-001', '1d', 'ทดสอบ', adminActor, baseIso).ok, 'ห้ามระงับ admin หลัก');
+    assert(!Logic.deleteUserAccount(list, 'USR-001', adminActor).ok, 'ห้ามลบ admin หลัก');
+
+    const suspRes = Logic.applyUserSuspension(list, 'USR-003', '3d', 'ลาพักงาน', adminActor, baseIso);
+    assert(suspRes.ok && suspRes.user.isActive === false && suspRes.user.suspendedUntil === '2026-11-26T10:00:00+07:00', 'ADMIN ระงับ 3 วันสำเร็จ');
+
+    const blockedLogin = Logic.authenticateUser(suspRes.users, 'wipada', '1234', '2026-11-24T10:00:00+07:00');
+    assert(!blockedLogin.ok && blockedLogin.suspended && blockedLogin.error.includes('ชั่วคราว'), 'ต้องบล็อกการเข้าสู่ระบบระหว่างถูกระงับ');
+
+    const autoUnblockedLogin = Logic.authenticateUser(suspRes.users, 'wipada', '1234', '2026-11-26T10:00:01+07:00');
+    assert(autoUnblockedLogin.ok && autoUnblockedLogin.autoUnsuspended === true, 'เมื่อครบกำหนดเวลาต้องปลดระงับและเข้าสู่ระบบได้อัตโนมัติ');
+
+    const permRes = Logic.applyUserSuspension(list, 'USR-003', 'PERMANENT', 'พ้นสภาพ', adminActor, baseIso);
+    assert(!Logic.authenticateUser(permRes.users, 'wipada', '1234', '2030-01-01T10:00:00+07:00').ok, 'ระงับถาวรต้องเข้าไม่ได้แม้เวลาผ่านไป');
+
+    const delRes = Logic.deleteUserAccount(list, 'USR-003', adminActor);
+    assert(delRes.ok && !delRes.users.some(u => u.userId === 'USR-003'), 'deleteUserAccount ต้องลบบัญชีออกจากรายการจริง');
+  });
 
   // --- Runner Output ---
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {

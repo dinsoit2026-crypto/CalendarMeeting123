@@ -4,6 +4,24 @@
 
 ---
 
+## เวอร์ชัน 2.8.0 (23 พฤศจิกายน 2569) - LINE OTP Password Reset, Optional Contact Person, Timed Suspension & Permanent Deletion
+> **จุดเด่น:** เพิ่มระบบรีเซ็ตรหัสผ่านบนหน้า Login ผ่าน LINE + Apps Script + Google Sheets, ปรับชื่อผู้นัดพบเป็นไม่บังคับกรอก และเพิ่มระบบระงับสมาชิกแบบกำหนดระยะเวลา (1/3/7/15 วัน หรือถาวร) พร้อมฟังก์ชันลบบัญชีผู้ใช้ออกจากระบบถาวร
+
+### 1. ระบบรีเซ็ตรหัสผ่านหน้า Login และผูกบัญชี LINE (`index.html`, `app.js`, `gas/Code.gs`)
+- **Self-Service Reset ผ่าน LINE 1-on-1 (ไม่ต้องต่อฐานข้อมูลเพิ่ม):** เก็บ `lineUserId` ใน Google Sheets (`Users`) และเก็บ OTP 6 หลักแบบแฮช SHA-256 ใน `CacheService` (อายุ 10 นาที, ใช้ครั้งเดียว, ล็อกเมื่อกรอกผิด 5 ครั้ง, Cooldown 60 วินาที)
+- **รองรับทั้ง Push และฟรี 0 โควตา Reply API:** กดปุ่ม `ลืมรหัสผ่าน?` บนหน้า Login เพื่อรับ OTP เข้าแชทส่วนตัว LINE หรือพิมพ์ `รีเซ็ตรหัส` ในแชทส่วนตัว 1-on-1 กับบอท LINE ฟรีไม่หักโควตา
+- **หน้าต่างจัดการบัญชี (`บัญชี / LINE`):** รองรับทั้ง `ADMIN` และ `STAFF` สำหรับสร้างรหัสผูกบัญชี (`ผูกบัญชี XXXXXX`), ยกเลิกการผูก และเปลี่ยนรหัสผ่านด้วยตนเอง
+- **Fallback กรณียังไม่ผูก LINE & Emergency Admin Reset:** ส่งคำขอแจ้ง `ADMIN` เพื่อออกรหัส OTP ชั่วคราว 6 หลักได้จากตารางจัดการสมาชิก (ไม่ส่งโค้ดลับลงแชทกลุ่ม) พร้อมฟังก์ชัน `resetAdminPassword(newPassword)` ใน Apps Script Editor
+
+### 2. ชื่อผู้นัดพบแบบไม่บังคับกรอก (`index.html`, `logic.js`, `gas/Code.gs`)
+- ยกเลิกการบังคับกรอก (`required`) ของช่อง `ชื่อผู้นัดพบ / ลูกค้า` ทั้งฝั่งฟอร์มหน้าเว็บ, `CalendarLogic.validateAppointmentInput`, และ `Code.gs` (`validateApt_`) โดยคงการแสดง `-` ในการ์ด รายงาน CSV/PDF และ Flex Message
+
+### 3. ระบบระงับสมาชิกแบบกำหนดช่วงเวลา และลบบัญชีถาวร (`logic.js`, `gas/Code.gs`, `index.html`, `app.js`)
+- **ระงับแบบกำหนดเวลา (`1 วัน`, `3 วัน`, `7 วัน`, `15 วัน`, `ถาวร`):** เพิ่มคอลัมน์ `suspendedUntil` และ `suspendReason` ในชีต `Users`, แสดงเวลาที่เหลือเมื่อถูกบล็อก และปลดระงับอัตโนมัติเมื่อครบกำหนด
+- **ลบบัญชีผู้ใช้ถาวร (`deleteUser_` Hard Delete):** ลบแถวบัญชีออกจาก Google Sheets จริง (ต้องพิมพ์ชื่อบัญชีให้ตรงกันเพื่อยืนยัน), ล็อกไม่ให้นำรหัส `USR-XXX` เก่ามาใช้ซ้ำ (`LAST_USER_SEQ`), คงประวัตินัดหมายเดิมไว้ครบถ้วน และบังคับผู้ใช้งานที่กำลังล็อกอินอยู่ออกจากระบบทันทีเมื่อบัญชีถูกระงับหรือถูกลบ
+
+---
+
 ## เวอร์ชัน 2.7.0 (19 พฤศจิกายน 2569) - Delta Sync Engine, Cross-Request GAS Cache, Multi-Tab Sync & Full Codebase Compaction
 > **จุดเด่น:** ยกระดับความเร็วการซิงก์ข้อมูลจากทุกช่องทาง (เว็บ มือถือ แท็บเบราว์เซอร์ Google Sheets และ LINE Bot) ด้วยโปรโตคอล `sinceRev` Delta Sync + `CacheService` แบบแยก Scope และป้องกัน Cache Poisoning พร้อม Lazy Loading ทรัพยากรหนักและ Compact โค้ดทั้งโปรเจกต์
 

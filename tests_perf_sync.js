@@ -1,5 +1,5 @@
 /**
- * tests_perf_sync.js - Performance, Delta Sync, CacheService & Integrity Test Suite (v2.7.0)
+ * tests_perf_sync.js - Performance, Delta Sync, CacheService & Integrity Test Suite (v2.8.0)
  * นโยบายเคร่งครัด: ห้ามใช้อิโมจิในทุกกรณี (Zero-Emoji Policy)
  */
 (function () {
@@ -23,7 +23,7 @@
   // --- Shared GAS Realistic Multi-Request Simulator ---
   const codeGsSrc = readF('gas', 'Code.gs');
   function createGasEnv() {
-    const sheets = {}, cacheStore = new Map(), propStore = { API_PASSCODE: '' };
+    const sheets = {}, cacheStore = new Map(), propStore = { API_PASSCODE: '' }, fetchCalls = [];
     const metrics = { sheetReads: 0, sheetWrites: 0, cacheGets: 0, cachePuts: 0, cacheGetAlls: 0, cachePutAlls: 0, cacheRemoves: 0, propGets: 0, propSets: 0 };
     let onBeforeRead = null;
 
@@ -119,7 +119,7 @@
           getUuid: () => 'uuid-' + Math.random().toString(36).slice(2)
         },
         ContentService: { MimeType: { JSON: 'application/json' }, createTextOutput: t => ({ _text: t, setMimeType() { return this; } }) },
-        UrlFetchApp: { fetch: () => ({ getResponseCode: () => 200, getContentText: () => '{}' }), fetchAll: reqs => reqs.map(() => ({ getResponseCode: () => 200, getContentText: () => '{}' })) },
+        UrlFetchApp: { fetch: (u, o) => { fetchCalls.push({ url: u, payload: o && o.payload ? JSON.parse(o.payload) : null }); return { getResponseCode: () => 200, getContentText: () => '{}' }; }, fetchAll: reqs => reqs.map(() => ({ getResponseCode: () => 200, getContentText: () => '{}' })) },
         ScriptApp: { getProjectTriggers: () => [], newTrigger: () => ({ timeBased: () => ({ everyDays: () => ({ atHour: () => ({ create: () => ({ getUniqueId: () => 't1' }) }) }), everyHours: () => ({ create: () => ({ getUniqueId: () => 't2' }) }), at: () => ({ create: () => ({ getUniqueId: () => 't3' }) }) }) }), deleteTrigger() {} },
         Session: { getScriptTimeZone: () => 'Asia/Bangkok' }
       };
@@ -136,7 +136,7 @@
     // Bootstrap sheets
     newCtx().setupDatabase();
     resetMetrics();
-    return { sheets, cacheStore, propStore, metrics, resetMetrics, newCtx, callPost, setOnBeforeRead: fn => { onBeforeRead = fn; } };
+    return { sheets, cacheStore, propStore, fetchCalls, metrics, resetMetrics, newCtx, callPost, setOnBeforeRead: fn => { onBeforeRead = fn; } };
   }
 
   // --- Suite A: GAS Delta Sync, CacheService & Batch I/O ---
@@ -274,7 +274,7 @@
   // --- Suite B: Frontend Sync Safety, Multi-Tab & Storage Recovery ---
   function createFrontendHarness(fetchImpl) {
     const lsMap = new Map(), winListeners = {}, docListeners = {};
-    const makeEl = id => ({ id, value: '', checked: false, disabled: false, textContent: '', innerHTML: '', href: '', src: '', style: {}, attributes: {}, classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, f) { f === undefined ? (this._s.has(c) ? this._s.delete(c) : this._s.add(c)) : (f ? this._s.add(c) : this._s.delete(c)); }, contains(c) { return this._s.has(c); } }, setAttribute(k, v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k] ?? null; }, addEventListener() {}, closest: () => null, querySelectorAll: () => [] });
+    const makeEl = id => ({ id, value: '', checked: false, disabled: false, textContent: '', innerHTML: '', href: '', src: '', style: {}, attributes: {}, classList: { _s: new Set(), add(c) { this._s.add(c); }, remove(c) { this._s.delete(c); }, toggle(c, f) { f === undefined ? (this._s.has(c) ? this._s.delete(c) : this._s.add(c)) : (f ? this._s.add(c) : this._s.delete(c)); }, contains(c) { return this._s.has(c); } }, setAttribute(k, v) { this.attributes[k] = String(v); }, getAttribute(k) { return this.attributes[k] ?? null; }, addEventListener() {}, appendChild() {}, remove() {}, closest: () => null, querySelectorAll: () => [] });
     const elCache = new Map();
     const getEl = id => elCache.get(id) || (elCache.set(id, makeEl(id)), elCache.get(id));
     let quotaThrowOnce = false, listRenderCount = 0;
@@ -494,6 +494,147 @@
     await new Promise(r => setTimeout(r, 40));
     assertEq(scriptAppends, 1, `ต้องพยายามโหลด patchnotes.js แค่ 1 ครั้งเมื่อ error (โหลดไป ${scriptAppends} ครั้ง)`);
     assert(container.innerHTML.includes('ไม่สามารถโหลดประวัติการอัปเดตได้'), 'ต้องแสดงข้อความแจ้งเตือนเมื่อโหลดไม่สำเร็จ');
+  });
+
+  // --- Suite D: GAS v2.8.0 Features (Optional Contact, Timed Suspension, Hard Delete, LINE OTP Reset) ---
+  test('D1. GAS v2.8.0 Optional Contact', 'สร้างและแก้ไขนัดหมายใน GAS โดยไม่กรอก contactPerson ได้สำเร็จ', () => {
+    const env = createGasEnv();
+    const c = env.callPost({ action: 'create', notifyLine: false, payload: { title: 'ประชุมทีมภายใน', appointmentDate: '2026-12-10', appointmentTime: '10:00', location: 'ห้อง A' } });
+    assert(c.ok && c.data.appointment.contactPerson === '', 'createApt_ ต้องสร้างสำเร็จเมื่อเว้นว่าง contactPerson');
+    const u = env.callPost({ action: 'update', id: c.data.appointment.id, notifyLine: false, payload: { location: 'ห้อง B', contactPerson: '' } });
+    assert(u.ok && u.data.appointment.location === 'ห้อง B' && u.data.appointment.contactPerson === '', 'updateApt_ ต้องแก้ไขสำเร็จเมื่อ contactPerson ว่าง');
+  });
+
+  test('D2. GAS v2.8.0 Timed Suspension', 'ระงับสมาชิก 1/3/7/15 วัน/ถาวร บล็อก Login และปลดระงับอัตโนมัติเมื่อครบเวลา', () => {
+    const env = createGasEnv();
+    const staffAttempt = env.callPost({ action: 'suspendUser', actorUserId: 'USR-002', userId: 'USR-003', duration: '1d', reason: 'ทดสอบ' });
+    assert(!staffAttempt.ok && staffAttempt.error.includes('ADMIN'), 'STAFF ต้องระงับสมาชิกไม่ได้');
+    assert(!env.callPost({ action: 'suspendUser', actorUserId: 'USR-001', userId: 'USR-001', duration: '1d' }).ok, 'ADMIN ต้องระงับตัวเองหรือ admin หลักไม่ได้');
+
+    const s3 = env.callPost({ action: 'suspendUser', actorUserId: 'USR-001', userId: 'USR-003', duration: '3d', reason: 'ลาพักร้อน' });
+    assert(s3.ok && s3.data.user.isActive === false && s3.data.user.suspendedUntil && s3.data.user.suspendReason === 'ลาพักร้อน', 'ระงับ 3 วันสำเร็จและคืน suspendedUntil');
+
+    const badLogin = env.callPost({ action: 'login', username: 'wipada', password: '1234' });
+    assert(!badLogin.ok && badLogin.error.includes('ระงับการใช้งานชั่วคราว'), 'ต้องบล็อกการล็อกอินระหว่างถูกระงับ');
+    assert(!env.callPost({ action: 'requestPasswordReset', username: 'wipada' }).ok, 'บัญชีที่ถูกระงับต้องขอรีเซ็ตรหัสผ่านไม่ได้');
+
+    // Simulate suspension expiry in Users sheet -> auto-unblock on login
+    const uRows = env.sheets.Users, hdrs = uRows[0], suspIdx = hdrs.indexOf('suspendedUntil'), rIdx = uRows.findIndex(r => r[0] === 'USR-003');
+    uRows[rIdx][suspIdx] = '2020-01-01T00:00:00+07:00';
+    env.cacheStore.clear();
+    const okLogin = env.callPost({ action: 'login', username: 'wipada', password: '1234' });
+    assert(okLogin.ok && okLogin.data.user.username === 'wipada', 'เมื่อครบกำหนดระงับต้องปลดระงับและล็อกอินได้อัตโนมัติ');
+    assertEq(uRows[rIdx][hdrs.indexOf('isActive')], 'TRUE', 'คอลัมน์ isActive ในชีต Users ต้องถูกอัปเดตกลับเป็น TRUE');
+    assertEq(uRows[rIdx][suspIdx], '', 'คอลัมน์ suspendedUntil ในชีต Users ต้องถูกล้าง');
+
+    const perm = env.callPost({ action: 'suspendUser', actorUserId: 'USR-001', userId: 'USR-003', duration: 'PERMANENT', reason: 'ยกเลิกสิทธิ์' });
+    assert(perm.ok && perm.data.user.isActive === false && perm.data.user.suspendedUntil === '', 'ระงับถาวรสำเร็จ');
+    assert(!env.callPost({ action: 'login', username: 'wipada', password: '1234' }).ok, 'บัญชีระงับถาวรต้องเข้าไม่ได้');
+    const unsusp = env.callPost({ action: 'suspendUser', actorUserId: 'USR-001', userId: 'USR-003', duration: 'UNSUSPEND' });
+    assert(unsusp.ok && unsusp.data.user.isActive === true, 'ปลดระงับทันทีสำเร็จ');
+  });
+
+  test('D3. GAS v2.8.0 Hard Account Deletion', 'ลบบัญชีถาวรออกจากชีต Users จริง ไม่ใช้เลข USR ซ้ำ และคงประวัตินัดหมายเดิม', () => {
+    const env = createGasEnv();
+    env.callPost({ action: 'create', notifyLine: false, payload: { title: 'งานของสมชาย', appointmentDate: '2026-12-12', appointmentTime: '09:00', location: 'กทม.', createdBy: 'คุณสมชาย' } });
+    const countBefore = env.sheets.Users.length;
+    assert(!env.callPost({ action: 'deleteUser', actorUserId: 'USR-001', userId: 'USR-001' }).ok, 'ห้ามลบ admin หลัก');
+    assert(!env.callPost({ action: 'deleteUser', actorUserId: 'USR-002', userId: 'USR-003' }).ok, 'STAFF ห้ามลบบัญชี');
+
+    const del = env.callPost({ action: 'deleteUser', actorUserId: 'USR-001', userId: 'USR-004' });
+    assert(del.ok && del.data.result.deleted === true, 'deleteUser ต้องลบสำเร็จ');
+    assertEq(env.sheets.Users.length, countBefore - 1, 'จำนวนแถวในชีต Users ต้องลดลงจริง');
+    assert(!env.callPost({ action: 'login', username: 'naphatsorn', password: '1234' }).ok, 'บัญชีที่ถูกลบต้องล็อกอินไม่ได้');
+    assert(!env.callPost({ action: 'requestPasswordReset', username: 'naphatsorn' }).ok, 'บัญชีที่ถูกลบต้องรีเซ็ตรหัสไม่ได้');
+
+    const reg = env.callPost({ action: 'register', payload: { username: 'newuser99', displayName: 'คุณใหม่ 99', password: '1234', confirmPassword: '1234' } });
+    assert(reg.ok && reg.data.user.userId === 'USR-005', `รหัส USR ใหม่ต้องไม่ซ้ำกับ USR-004 ที่ถูกลบ (ได้ ${reg.data && reg.data.user && reg.data.user.userId})`);
+    const apts = env.callPost({ action: 'list', force: true }).data.appointments;
+    assertEq(apts.length, 1, 'รายการนัดหมายเดิมในระบบต้องยังคงอยู่ครบถ้วน');
+  });
+
+  test('D4. GAS v2.8.0 LINE Bind & Password Reset', 'ผูกบัญชี LINE 1-on-1, ส่ง OTP ทาง Push และ Reply DM ฟรี, Cooldown 60 วิ, ล็อกเมื่อผิด 5 ครั้ง และ Admin Fallback', () => {
+    const env = createGasEnv();
+    env.propStore.LINE_CHANNEL_ACCESS_TOKEN = 'test-token';
+    env.propStore.LINE_TARGET_ID = 'C_TEAM_GROUP';
+
+    // 1) Unlinked user fallback -> must NOT expose OTP
+    const unlRes = env.callPost({ action: 'requestPasswordReset', username: 'somchai', notifyAdmin: false });
+    assert(unlRes.ok && unlRes.data.needsAdminReset === true && !unlRes.data.otp, 'ยังไม่ผูก LINE ต้องไม่ส่ง OTP หรือหลุดออกหน้าเว็บ');
+
+    // Admin generates temporary OTP for unlinked user
+    const admOtp = env.callPost({ action: 'adminGenerateResetOtp', actorUserId: 'USR-001', userId: 'USR-002' });
+    assert(admOtp.ok && /^\d{6}$/.test(admOtp.data.otp), 'ADMIN ออก OTP 6 หลักชั่วคราวได้');
+    assert(!env.callPost({ action: 'adminGenerateResetOtp', actorUserId: 'USR-002', userId: 'USR-003' }).ok, 'STAFF ห้ามออก OTP');
+
+    // 2) Link LINE account via 1-on-1 DM (group chat must be rejected)
+    const linkCode = env.callPost({ action: 'createLineLinkCode', actorUserId: 'USR-002' });
+    assert(linkCode.ok && /^\d{6}$/.test(linkCode.data.code), 'สร้างรหัสผูกบัญชี LINE 6 หลักสำเร็จ');
+    const sb = env.newCtx();
+    const grpAttempt = sb.parseWebhookCmd_(linkCode.data.command, 'C_TEAM_GROUP', 'U_SOMCHAI');
+    assert(JSON.stringify(grpAttempt).includes('ไม่อนุญาตในแชทกลุ่ม'), 'ห้ามผูกบัญชีในแชทกลุ่ม');
+    const dmBind = sb.parseWebhookCmd_(linkCode.data.command, '', 'U_SOMCHAI');
+    assert(JSON.stringify(dmBind).includes('ผูกบัญชี LINE สำเร็จ'), 'ผูกบัญชีในแชทส่วนตัวสำเร็จ');
+
+    const pubUsers = env.callPost({ action: 'listUsers' }).data.users;
+    const somchaiPub = pubUsers.find(u => u.username === 'somchai');
+    assert(somchaiPub.hasLineLinked === true && !somchaiPub.lineUserId, 'listUsers ต้องส่งเฉพาะ hasLineLinked โดยไม่เปิดเผย lineUserId จริง');
+
+    // 3) Request password reset -> Push Flex OTP to U_SOMCHAI + enforce 60s cooldown
+    env.fetchCalls.length = 0;
+    const pushReset = env.callPost({ action: 'requestPasswordReset', username: 'somchai' });
+    assert(pushReset.ok && pushReset.data.sent === true && env.fetchCalls.length === 1, 'ต้องยิง Push OTP ไปยัง LINE ส่วนตัว');
+    const pushPayload = env.fetchCalls[0].payload;
+    assertEq(pushPayload.to, 'U_SOMCHAI', 'ต้องส่งเฉพาะ LINE userId ส่วนตัวของบัญชีนั้น');
+    assert(!Logic.hasEmoji(JSON.stringify(pushPayload)), 'Flex OTP ต้องไร้ Emoji');
+    const otpMatch = JSON.stringify(pushPayload).match(/\b(\d{6})\b/);
+    assert(otpMatch, 'ต้องพบรหัส OTP 6 หลักใน Flex message');
+    const sentOtp = otpMatch[1];
+
+    // Cooldown guard
+    const cdErr = env.callPost({ action: 'requestPasswordReset', username: 'somchai' });
+    assert(!cdErr.ok && cdErr.error.includes('60 วินาที'), 'ต้องติด Cooldown 60 วินาที');
+
+    // 5 wrong attempts lock out OTP
+    const wrongOtp = sentOtp === '111111' ? '222222' : '111111';
+    for (let i = 1; i <= 5; i++) {
+      const bad = env.callPost({ action: 'confirmPasswordReset', username: 'somchai', otp: wrongOtp, newPassword: 'newpw', confirmPassword: 'newpw' });
+      assert(!bad.ok, `กรอกผิดครั้งที่ ${i} ต้องไม่ผ่าน`);
+    }
+    assert(!env.callPost({ action: 'confirmPasswordReset', username: 'somchai', otp: sentOtp, newPassword: 'newpw', confirmPassword: 'newpw' }).ok, 'หลังผิดครบ 5 ครั้ง OTP เดิมต้องถูกยกเลิก');
+
+    // 4) Free Reply DM "รีเซ็ตรหัส" (0 Push calls!) -> confirm reset -> login new pw -> cannot reuse OTP
+    env.cacheStore.delete('PWD_CD_somchai');
+    env.fetchCalls.length = 0;
+    const grpReset = sb.parseWebhookCmd_('รีเซ็ตรหัส', 'C_TEAM_GROUP', 'U_SOMCHAI');
+    assert(JSON.stringify(grpReset).includes('ไม่อนุญาตในแชทกลุ่ม'), 'ห้ามขอ OTP ในแชทกลุ่ม');
+    const dmOtpFlex = sb.parseWebhookCmd_('รีเซ็ตรหัส', '', 'U_SOMCHAI');
+    assertEq(env.fetchCalls.length, 0, 'คำสั่ง รีเซ็ตรหัส ในแชทส่วนตัวต้องใช้ Reply API โดยไม่เรียก Push');
+    const dmOtp = JSON.stringify(dmOtpFlex).match(/\b(\d{6})\b/)[1];
+    const okReset = env.callPost({ action: 'confirmPasswordReset', username: 'somchai', otp: dmOtp, newPassword: 'pass999', confirmPassword: 'pass999' });
+    assert(okReset.ok, 'เปลี่ยนรหัสผ่านด้วย OTP จาก LINE DM สำเร็จ');
+    assert(!env.callPost({ action: 'confirmPasswordReset', username: 'somchai', otp: dmOtp, newPassword: 'pass888', confirmPassword: 'pass888' }).ok, 'OTP ที่ใช้แล้วต้องใช้ซ้ำไม่ได้');
+    assert(!env.callPost({ action: 'login', username: 'somchai', password: '1234' }).ok, 'รหัสผ่านเก่าต้องเข้าไม่ได้แล้ว');
+    assert(env.callPost({ action: 'login', username: 'somchai', password: 'pass999' }).ok, 'รหัสผ่านใหม่ต้องเข้าสู่ระบบได้ทันที');
+
+    // Emergency resetAdminPassword helper
+    assert(sb.resetAdminPassword('adm2026').includes('เรียบร้อย') && env.callPost({ action: 'login', username: 'admin', password: 'adm2026' }).ok, 'resetAdminPassword ต้องรีเซ็ตรหัส admin ได้');
+  });
+
+  test('D5. Frontend Active Session Enforcement', 'applySyncBundle ต้องบังคับ Logout ทันทีเมื่อผู้ใช้ปัจจุบันถูกระงับหรือถูกลบ', () => {
+    const h = createFrontendHarness(async () => {});
+    h.api.state.currentUser = { userId: 'USR-003', username: 'wipada', displayName: 'คุณวิภาดา', role: 'STAFF' };
+    h.lsMap.set('CAL_AUTH_USER_V2', JSON.stringify(h.api.state.currentUser));
+    // Case 1: User suspended on server
+    h.api.applySyncBundle({ appointments: [], users: [{ userId: 'USR-001', username: 'admin', role: 'ADMIN', isActive: true }, { userId: 'USR-003', username: 'wipada', role: 'STAFF', isActive: false, suspendedUntil: '2099-01-01T00:00:00+07:00' }], rev: 'r10' });
+    assertEq(h.api.state.currentUser, null, 'เมื่อบัญชีถูกระงับระหว่างใช้งาน ต้องบังคับออกจากระบบทันที');
+    assert(!h.lsMap.has('CAL_AUTH_USER_V2'), 'ต้องล้าง session ใน localStorage');
+
+    // Case 2: User permanently deleted on server
+    h.api.state.currentUser = { userId: 'USR-004', username: 'naphatsorn', displayName: 'คุณนภัสสร', role: 'STAFF' };
+    h.lsMap.set('CAL_AUTH_USER_V2', JSON.stringify(h.api.state.currentUser));
+    h.api.applySyncBundle({ appointments: [], users: [{ userId: 'USR-001', username: 'admin', role: 'ADMIN', isActive: true }], rev: 'r11' });
+    assertEq(h.api.state.currentUser, null, 'เมื่อบัญชีถูกลบระหว่างใช้งาน ต้องบังคับออกจากระบบทันที');
   });
 
   Promise.all(asyncTests).then(() => {
