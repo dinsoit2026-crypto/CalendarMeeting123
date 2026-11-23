@@ -38,11 +38,11 @@
 - `app.js` - ตัวควบคุมหน้าเว็บ, Delta Sync, Multi-Tab Storage Sync, O(1) Index, PWA & Web Push Engine, Duplicate/Copy/ICS, CSV/Print Report Engine และ Optimistic UI (v2.8.0)
 - `logic.js` - ฟังก์ชันคำนวณวันเวลา (Asia/Bangkok), ตรวจสอบความถูกต้อง, ระบบแจ้งเตือน, SHA-256 Hash, Timed Suspension, ตรวจสอบคิวชนกัน และสรุปสถิติ O(N) (v2.8.0)
 - `manifest.json` / `sw.js` / `icon.svg` - ชุดไฟล์มาตรฐาน PWA Standalone (Stale-While-Revalidate + Web Push & Notification Click Handlers)
-- `patchnotes.js` / `CHANGELOG.md` - บันทึกประวัติการพัฒนาและฟีเจอร์แต่ละเวอร์ชัน
+- `patchnotes.js` / `PATCHNOTES.md` - บันทึกประวัติการพัฒนาและฟีเจอร์แต่ละเวอร์ชัน
 - `tests.js` / `tests.html` / `tests_perf_sync.js` - ชุดทดสอบอัตโนมัติ (ครอบคลุม API Contract, DOM Audit, Zero-Emoji, Delta Sync, CacheService Chunking, Multi-Tab Sync, PWA/Web Push, Flex Audit, Timed Suspension, LINE OTP Reset และ Benchmark)
 - `SETUP_GUIDE.md` - คู่มือการติดตั้งระบบ LINE Messaging API และ Google Sheets
 - `gas/Code.gs` - โค้ดฝั่งเซิร์ฟเวอร์ Google Apps Script พร้อม Delta Sync, Cross-Request CacheService, LINE OTP Password Reset และ Timed Suspension/Hard Delete (v2.8.0)
 - `gas/appsscript.json` - ค่าคอนฟิกโปรเจกต์ Apps Script (Asia/Bangkok, V8 Runtime)
 
 ## ประวัติการปรับปรุงระบบ (Patch Notes)
-ดูรายละเอียดการพัฒนาทั้งหมดในแต่ละเวอร์ชันได้ที่ [CHANGELOG.md](file:///c:/Calendar/CHANGELOG.md) หรือคลิกป้ายเวอร์ชัน `v2.8.0` บนแถบด้านบนของหน้าเว็บแอปพลิเคชัน
+ดูรายละเอียดการพัฒนาทั้งหมดในแต่ละเวอร์ชันได้ที่ [PATCHNOTES.md](file:///c:/Calendar/PATCHNOTES.md) หรือคลิกป้ายเวอร์ชัน `v2.8.0` บนแถบด้านบนของหน้าเว็บแอปพลิเคชัน

@@ -4,6 +4,15 @@
 
 ---
 
+## เวอร์ชัน 2.8.1 (23 พฤศจิกายน 2569) - Auto-Migrate Legacy GAS URL & PWA Cache Refresh
+> **จุดเด่น:** แก้ไขปัญหาอุปกรณ์เดิม (คอมพิวเตอร์และมือถือ PWA) ที่เคยบันทึกลิงก์ Google Apps Script เวอร์ชันเก่าค้างไว้ในเครื่อง จนเรียกใช้งานฟีเจอร์ `v2.8.0` ไม่ได้ โดยอัปเกรดลิงก์และล้างแคชเก่าให้อัตโนมัติทันทีที่เปิดแอป
+
+- **Auto-Migrate ลิงก์ Google Apps Script เก่า (`app.js`):** ตรวจสอบและอัปเกรดลิงก์ Deployment เก่า (`...3DSYbS/exec`, `...e--ro/exec`) ที่ค้างอยู่ใน `localStorage` (`CAL_CONN_CFG_V2`) มาเป็นลิงก์ล่าสุด (`v2.8.0`) พร้อมล้าง `LIVE_CACHE` อัตโนมัติเมื่อเปิดแอป (โดยไม่ทับลิงก์กรณีผู้ใช้กำหนด URL เอง) และล้างแคชเก่าเมื่อกด `ดึงค่าเริ่มต้นทีม` แก้ปัญหา error `ไม่รู้จัก action: createLineLinkCode` บนอุปกรณ์เดิม 100%
+- **PWA Service Worker Cache Bust (`sw.js`):** อัปเกรด `CACHE_NAME` เป็น `cal-pwa-v2.8.1` เพื่อให้แอป PWA ที่ติดตั้งไว้บนมือถือดาวน์โหลด `app.js` ชุดล่าสุดโดยอัตโนมัติ (คง `API_VERSION` ที่ `2.8.0` จึงไม่ต้อง Deploy `gas/Code.gs` ใหม่)
+- **ชุดทดสอบและเอกสาร (`tests_perf_sync.js`, `PATCHNOTES.md`, `patchnotes.js`, `README.md`, `tests.js`):** เพิ่มเคสทดสอบ `B9` ตรวจสอบการ Auto-Migrate URL เก่าและการคง URL ที่กำหนดเอง และย้ายเอกสารบันทึกประวัติการอัปเดตมารวมที่ `PATCHNOTES.md`
+
+---
+
 ## เวอร์ชัน 2.8.0 (23 พฤศจิกายน 2569) - LINE OTP Password Reset, Optional Contact Person, Timed Suspension & Permanent Deletion
 > **จุดเด่น:** เพิ่มระบบรีเซ็ตรหัสผ่านบนหน้า Login ผ่าน LINE + Apps Script + Google Sheets, ปรับชื่อผู้นัดพบเป็นไม่บังคับกรอก และเพิ่มระบบระงับสมาชิกแบบกำหนดระยะเวลา (1/3/7/15 วัน หรือถาวร) พร้อมฟังก์ชันลบบัญชีผู้ใช้ออกจากระบบถาวร
 
