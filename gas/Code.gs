@@ -1,337 +1,680 @@
 /** Code.gs - Google Apps Script Backend for Calendar & LINE System (v2.8.0) */
-var API_VER='2.8.0',SH_USERS='Users',SH_APTS='Appointments',SH_RE_LOGS='RescheduleLogs',SH_NOTIF_LOGS='NotificationLogs',SH_META='SystemMeta',LN_API='https://api.line.me/v2/bot/',S_SYS='ผู้ใช้งานระบบ';
-var E_PW4='รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร',E_DUP_UN='ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น';
-var USER_COLS=['userId','username','passwordHash','displayName','role','isActive','createdAt','lastLoginAt','lineUserId','suspendedUntil','suspendReason'],META_COLS=['key','value','updatedAt'];
-var SUSPEND_DAYS_MAP={'1d':1,'3d':3,'7d':7,'15d':15,PERMANENT:0},ACCT_CMD_RE=/^(?:ผูกบัญชี(?:\s+\d{1,8})?|รีเซ็ตรหัส(?:ผ่าน)?|ลืมรหัส(?:ผ่าน)?|ขอรหัส\s*otp)$/i;
-var APT_COLS=['id','title','appointmentDate','appointmentTime','location','contactPerson','status','remindDaysBefore','remindHoursBefore','notifiedDayForSlot','notifiedHourForSlot','rescheduleCount','notes','createdBy','statusChangedBy','statusChangedAt','statusReason','updatedBy','createdAt','updatedAt','deletedAt','mapUrl','imageUrl'];
-var RE_LOG_COLS=['logId','appointmentId','changedAt','changedBy','fieldChanged','oldValue','newValue','reason'],NOTIF_LOG_COLS=['logId','sentAt','triggerType','appointmentIds','targetId','httpStatus','retryKey','errorMessage'];
-var STATUS={CONFIRMED: 'เริ่มนัด',COMPLETED:'สิ้นสุดการนัดหมาย',CANCELLED:'ยกเลิกการนัดหมาย'},S_CF=STATUS.CONFIRMED,S_CP=STATUS.COMPLETED,S_CN=STATUS.CANCELLED;
-var TH_MONTHS=['มกราคม','กุมภาพันธ์','มีนาคม','เมษายน','พฤษภาคม','มิถุนายน','กรกฎาคม','สิงหาคม','กันยายน','ตุลาคม','พฤศจิกายน','ธันวาคม'],TH_MONTHS_S=['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'],TH_MO_MAP={};
-TH_MONTHS.forEach(function(m,i){TH_MO_MAP[m]=i+1;});TH_MONTHS_S.forEach(function(m,i){TH_MO_MAP[m]=i+1;TH_MO_MAP[m.replace(/\./g,'')]=i+1;});
-var EMOJI_EXT_RE=/(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
-var EMOJI_MOD_RE=/[\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/gu,FAST_SAFE_RE=/^[\x00-\x7F\u0E00-\u0E7F]*$/;
-var Q_KEYS='ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ',C_KW='(?:สร้างนัด(?:หมาย)?|เพิ่มนัด(?:หมาย)?|นัด(?:หมาย)?ใหม่|สร้างงาน|เพิ่มงาน|งานใหม่|ลงนัด|ตั้งนัด|สร้างคิว|เพิ่มคิว|จองคิว)';
-var TH_ALT_GAS=TH_MONTHS.concat(TH_MONTHS_S.map(function(s){return s.replace(/\./g,'\\.?');})).join('|');
-var WEBHOOK_CMD_RE=new RegExp('^คิว(?:\\s+|'+Q_KEYS+'|'+C_KW+'|$)|^(?:'+Q_KEYS+'|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+|ผูกบัญชี(?:\\s+\\d{1,8})?|รีเซ็ตรหัส(?:ผ่าน)?|ลืมรหัส(?:ผ่าน)?|ขอรหัส\\s*otp|'+C_KW+'(?:[\\s:：]+[\\s\\S]+)?)$','i');
-var CREATE_CMD_RE=new RegExp('^'+C_KW+'(?:[\\s:：]+([\\s\\S]+))?$','i'),CREATE_KW_RE=new RegExp('^'+C_KW+'(?:[\\s:：]|$)','i');
-var KV_RE=/^(หัวข้อ|งาน|เรื่อง|วันที่|วันนัด|วัน|วันเวลา|เวลา|เวลานัด|สถานที่|ที่นัดหมาย|ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ|เตือน|แจ้งเตือน|หมายเหตุ|รายละเอียด|แผนที่|พิกัด)\s*[:：]\s*(.+)$/i;
-function tr_(v){return String(v==null?'':v).trim();}
-var DT_TOK_RE=new RegExp('(?:^|\\s)((?:(?:วันที่|วันนัด|วัน(?=\\s|[:：]))\\s*[:：]?\\s*)?(?:วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}(?:[-/]\\d{2,4})?|\\d{1,2}\\s*(?:'+TH_ALT_GAS+')(?:\\s*(?:\\d{4}|\\d{2}(?!\\s*(?:โมง|[:.]))))?))(?=\\s|$)','i');
-var TM_TOK_RE=/(?:^|\s)((?:(?:เวลา|เวลานัด)\s*[:：]?\s*)?(?:\d{1,2}[:.]\d{2}(?:\s*[-~ถึง]\s*\d{1,2}[:.]\d{2})?\s*(?:น\.?|โมง)?|\d{1,2}\s*โมง(?:ครึ่ง)?))(?=\s|$)/i;function isTrue_(v){return v===true||String(v).toUpperCase()==='TRUE';}
-function sanitizeNoEmoji(s){if(s==null)return'';var str=String(s);return(FAST_SAFE_RE.test(str)?str:str.replace(EMOJI_EXT_RE,'').replace(EMOJI_MOD_RE,'')).replace(/[ \t]{2,}/g,' ').trim();}function normalizeStatus_(st){if(st===S_CF||st===S_CP||st===S_CN)return st;var s=_sn(st||S_CF);return(s===S_CP||s===S_CN)?s:S_CF;}
-function cmpSlot_(x,y){var xd=x.appointmentDate||'',yd=y.appointmentDate||'';if(xd&&yd&&x.appointmentTime&&y.appointmentTime)return xd<yd?-1:(xd>yd?1:(x.appointmentTime<y.appointmentTime?-1:(x.appointmentTime>y.appointmentTime?1:0)));
-var sx=xd+'T'+(x.appointmentTime||''),sy=yd+'T'+(y.appointmentTime||'');return sx<sy?-1:(sx>sy?1:0);}function hashPassword_(str){var raw=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,String(str||''),Utilities.Charset.UTF_8),out='';
-for(var i=0;i<raw.length;i++)out+=((raw[i]<0?raw[i]+256:raw[i]).toString(16)).padStart(2,'0');return out;}var _ss=null,_shMap={},_metaCache=null,_dataCache={},_propsCache=null,_ps=null,_sc=null,_scPre=null,_revCache=null,_revSeq=0,_bypassCache=false,_sn=sanitizeNoEmoji,_ns=normalizeStatus_;
-var SCOPE_MAP={apts:'a',users:'u',meta:'m',relogs:'l'},CACHE_KEY_MAP={a:'CAL_A',u:'CAL_U',m:'CAL_M',l:'CAL_L'};function getSs_(){return _ss||(_ss=SpreadsheetApp.getActiveSpreadsheet());}function ps_(){try{return _ps||(_ps=PropertiesService.getScriptProperties());}catch(_){return null;}}
-function sc_(){try{return _sc||(_sc=CacheService.getScriptCache());}catch(_){return null;}}function getProps_(){if(_propsCache)return _propsCache;try{var p=ps_();return(_propsCache=(p&&p.getProperties?p.getProperties():null)||{});}catch(_){return(_propsCache={});}}
-function getProp_(k){return String(getProps_()[k]||'');}function setProp_(k,v){try{var p=ps_();if(p&&typeof p.setProperty==='function')p.setProperty(k,v);}catch(_){}(_propsCache||(_propsCache={}))[k]=v;}function delProp_(k){try{var p=ps_();if(p&&typeof p.deleteProperty==='function')p.deleteProperty(k);}catch(_){}if(_propsCache)delete _propsCache[k];}
-function parseRevObj_(raw){if(!raw)return null;var s=String(raw).trim();if(!s)return null;if(s.charAt(0)==='{')try{var o=JSON.parse(s);if(o&&o.g)return{g:String(o.g),a:String(o.a||o.g),u:String(o.u||o.g),m:String(o.m||o.g),l:String(o.l||o.g)};}catch(_){}
-return{g:s,a:s,u:s,m:s,l:s};}var PRE_KEYS={CAL_REV:1,CAL_M:1,CAL_U:1,CAL_L:1,CAL_A:1};function prewarmSc_(){if(_scPre||_bypassCache)return _scPre;var c=sc_();if(c&&typeof c.getAll==='function')try{_scPre=c.getAll(['CAL_REV','CAL_M','CAL_U','CAL_L','CAL_A'])||{};}catch(_){_scPre=null;}return _scPre;}
-function getRevs_(){if(_revCache&&!_bypassCache)return _revCache;var c=sc_(),raw='';if(!_bypassCache){var pre=prewarmSc_();if(pre)raw=pre.CAL_REV||'';else if(c)try{raw=c.get('CAL_REV')||'';}catch(_){}}var ro=parseRevObj_(raw);if(!ro){ro=parseRevObj_(getProp_('CAL_DATA_REV'))||{g:'1',a:'1',u:'1',m:'1',l:'1'};if(c)try{c.put('CAL_REV',JSON.stringify(ro),21600);}catch(_){}}
-return(_revCache=ro);}function getDataRev_(){return getRevs_().g;}function liveRevs_(){var c=sc_(),raw='';if(c)try{raw=c.get('CAL_REV')||'';}catch(_){}var ro=parseRevObj_(raw);if(ro)return ro;var p=ps_(),pr='';if(p&&typeof p.getProperty==='function')try{pr=p.getProperty('CAL_DATA_REV')||'';}catch(_){}return parseRevObj_(pr)||parseRevObj_(getProp_('CAL_DATA_REV'))||{g:'1',a:'1',u:'1',m:'1',l:'1'};}
-function bumpDataRev_(scopes){var ro=liveRevs_(),nr=Date.now().toString(36)+'-'+(++_revSeq),c=sc_();ro.g=nr;(scopes||['apts']).forEach(function(sc){var k=SCOPE_MAP[sc];if(!k)return;ro[k]=nr;if(c)try{var ck=CACHE_KEY_MAP[k];if(typeof c.remove==='function')c.remove(ck);else c.put(ck,'',1);}catch(_){}});
-var js=JSON.stringify(ro);_revCache=ro;_scPre=null;if(c)try{c.put('CAL_REV',js,21600);}catch(_){}setProp_('CAL_DATA_REV',js);return nr;}function cacheReadObj_(key,expectedRev){var c=sc_();if(!c)return null;var pre=prewarmSc_(),head='';if(pre&&PRE_KEYS[key])head=pre[key]||'';else try{head=c.get(key)||'';}catch(_){return null;}if(!head)return null;
-var p1='1:'+expectedRev+'|';if(head.indexOf(p1)===0)try{return JSON.parse(head.slice(p1.length));}catch(_){return null;}var pm='M:'+expectedRev+':';if(head.indexOf(pm)!==0)return null;var n=+head.slice(pm.length);if(!n||n<1||n>16)return null;
-var keys=[],raw='',map=null;for(var i=0;i<n;i++)keys.push(key+'_'+i);if(typeof c.getAll==='function')try{map=c.getAll(keys)||{};}catch(_){map=null;}for(var j=0;j<n;j++){var part=map?map[keys[j]]:c.get(keys[j]);if(!part)return null;raw+=part;}try{return JSON.parse(raw);}catch(_){return null;}}
-function cacheWriteObj_(key,expectedRev,scopeKey,obj,ttl){var c=sc_();if(!c)return;try{if(liveRevs_()[scopeKey]!==expectedRev)return;var js=JSON.stringify(obj),single='1:'+expectedRev+'|'+js;if(single.length<=29000||unescape(encodeURIComponent(single)).length<=88000){c.put(key,single,ttl);if(_scPre)_scPre[key]=single;return;}
-var chunks=[],i=0,len=js.length;while(i<len){var b=0,st=i;while(i<len){var cc=js.charCodeAt(i),cb=cc<128?1:(cc<2048?2:(cc>=55296&&cc<=56319?4:3));if(b+cb>86000)break;b+=cb;i+=(cb===4?2:1);}chunks.push(js.slice(st,i));}if(chunks.length>16)return;var batch={};batch[key]='M:'+expectedRev+':'+chunks.length;for(var j=0;j<chunks.length;j++)batch[key+'_'+j]=chunks[j];
-if(typeof c.putAll==='function')c.putAll(batch,ttl);else Object.keys(batch).forEach(function(bk){c.put(bk,batch[bk],ttl);});if(_scPre)_scPre[key]=batch[key];}catch(_){}}function invalidateSheetCache_(name){if(name)delete _dataCache[name];else _dataCache={};if(!name||name===SH_META)_metaCache=null;_scPre=null;}
-function formatPlainText_(sh,colCount){sh.getRange(1,1,Math.max(sh.getMaxRows(),500),Math.max(colCount||1,1)).setNumberFormat('@');}function putGrid_(sh,r,c,rows){sh.getRange(r,c,rows.length,rows[0].length).setNumberFormat('@').setValues(rows);}
-function appendPlainRow_(sh,rowVals,knownLastRow){putGrid_(sh,(knownLastRow!=null?knownLastRow:sh.getLastRow())+1,1,[rowVals]);invalidateSheetCache_(sh.getName());}function seedDefaultUsers_(sh){var nowIso=_gb().isoStr,defPw=hashPassword_('1234');
-var rows=[['USR-001','admin',hashPassword_('admin'),'ผู้ดูแลระบบ','ADMIN','TRUE',nowIso,nowIso,'','',''],['USR-002','somchai',defPw,'คุณสมชาย','STAFF','TRUE',nowIso,'','','',''],['USR-003','wipada',defPw,'คุณวิภาดา','STAFF','TRUE',nowIso,'','','',''],['USR-004','naphatsorn',defPw,'คุณนภัสสร','STAFF','TRUE',nowIso,'','','','']];
-putGrid_(sh,2,1,rows);formatPlainText_(sh,USER_COLS.length);return rows;}function ensureSheet_(ss,name,cols,isSetup){if(!isSetup&&_shMap[name])return _shMap[name];var s=ss||getSs_(),sh=s.getSheetByName(name),created=!sh;if(created)sh=s.insertSheet(name);
-if((created||isSetup)&&sh.getLastRow()===0&&cols){sh.appendRow(cols);sh.getRange(1,1,1,cols.length).setFontWeight('bold');sh.setFrozenRows(1);formatPlainText_(sh,cols.length);}else if(isSetup&&cols){var hdrs=sh.getRange(1,1,1,Math.max(sh.getLastColumn(),1)).getDisplayValues()[0];
-cols.forEach(function(c){if(hdrs.indexOf(c)===-1)sh.getRange(1,sh.getLastColumn()+1).setValue(c).setFontWeight('bold');});formatPlainText_(sh,Math.max(sh.getLastColumn(),cols.length));}if(name===SH_USERS&&(created||isSetup)&&sh.getLastRow()<=1)seedDefaultUsers_(sh);return(_shMap[name]=sh);}
-function getSheetData_(name,cols){if(_dataCache[name])return _dataCache[name];var sh=ensureSheet_(getSs_(),name,cols),all=sh.getDataRange().getDisplayValues();if(!all||!all.length||(all.length===1&&all[0].length<=1&&!tr_(all[0][0]))){if(cols&&cols.length){sh.getRange(1,1,1,cols.length).setNumberFormat('@').setValues([cols]).setFontWeight('bold');sh.setFrozenRows(1);}
-return(_dataCache[name]={sh:sh,headers:(cols||[]).slice(),rows:name===SH_USERS?seedDefaultUsers_(sh):[]});}var hdrs=all[0].slice(),added=false;if(cols)cols.forEach(function(c){if(hdrs.indexOf(c)===-1){hdrs.push(c);added=true;sh.getRange(1,hdrs.length).setNumberFormat('@').setValue(c).setFontWeight('bold');}});
-if(added)for(var ri=1,diff=hdrs.length-all[0].length;ri<all.length;ri++)for(var k=0;k<diff;k++)all[ri].push('');var rows=all.slice(1);if(!rows.length&&name===SH_USERS)rows=seedDefaultUsers_(sh);return(_dataCache[name]={sh:sh,headers:hdrs,rows:rows});}
-function setupDatabase(){var ss=getSs_();[[SH_USERS,USER_COLS],[SH_APTS,APT_COLS],[SH_RE_LOGS,RE_LOG_COLS],[SH_NOTIF_LOGS,NOTIF_LOG_COLS],[SH_META,META_COLS]].forEach(function(p){ensureSheet_(ss,p[0],p[1],true);});var defs={LAST_TRIGGER_RUN_AT:'',CACHED_QUOTA_LIMIT:'300',CACHED_QUOTA_USED:'0',QUOTA_UPDATED_AT:'',DAILY_DIGEST_HOUR:'8',QUIET_HOURS_START:'22',QUIET_HOURS_END:'7',ENABLE_LINE_BOT_QUERY:'TRUE',PRIVACY_MASK_CONTACT:'FALSE',NOTIFY_ON_STATUS_CHANGE:'FALSE',WEB_APP_URL:''};
-var cur=getMetaMap_(),now=_gb().isoStr,mSh=ensureSheet_(ss,SH_META,META_COLS,true);Object.keys(defs).forEach(function(k){if(cur[k]===undefined){mSh.appendRow([k,defs[k],now]);cur[k]=defs[k];}});formatPlainText_(mSh,META_COLS.length);invalidateSheetCache_(SH_META);bumpDataRev_(['apts','users','meta','relogs']);return'ตั้งค่าโครงสร้างชีต Plain Text และบัญชีเริ่มต้นสำเร็จ';}
-function removeNotificationTriggers(){ScriptApp.getProjectTriggers().forEach(function(t){if(t.getHandlerFunction()==='runNotificationEngine')ScriptApp.deleteTrigger(t);});delProp_('ONEOFF_TRIGGERS_JSON');return'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย';}
-function getTrigMs_(e){return e&&typeof e==='object'?(+e.ms||0):(+e||0);}function getTrigId_(e){return e&&typeof e==='object'?String(e.id||''):'';}function cleanExpiredTriggers_(existingTriggers){try{var map=JSON.parse(getProp_('ONEOFF_TRIGGERS_JSON')||'{}'),nowMs=Date.now(),changed=false;
-if(!Object.keys(map).some(function(u){var ms=getTrigMs_(map[u]);return ms&&ms<=nowMs;}))return;(existingTriggers||ScriptApp.getProjectTriggers()).forEach(function(t){var uid=t.getUniqueId(),ms=getTrigMs_(map[uid]);if(ms&&ms<=nowMs){ScriptApp.deleteTrigger(t);delete map[uid];changed=true;}});
-if(changed)setProp_('ONEOFF_TRIGGERS_JSON',JSON.stringify(map));}catch(_){}}function _tb(){return ScriptApp.newTrigger('runNotificationEngine').timeBased();}function installTriggerAuto(){removeNotificationTriggers();_tb().everyDays(1).atHour(8).create();_tb().everyHours(1).create();return'ติดตั้ง Trigger แจ้งเตือนอัตโนมัติ (รอบเช้า 08:00 น. และตรวจก่อนเวลานัดทุก 1 ชั่วโมง) เรียบร้อย';}
-function installTriggerEvery15Minutes(){removeNotificationTriggers();_tb().everyMinutes(15).create();return'ติดตั้ง Trigger ตรวจเช็คทุก 15 นาที เรียบร้อย';}function installTriggerDailyAt8AM(){removeNotificationTriggers();_tb().everyDays(1).atHour(8).create();return'ติดตั้ง Trigger แจ้งเตือนวันละ 1 ครั้ง (ช่วง 08:00 น.) เรียบร้อย';}
-function setupNotificationTriggers_(m){return m==='every15Min'?installTriggerEvery15Minutes():(m==='daily'?installTriggerDailyAt8AM():(m==='off'?removeNotificationTriggers():installTriggerAuto()));}function scheduleExactReminderForApt_(apt){try{if(!apt||!apt.id)return;
-var map=JSON.parse(getProp_('ONEOFF_TRIGGERS_JSON')||'{}'),uids=Object.keys(map),aptUids=uids.filter(function(u){return getTrigId_(map[u])===apt.id;}),ep=(apt.status===S_CF&&apt.appointmentDate&&apt.appointmentTime)?bkkSlotToEpoch_(apt.appointmentDate,apt.appointmentTime):null;
-var rH=(apt.remindHoursBefore!=null&&apt.remindHoursBefore!=='')?+apt.remindHoursBefore:0,remindMs=(ep&&rH>0)?ep-(rH*3600000):0,nowMs=_gb().epochMs,shouldCreate=Boolean(ep&&rH>0&&remindMs>nowMs+180000&&remindMs<=nowMs+172800000);if(!shouldCreate&&!aptUids.length)return;if(shouldCreate&&!aptUids.length&&uids.some(function(u){return Math.abs(getTrigMs_(map[u])-remindMs)<60000;}))return;if(shouldCreate&&aptUids.length===1&&Math.abs(getTrigMs_(map[aptUids[0]])-remindMs)<60000)return;
-var allTriggers=ScriptApp.getProjectTriggers(),changed=false,activeCount=allTriggers.length,slotCovered=false;allTriggers.forEach(function(t){var uid=t.getUniqueId(),ms=getTrigMs_(map[uid]),tAptId=getTrigId_(map[uid]);if((ms&&ms<=nowMs)||(tAptId&&tAptId===apt.id)){ScriptApp.deleteTrigger(t);delete map[uid];activeCount--;changed=true;}else if(shouldCreate&&ms&&Math.abs(ms-remindMs)<60000)slotCovered=true;});
-if(shouldCreate&&!slotCovered){if(activeCount>=16)for(var i=0;i<allTriggers.length;i++){var tUid=allTriggers[i].getUniqueId();if(map[tUid]){ScriptApp.deleteTrigger(allTriggers[i]);delete map[tUid];changed=true;break;}}map[ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create().getUniqueId()]={ms:remindMs,id:apt.id};changed=true;}
-if(changed)setProp_('ONEOFF_TRIGGERS_JSON',JSON.stringify(map));}catch(_){}}function buildSyncBundle_(optUsers){return{appointments:readAllApts_(),users:optUsers||readPublicUsers_(),rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50),meta:getMetaMap_(),rev:getDataRev_(),serverTime:_gb().isoStr};}
-function fCloneOmitImg_(o){var c={};Object.keys(o).forEach(function(k){c[k]=k==='imageUrl'?'':o[k];});c._imgOmitted=true;return c;}function resetLock_(){invalidateSheetCache_();_revCache=null;}function lockMut_(scopes,fn){return lockOk_(function(){resetLock_();var pr=getDataRev_(),r=fn();r.prevRev=pr;r.rev=scopes?bumpDataRev_(scopes):getDataRev_();return r;});}
-function doGet(e){try{var p=(e&&e.parameter)||{};if(!verifyPasscode_(p.passcode))return jErr_('API Passcode ไม่ถูกต้อง');if((p.action||'list')!=='list')return jErr_('ไม่รองรับ GET action');var curRev=getDataRev_(),force=isTrue_(p.force);
-if(p.sinceRev&&!force&&String(p.sinceRev)===curRev)return jOk_({unchanged:true,rev:curRev,serverTime:_gb().isoStr});if(force){_bypassCache=true;invalidateSheetCache_();}var res={appointments:readAllApts_(),users:readPublicUsers_(),meta:getMetaMap_(),rev:getDataRev_(),serverTime:_gb().isoStr};_bypassCache=false;return jOk_(res);
-}catch(err){_bypassCache=false;return jErr_(err.message||String(err));}}function doPost(e){try{var body=JSON.parse((e&&e.postData&&e.postData.contents)||'{}'),p=(e&&e.parameter)||{};if(Array.isArray(body.events))return handleLineWebhook_(body,p);if(!verifyPasscode_(body.passcode))return jErr_('API Passcode ไม่ถูกต้อง');var a=body.action||'';
-if(a==='login')return jOk_(handleUserLogin_(body.username,body.password));if(a==='register')return lockMut_(['users'],function(){return handleUserRegister_(body.payload||body.userPayload||{});});if(a==='listUsers')return jOk_({users:readPublicUsers_(),rev:getDataRev_()});
-if(a==='saveUser')return lockMut_(['users'],function(){return{user:saveUser_(body.userPayload,body.actorUserId)};});if(a==='suspendUser')return lockMut_(['users'],function(){return suspendUser_(body.userId,body.duration,body.reason,body.actorUserId);});if(a==='deleteUser')return lockMut_(['users'],function(){return{result:deleteUser_(body.userId,body.actorUserId)};});
-if(a==='requestPasswordReset')return jOk_(requestPasswordReset_(body.username,body.notifyAdmin));if(a==='confirmPasswordReset')return lockMut_(['users'],function(){return confirmPasswordReset_(body.username,body.otp,body.newPassword,body.confirmPassword);});
-if(a==='adminGenerateResetOtp')return jOk_(adminGenerateResetOtp_(body.userId,body.actorUserId));if(a==='createLineLinkCode')return jOk_(createLineLinkCode_(body.actorUserId));if(a==='unlinkLineAccount')return lockMut_(['users'],function(){return unlinkLineAccount_(body.actorUserId);});
-if(a==='changeOwnPassword')return lockMut_(['users'],function(){return changeOwnPassword_(body.actorUserId,body.currentPassword,body.newPassword,body.confirmPassword);});
-if(a==='list'){var curRev=getDataRev_(),force=isTrue_(body.force);
-if(body.sinceRev&&!force&&String(body.sinceRev)===curRev)return jOk_({unchanged:true,rev:curRev,serverTime:_gb().isoStr});if(force){_bypassCache=true;invalidateSheetCache_();}var bun=buildSyncBundle_();_bypassCache=false;return jOk_(bun);}
-if(a==='create'){var cOut=withLock_(function(){resetLock_();var pr=getDataRev_(),apt=createApt_(body.payload||{});return{apt:apt,rev:bumpDataRev_(['apts']),prevRev:pr};});var apt=cOut.apt,wantC=isTrue_(body.notifyLine),lineN=wantC?sendInstantAptNotification_(apt,false):null,cPrev=(lineN&&lineN.preQRev&&lineN.preQRev!==cOut.rev)?lineN.preQRev:cOut.prevRev;
-if(+apt.remindHoursBefore>0)scheduleExactReminderForApt_(apt);return jOk_({appointment:(isTrue_(body.omitImgEcho)&&apt.imageUrl)?fCloneOmitImg_(apt):apt,lineNotification:lineN,meta:wantC?getMetaMap_():null,rev:getDataRev_(),prevRev:cPrev});}
-if(a==='update'){var wantU=isTrue_(body.notifyLine),res=withLock_(function(){resetLock_();var pr=getDataRev_(),r=updateApt_(body.id,body.payload||{},body.expectedUpdatedAt,body.reason,body.currentUser,!wantU);r.prevRev=pr;r.rev=bumpDataRev_(r.logs&&r.logs.length?['apts','relogs']:['apts']);return r;});
-if(wantU&&res&&res.appointment){res.lineNotification=sendInstantAptNotification_(res.appointment,true);res.meta=getMetaMap_();if(res.lineNotification&&res.lineNotification.preQRev&&res.lineNotification.preQRev!==res.rev)res.prevRev=res.lineNotification.preQRev;}
-if(res&&res.appointment&&res.needsTriggerSync)scheduleExactReminderForApt_(res.appointment);res.rev=getDataRev_();if(isTrue_(body.omitImgEcho)&&res.appointment&&res.appointment.imageUrl)res.appointment=fCloneOmitImg_(res.appointment);return jOk_(res);}
-if(a==='delete')return lockMut_(['apts','relogs'],function(){return{appointment:deleteApt_(body.id,body.updatedBy)};});if(a==='updateMeta')return lockMut_(null,function(){return{meta:updateMeta_(body.meta||{})};});if(a==='setupTriggers')return jOk_({message:setupNotificationTriggers_(body.mode)});if(a==='refreshQuota')return jOk_(refreshLineQuotaCache_());
-if(a==='testNotification')return jOk_(testNotification_(body.dryRun!==false,body.sampleText));if(a==='runEngineNow')return jOk_(runNotificationEngine());return jErr_('ไม่รู้จัก action: '+a);}catch(err){_bypassCache=false;return jErr_(err.message||String(err),err.code||'SERVER_ERROR');}}
-function json_(o){return ContentService.createTextOutput(JSON.stringify({ok:Boolean(o.ok),version:API_VER,data:o.data||null,code:o.code||null,error:o.error||null})).setMimeType(ContentService.MimeType.JSON);}function jOk_(d){return json_({ok:true,data:d});}
-function jErr_(e,c){return json_({ok:false,error:e,code:c});}function withLock_(fn){var l=LockService.getScriptLock();l.waitLock(15000);try{return fn();}finally{l.releaseLock();}}function lockOk_(fn){return withLock_(function(){return jOk_(fn());});}
-function verifyPasscode_(p){var exp=getProp_('API_PASSCODE');return!exp||String(p||'')===exp;}function pad2_(n){return String(Math.floor(Math.abs(Number(n)||0))).padStart(2,'0');}function getBkkNow_(opt){var ep=(opt?new Date(opt):new Date()).getTime(),b=new Date(ep+7*3600*1000),yr=b.getUTCFullYear(),mo=b.getUTCMonth()+1,dy=b.getUTCDate(),hr=b.getUTCHours(),mi=b.getUTCMinutes(),sc=b.getUTCSeconds(),ds=yr+'-'+pad2_(mo)+'-'+pad2_(dy),ts=pad2_(hr)+':'+pad2_(mi);
-return{epochMs:ep,year:yr,buddhistYear:yr+543,month:mo,day:dy,hour:hr,minute:mi,dateStr:ds,timeStr:ts,isoStr:ds+'T'+ts+':'+pad2_(sc)+'+07:00'};}var _gb=getBkkNow_;function bkkSlotToEpoch_(d,t){if(!d)return null;var dp=String(d).split('-').map(Number),tp=String(t||'00:00').split(':').map(Number);return(dp.length!==3||tp.length<2)?null:Date.UTC(dp[0],dp[1]-1,dp[2],tp[0],tp[1],0,0)-25200000;}
-function diffDays_(s,e){var sm=bkkSlotToEpoch_(s,'00:00'),em=bkkSlotToEpoch_(e,'00:00');return(sm===null||em===null)?null:Math.round((em-sm)/86400000);}function fmtThaiDate_(d){var p=String(d||'').split('-').map(Number);return p.length!==3?(d||'ยังไม่กำหนดวัน'):(p[2]+' '+(TH_MONTHS_S[p[1]-1]||'')+' '+(p[0]+543));}
-function readAllUsersInternal_(){var d=getSheetData_(SH_USERS,USER_COLS),hdrs=d.headers,hLen=hdrs.length;return d.rows.reduce(function(arr,r,idx){var o={_rowIndex:idx+2,_headers:hdrs,_sh:d.sh};for(var i=0;i<hLen;i++)o[hdrs[i]]=tr_(r[i]);if(o.userId&&o.username)arr.push(o);return arr;},[]);}
-function getUserSuspensionState_(u,now){if(!u||String(u.isActive).toUpperCase()!=='FALSE')return{suspended:false,permanent:false,expired:false,until:'',reason:'',untilDisplay:'',message:''};
-var reason=_sn(u.suspendReason||''),raw=tr_(u.suspendedUntil);if(!raw)return{suspended:true,permanent:true,expired:false,until:'',reason:reason,untilDisplay:'ถาวร',message:'บัญชีนี้ถูกระงับการใช้งานถาวร'+(reason?' (เหตุผล: '+reason+')':'')};
-var ms=Date.parse(raw);if(Number.isNaN(ms))return{suspended:true,permanent:true,expired:false,until:'',reason:reason,untilDisplay:'ถาวร',message:'บัญชีนี้ถูกระงับการใช้งานถาวร'+(reason?' (เหตุผล: '+reason+')':'')};
-var cur=now||_gb();if(cur.epochMs>=ms)return{suspended:false,permanent:false,expired:true,until:'',reason:'',untilDisplay:'',message:''};
-var rem=ms-cur.epochMs,rD=Math.floor(rem/86400000),rH=Math.ceil((rem%86400000)/3600000);if(rH>=24){rD++;rH=0;}
-var ub=_gb(ms),uDisp=fmtThaiDate_(ub.dateStr)+' เวลา '+ub.timeStr+' น.',rTxt=(rD>0?rD+' วัน':'')+(rD>0&&rH>0?' ':'')+(rH>0?rH+' ชม.':(rD===0?'น้อยกว่า 1 ชม.':''));
-return{suspended:true,permanent:false,expired:false,until:raw,reason:reason,untilDisplay:uDisp,message:'บัญชีนี้ถูกระงับการใช้งานชั่วคราว จนถึง '+uDisp+' (เหลืออีก '+rTxt+')'+(reason?' เหตุผล: '+reason:'')};}
-function toPublicUser_(u){var s=getUserSuspensionState_(u,_gb());return{userId:u.userId,username:u.username,displayName:_sn(u.displayName||u.username),role:u.role==='ADMIN'?'ADMIN':'STAFF',isActive:!s.suspended,createdAt:u.createdAt,lastLoginAt:u.lastLoginAt,hasLineLinked:Boolean(u.lineUserId),suspendedUntil:s.suspended?s.until:'',suspendReason:s.suspended?s.reason:''};}
-function readPublicUsers_(){var revs=getRevs_(),now=_gb();if(!_bypassCache){var hit=cacheReadObj_('CAL_U',revs.u);if(hit)return hit.map(function(u){if(!u.isActive&&u.suspendedUntil&&!Number.isNaN(Date.parse(u.suspendedUntil))&&now.epochMs>=Date.parse(u.suspendedUntil))return Object.assign({},u,{isActive:true,suspendedUntil:'',suspendReason:''});return u;});}
-var out=readAllUsersInternal_().map(toPublicUser_);cacheWriteObj_('CAL_U',revs.u,'u',out,300);return out;}
-function buildUserRow_(headers,id,un,pwHash,disp,role,active,created,login,lineUid,suspUntil,suspReason){var map={userId:id,username:un,passwordHash:pwHash,displayName:disp,role:role,isActive:active,createdAt:created,lastLoginAt:login||'',lineUserId:lineUid||'',suspendedUntil:suspUntil||'',suspendReason:suspReason||''};return headers.map(function(h){return map[h]!==undefined?map[h]:'';});}
-function nextUserId_(users){var maxNum=Number(getProp_('LAST_USER_SEQ')||0)||0;(users||[]).forEach(function(u){var id=u&&u.userId;if(id&&String(id).indexOf('USR-')===0)maxNum=Math.max(maxNum,+String(id).slice(4)||0);});var next=maxNum+1;setProp_('LAST_USER_SEQ',String(next));return'USR-'+String(next).padStart(3,'0');}
-function requireAdmin_(actorUserId,allowMissingLegacy){if(!actorUserId){if(allowMissingLegacy)return null;throw new Error('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่ทำรายการนี้ได้');}
-var actor=readAllUsersInternal_().filter(function(u){return u.userId===actorUserId;})[0];if(!actor||actor.role!=='ADMIN'||getUserSuspensionState_(actor,_gb()).suspended)throw new Error('ไม่มีสิทธิ์ผู้ดูแลระบบ (ADMIN) หรือบัญชีถูกระงับ');return actor;}
-function handleUserLogin_(username,password){var un=_sn(username).toLowerCase(),pw=String(password||'');if(!un||!pw)throw new Error('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน');var users=readAllUsersInternal_(),target=users.filter(function(u){return u.username.toLowerCase()===un;})[0];
-if(!target)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้');var now=_gb(),susp=getUserSuspensionState_(target,now);if(susp.suspended)throw new Error(susp.message);if(target.passwordHash!==hashPassword_(pw))throw new Error('รหัสผ่านไม่ถูกต้อง');
-var nowIso=now.isoStr,hdrs=target._headers||USER_COLS;if(susp.expired&&target._rowIndex>1&&target._sh){target.isActive='TRUE';target.suspendedUntil='';target.suspendReason='';target.lastLoginAt=nowIso;
-var updRow=hdrs.map(function(h){return h==='isActive'?'TRUE':(h==='suspendedUntil'||h==='suspendReason'?'':(h==='lastLoginAt'?nowIso:(target[h]||'')));});putGrid_(target._sh,target._rowIndex,1,[updRow]);invalidateSheetCache_(SH_USERS);bumpDataRev_(['users']);}
-else{var colIdx=hdrs.indexOf('lastLoginAt')+1;if(colIdx>0&&target._rowIndex>1&&target._sh){target._sh.getRange(target._rowIndex,colIdx).setValue(nowIso);invalidateSheetCache_(SH_USERS);bumpDataRev_(['users']);}target.lastLoginAt=nowIso;}
-var bundle=buildSyncBundle_(users.map(toPublicUser_));bundle.user={userId:target.userId,username:target.username,displayName:_sn(target.displayName||target.username),role:target.role==='ADMIN'?'ADMIN':'STAFF',createdAt:target.createdAt,hasLineLinked:Boolean(target.lineUserId)};return bundle;}
-function handleUserRegister_(payload){var p=payload||{},un=_sn(p.username).toLowerCase(),disp=_sn(p.displayName),pw=String(p.password||''),confirmPw=p.confirmPassword!==undefined?String(p.confirmPassword||''):pw;if(!un||un.length<3||un.length>30||!/^[a-z0-9_.-]+$/.test(un))throw new Error('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร');
-if(!disp)throw new Error('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียกที่ใช้แสดงในระบบ');if(!pw||pw.length<4)throw new Error(E_PW4);if(pw!==confirmPw)throw new Error('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');var d=getSheetData_(SH_USERS,USER_COLS),users=readAllUsersInternal_(),pubUsers=[];
-for(var i=0;i<users.length;i++){var u=users[i];if(u.username.toLowerCase()===un)throw new Error(E_DUP_UN);if(u.displayName&&u.displayName.toLowerCase()===disp.toLowerCase())throw new Error('ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม');pubUsers.push(toPublicUser_(u));}
-var nowIso=_gb().isoStr,newId=nextUserId_(users);appendPlainRow_(d.sh,buildUserRow_(d.headers,newId,un,hashPassword_(pw),disp,'STAFF','TRUE',nowIso,nowIso,'','',''),d.rows.length+1);
-pubUsers.push({userId:newId,username:un,displayName:disp,role:'STAFF',isActive:true,createdAt:nowIso,lastLoginAt:nowIso,hasLineLinked:false,suspendedUntil:'',suspendReason:''});
-var bundle=buildSyncBundle_(pubUsers);bundle.user={userId:newId,username:un,displayName:disp,role:'STAFF',createdAt:nowIso,hasLineLinked:false};return bundle;}
-function saveUser_(payload,actorUserId){requireAdmin_(actorUserId,true);var p=payload||{},uid=_sn(p.userId),un=_sn(p.username).toLowerCase();var d=getSheetData_(SH_USERS,USER_COLS),rows=d.rows,headers=d.headers,idIdx=headers.indexOf('userId'),unIdx=headers.indexOf('username'),dispIdx=headers.indexOf('displayName'),roleIdx=headers.indexOf('role'),actIdx=headers.indexOf('isActive'),foundIdx=-1,foundByUn=-1,curIds=[];
-for(var i=0;i<rows.length;i++){var rId=tr_(rows[i][idIdx]),rUn=tr_(rows[i][unIdx]).toLowerCase();if(rId)curIds.push({userId:rId});if(uid&&rId===uid)foundIdx=i;if(un&&rUn===un)foundByUn=i;}if(p.isNew&&foundByUn!==-1)throw new Error(E_DUP_UN);if(foundIdx===-1&&!p.isNew&&foundByUn!==-1)foundIdx=foundByUn;var nowIso=_gb().isoStr;
-if(foundIdx!==-1){var curRow=rows[foundIdx],curUserId=tr_(curRow[idIdx]),curUn=tr_(curRow[unIdx]).toLowerCase();var nextDisp=p.displayName!==undefined?_sn(p.displayName):String(curRow[dispIdx]||curUn).trim();if(!nextDisp)throw new Error('กรุณาระบุชื่อที่แสดงผล');
-var nextRole=(p.role!==undefined?String(p.role):String(curRow[roleIdx]||'STAFF')).toUpperCase()==='ADMIN'?'ADMIN':'STAFF';var nextActive=(p.isActive!==undefined?(p.isActive!==false&&String(p.isActive).toUpperCase()!=='FALSE'):(String(curRow[actIdx]).toUpperCase()!=='FALSE'))?'TRUE':'FALSE';
-if(curUn==='admin'&&nextActive==='FALSE')throw new Error('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลัก (admin) ได้');var updatedRow=headers.map(function(h,colI){if(h==='displayName')return nextDisp;if(h==='role')return nextRole;if(h==='isActive')return nextActive;if((h==='suspendedUntil'||h==='suspendReason')&&nextActive==='TRUE')return'';
-if(h==='passwordHash'&&p.password){if(String(p.password).length<4)throw new Error(E_PW4);return hashPassword_(p.password);}return curRow[colI];});putGrid_(d.sh,foundIdx+2,1,[updatedRow]);invalidateSheetCache_(SH_USERS);var pubObj={};headers.forEach(function(h,ci){pubObj[h]=tr_(updatedRow[ci]);});return toPublicUser_(pubObj);}
-if(foundIdx===-1&&uid&&!p.isNew&&!un)throw new Error('ไม่พบรหัสผู้ใช้: '+uid);if(!un||un.length<3)throw new Error('ชื่อผู้ใช้ต้องมีอย่างน้อย 3 ตัวอักษร');var disp=_sn(p.displayName||un);if(!disp)throw new Error('กรุณาระบุชื่อที่แสดงผล');if(!p.password||String(p.password).length<4)throw new Error(E_PW4);
-var role=(p.role||'STAFF').toUpperCase()==='ADMIN'?'ADMIN':'STAFF',isActive=p.isActive!==false&&String(p.isActive).toUpperCase()!=='FALSE'?'TRUE':'FALSE',newId=nextUserId_(curIds);appendPlainRow_(d.sh,buildUserRow_(headers,newId,un,hashPassword_(p.password),disp,role,isActive,nowIso,'','','',''),rows.length+1);
-return{userId:newId,username:un,displayName:disp,role:role,isActive:isActive==='TRUE',createdAt:nowIso,lastLoginAt:'',hasLineLinked:false,suspendedUntil:'',suspendReason:''};}
-function suspendUser_(userId,durationKey,reason,actorUserId){var actor=requireAdmin_(actorUserId,false);if(!userId)throw new Error('ไม่พบรหัสผู้ใช้: '+userId);var d=getSheetData_(SH_USERS,USER_COLS),rows=d.rows,headers=d.headers,idIdx=headers.indexOf('userId'),unIdx=headers.indexOf('username'),foundIdx=-1;
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][idIdx])===String(userId).trim()){foundIdx=i;break;}}if(foundIdx===-1)throw new Error('ไม่พบรหัสผู้ใช้: '+userId);var curRow=rows[foundIdx],curUn=tr_(curRow[unIdx]).toLowerCase(),curId=tr_(curRow[idIdx]);
-if(curUn==='admin')throw new Error('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลัก (admin) ได้');if(curId===actor.userId||curUn===actor.username.toLowerCase())throw new Error('ไม่สามารถระงับบัญชีของตนเองที่กำลังใช้งานอยู่ได้');
-var now=_gb(),dk=String(durationKey||'PERMANENT'),nextActive='FALSE',nextUntil='',nextReason=_sn(reason||'');if(dk==='UNSUSPEND'){nextActive='TRUE';nextUntil='';nextReason='';}
-else if(dk==='PERMANENT'){nextUntil='';}else if(SUSPEND_DAYS_MAP[dk]){nextUntil=_gb(now.epochMs+SUSPEND_DAYS_MAP[dk]*86400000).isoStr;}else throw new Error('รูปแบบระยะเวลาการระงับไม่ถูกต้อง');
-var updRow=headers.map(function(h,ci){return h==='isActive'?nextActive:(h==='suspendedUntil'?nextUntil:(h==='suspendReason'?nextReason:curRow[ci]));});
-putGrid_(d.sh,foundIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);var pubObj={};headers.forEach(function(h,ci){pubObj[h]=tr_(updRow[ci]);});
-appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),now.isoStr,dk==='UNSUSPEND'?'USER_UNSUSPEND':'USER_SUSPEND',curId,curUn,'200','-',actor.displayName+' -> '+dk+(nextReason?' ('+nextReason+')':'')]);
-return{user:toPublicUser_(pubObj)};}
-function deleteUser_(userId,actorUserId){var actor=requireAdmin_(actorUserId,false);if(!userId)throw new Error('ไม่พบรหัสผู้ใช้: '+userId);var d=getSheetData_(SH_USERS,USER_COLS),rows=d.rows,headers=d.headers,idIdx=headers.indexOf('userId'),unIdx=headers.indexOf('username'),dispIdx=headers.indexOf('displayName'),foundIdx=-1;
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][idIdx])===String(userId).trim()){foundIdx=i;break;}}if(foundIdx===-1)throw new Error('ไม่พบรหัสผู้ใช้: '+userId);
-var curId=tr_(rows[foundIdx][idIdx]),curUn=tr_(rows[foundIdx][unIdx]).toLowerCase(),curDisp=tr_(rows[foundIdx][dispIdx]);
-if(curUn==='admin')throw new Error('ไม่สามารถลบบัญชีผู้ดูแลระบบหลัก (admin) ได้');if(curId===actor.userId||curUn===actor.username.toLowerCase())throw new Error('ไม่สามารถลบบัญชีของตนเองที่กำลังใช้งานอยู่ได้');
-var curSeq=Number(getProp_('LAST_USER_SEQ')||0)||0,numPart=curId.indexOf('USR-')===0?(+curId.slice(4)||0):0;if(numPart>curSeq)setProp_('LAST_USER_SEQ',String(numPart));
-d.sh.deleteRow(foundIdx+2);invalidateSheetCache_(SH_USERS);var c=sc_();if(c)try{c.remove('PWD_OTP_'+curUn);c.remove('PWD_CD_'+curUn);}catch(_){}
-appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),_gb().isoStr,'USER_DELETED',curId,curUn,'200','-','ลบบัญชีถาวรโดย '+actor.displayName+' ('+curDisp+')']);
-return{success:true,deleted:true,userId:curId,username:curUn};}
-function genOtp6_(){var hex=hashPassword_(Utilities.getUuid()+':'+Date.now()+':'+Math.random()).slice(0,8);return String((parseInt(hex,16)%900000)+100000);}
-function storeResetOtp_(un,ttlSec,skipCooldown){var c=sc_();if(!c)throw new Error('CacheService ไม่พร้อมใช้งาน');var otp=genOtp6_(),salt=Utilities.getUuid().slice(0,12),ttl=ttlSec||600,rec={h:hashPassword_(un+':'+otp+':'+salt),s:salt,exp:Date.now()+ttl*1000,att:0};
-c.put('PWD_OTP_'+un,JSON.stringify(rec),ttl);if(!skipCooldown)c.put('PWD_CD_'+un,'1',60);return otp;}
-function requestPasswordReset_(username,notifyAdmin){var un=_sn(username).toLowerCase();if(!un)throw new Error('กรุณาระบุชื่อผู้ใช้ (Username)');
-var target=readAllUsersInternal_().filter(function(u){return u.username.toLowerCase()===un;})[0];if(!target)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
-var susp=getUserSuspensionState_(target,_gb());if(susp.suspended)throw new Error(susp.message);var c=sc_();if(c&&c.get('PWD_CD_'+un))throw new Error('กรุณารอ 60 วินาที ก่อนขอรหัส OTP ใหม่อีกครั้ง');
-if(target.lineUserId){var otp=storeResetOtp_(un,600,false),pushRes=pushLine_(target.lineUserId,buildOtpFlex_(un,otp,10),Utilities.getUuid(),false,'PWD_RESET_OTP',target.userId);
-if(pushRes.ok){withLock_(function(){resetLock_();var cm=getMetaMap_();updateMeta_({CACHED_QUOTA_USED:String((+cm.CACHED_QUOTA_USED||0)+1)});});return{sent:true,lineLinked:true,expiresInSec:600,cooldownSec:60,message:'ส่งรหัส OTP 6 หลักไปยังแชทส่วนตัว LINE ของคุณแล้ว (มีอายุ 10 นาที)'};}
-return{sent:false,lineLinked:true,quotaFallback:true,cooldownSec:60,message:'ส่ง Push ไม่สำเร็จ (อาจเป็นเพราะโควตา LINE เต็ม) กรุณาพิมพ์ "รีเซ็ตรหัส" ในแชทส่วนตัวกับบอท LINE เพื่อรับ OTP ฟรีทันที'};}
-if(!isTrue_(notifyAdmin))return{sent:false,lineLinked:false,needsAdminReset:true,message:'บัญชีนี้ยังไม่ได้ผูกกับ LINE กรุณากด "แจ้งผู้ดูแลระบบ (ADMIN)" หรือติดต่อ ADMIN เพื่อรับรหัส OTP ชั่วคราว'};
-if(c)c.put('PWD_CD_'+un,'1',60);var admins=readAllUsersInternal_().filter(function(u){return u.role==='ADMIN'&&u.lineUserId&&!getUserSuspensionState_(u,_gb()).suspended;});
-var msg=buildNoticeFlex_('-','คำขอรีเซ็ตรหัสผ่าน','บัญชี "'+un+'" ('+_sn(target.displayName||un)+') ร้องขอรีเซ็ตรหัสผ่าน กรุณาออกรหัส OTP ชั่วคราวในหน้า ตั้งค่า -> จัดการสมาชิก (ไม่มีรหัสผ่านหรือ OTP แสดงในข้อความนี้)','','','');
-var sentCount=0;if(admins.length)admins.forEach(function(ad){if(pushLine_(ad.lineUserId,msg,Utilities.getUuid(),false,'PWD_RESET_REQ_ADMIN',target.userId).ok)sentCount++;});
-else{var tid=getProp_('LINE_TARGET_ID');if(tid&&pushLine_(tid,msg,Utilities.getUuid(),false,'PWD_RESET_REQ_GROUP',target.userId).ok)sentCount++;}
-if(sentCount>0)withLock_(function(){resetLock_();var cm=getMetaMap_();updateMeta_({CACHED_QUOTA_USED:String((+cm.CACHED_QUOTA_USED||0)+sentCount)});});
-return{sent:false,lineLinked:false,adminNotified:true,cooldownSec:60,message:'แจ้งผู้ดูแลระบบ (ADMIN) แล้ว กรุณาติดต่อขอรับรหัส OTP ชั่วคราวจาก ADMIN เพื่อนำมากรอกตั้งรหัสผ่านใหม่'};}
-function confirmPasswordReset_(username,otp,newPassword,confirmPassword){var un=_sn(username).toLowerCase(),code=tr_(otp),pw=String(newPassword||''),cpw=confirmPassword!==undefined?String(confirmPassword||''):pw;
-if(!un)throw new Error('กรุณาระบุชื่อผู้ใช้');if(!/^\d{6}$/.test(code))throw new Error('รหัส OTP ต้องเป็นตัวเลข 6 หลัก');if(!pw||pw.length<4)throw new Error(E_PW4);if(pw!==cpw)throw new Error('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');
-var c=sc_(),raw=c?c.get('PWD_OTP_'+un):null;if(!raw)throw new Error('รหัส OTP ไม่ถูกต้องหรือหมดอายุแล้ว กรุณาขอรหัสใหม่');var rec;try{rec=JSON.parse(raw);}catch(_){rec=null;}
-if(!rec||!rec.h||Date.now()>(+rec.exp||0)){if(c)c.remove('PWD_OTP_'+un);throw new Error('รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่');}
-if((+rec.att||0)>=5){if(c)c.remove('PWD_OTP_'+un);throw new Error('กรอกรหัส OTP ผิดเกิน 5 ครั้ง รหัสถูกยกเลิกแล้ว กรุณาขอรหัสใหม่');}
-var d=getSheetData_(SH_USERS,USER_COLS),headers=d.headers,rows=d.rows,unIdx=headers.indexOf('username'),foundIdx=-1,curObj={};
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][unIdx]).toLowerCase()===un){foundIdx=i;headers.forEach(function(h,ci){curObj[h]=tr_(rows[i][ci]);});break;}}
-if(foundIdx===-1)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');var susp=getUserSuspensionState_(curObj,_gb());if(susp.suspended)throw new Error(susp.message);
-if(hashPassword_(un+':'+code+':'+rec.s)!==rec.h){rec.att=(+rec.att||0)+1;if(rec.att>=5){c.remove('PWD_OTP_'+un);throw new Error('กรอกรหัส OTP ผิดครบ 5 ครั้ง รหัสถูกยกเลิกแล้ว กรุณาขอรหัสใหม่');}
-var remSec=Math.max(10,Math.ceil((rec.exp-Date.now())/1000));c.put('PWD_OTP_'+un,JSON.stringify(rec),remSec);throw new Error('รหัส OTP ไม่ถูกต้อง (เหลือโอกาสอีก '+(5-rec.att)+' ครั้ง)');}
-var newHash=hashPassword_(pw),updRow=headers.map(function(h,ci){return h==='passwordHash'?newHash:rows[foundIdx][ci];});
-putGrid_(d.sh,foundIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);c.remove('PWD_OTP_'+un);try{c.remove('PWD_CD_'+un);}catch(_){}
-appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),_gb().isoStr,'PWD_RESET_OK',curObj.userId||'-',un,'200','-','รีเซ็ตรหัสผ่านสำเร็จ']);
-return{success:true,username:un};}
-function adminGenerateResetOtp_(targetUserId,actorUserId){var actor=requireAdmin_(actorUserId,false),target=readAllUsersInternal_().filter(function(u){return u.userId===targetUserId;})[0];
-if(!target)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');var susp=getUserSuspensionState_(target,_gb());if(susp.suspended)throw new Error(susp.message);
-var otp=storeResetOtp_(target.username.toLowerCase(),600,true);
-appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),_gb().isoStr,'ADMIN_GEN_OTP',target.userId,target.username,'200','-','ออก OTP โดย '+actor.displayName]);
-return{userId:target.userId,username:target.username,displayName:_sn(target.displayName||target.username),otp:otp,expiresInSec:600};}
-function createLineLinkCode_(actorUserId){if(!actorUserId)throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ');var target=readAllUsersInternal_().filter(function(u){return u.userId===actorUserId;})[0];
-if(!target)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');if(getUserSuspensionState_(target,_gb()).suspended)throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
-var c=sc_();if(!c)throw new Error('CacheService ไม่พร้อมใช้งาน');var code=genOtp6_();
-c.put('LN_BIND_'+code,JSON.stringify({userId:target.userId,username:target.username.toLowerCase(),exp:Date.now()+300000}),300);
-return{code:code,command:'ผูกบัญชี '+code,expiresInSec:300};}
-function unlinkLineAccount_(actorUserId){if(!actorUserId)throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ');var d=getSheetData_(SH_USERS,USER_COLS),headers=d.headers,rows=d.rows,idIdx=headers.indexOf('userId'),foundIdx=-1;
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][idIdx])===actorUserId){foundIdx=i;break;}}if(foundIdx===-1)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
-var updRow=headers.map(function(h,ci){return h==='lineUserId'?'':rows[foundIdx][ci];});putGrid_(d.sh,foundIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);return{success:true,hasLineLinked:false};}
-function changeOwnPassword_(actorUserId,currentPassword,newPassword,confirmPassword){if(!actorUserId)throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ');
-var cur=String(currentPassword||''),pw=String(newPassword||''),cpw=confirmPassword!==undefined?String(confirmPassword||''):pw;
-if(!cur)throw new Error('กรุณาระบุรหัสผ่านปัจจุบัน');if(!pw||pw.length<4)throw new Error(E_PW4);if(pw!==cpw)throw new Error('รหัสผ่านใหม่และการยืนยันไม่ตรงกัน');
-var d=getSheetData_(SH_USERS,USER_COLS),headers=d.headers,rows=d.rows,idIdx=headers.indexOf('userId'),foundIdx=-1,curObj={};
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][idIdx])===actorUserId){foundIdx=i;headers.forEach(function(h,ci){curObj[h]=tr_(rows[i][ci]);});break;}}
-if(foundIdx===-1)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');if(getUserSuspensionState_(curObj,_gb()).suspended)throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
-if(curObj.passwordHash!==hashPassword_(cur))throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
-var nh=hashPassword_(pw),updRow=headers.map(function(h,ci){return h==='passwordHash'?nh:rows[foundIdx][ci];});putGrid_(d.sh,foundIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);return{success:true};}
-function resetAdminPassword(newPassword){var pw=String(newPassword||'');if(pw.length<4)throw new Error(E_PW4);var d=getSheetData_(SH_USERS,USER_COLS),headers=d.headers,rows=d.rows,unIdx=headers.indexOf('username'),foundIdx=-1;
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][unIdx]).toLowerCase()==='admin'){foundIdx=i;break;}}if(foundIdx===-1)throw new Error('ไม่พบบัญชี admin ในชีต Users');
-var nh=hashPassword_(pw),updRow=headers.map(function(h,ci){return h==='passwordHash'?nh:(h==='isActive'?'TRUE':((h==='suspendedUntil'||h==='suspendReason')?'':rows[foundIdx][ci]));});
-putGrid_(d.sh,foundIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);bumpDataRev_(['users']);return'รีเซ็ตรหัสผ่านบัญชี admin และเปิดใช้งานเรียบร้อยแล้ว';}
-function readAllApts_(includeDeleted,fresh){var revs=getRevs_();if(!includeDeleted&&!fresh&&!_bypassCache){var hit=cacheReadObj_('CAL_A',revs.a);if(hit)return hit.slice();}var d=getSheetData_(SH_APTS,APT_COLS);if(!d.rows.length){if(!includeDeleted)cacheWriteObj_('CAL_A',revs.a,'a',[],180);return[];}
-var cacheKey=includeDeleted?'_aptsAll':'_aptsActive';if(!fresh&&d[cacheKey])return d[cacheKey].slice();var hdrs=d.headers,hLen=hdrs.length,delIdx=hdrs.indexOf('deletedAt'),out=[];for(var r=0;r<d.rows.length;r++){var row=d.rows[r],isDel=delIdx!==-1&&Boolean(tr_(row[delIdx]));
-if(!includeDeleted&&isDel)continue;var o={};for(var c=0;c<hLen;c++)o[hdrs[c]]=tr_(row[c]);if(!o.id)continue;o.status=_ns(o.status);o.remindDaysBefore=Number(o.remindDaysBefore)||0;o.remindHoursBefore=Number(o.remindHoursBefore)||0;o.rescheduleCount=Number(o.rescheduleCount)||0;
-o.mapUrl=_sn(o.mapUrl);o.imageUrl=_sn(o.imageUrl);o.createdBy=_sn(o.createdBy||o.updatedBy||S_SYS);o.statusChangedBy=_sn(o.statusChangedBy);o.statusChangedAt=_sn(o.statusChangedAt);o.statusReason=_sn(o.statusReason);out.push(o);}d[cacheKey]=out;if(!includeDeleted)cacheWriteObj_('CAL_A',revs.a,'a',out,180);return out.slice();}
-function createApt_(inp){var d=getSheetData_(SH_APTS,APT_COLS),now=_gb(),pfx='APT-'+now.dateStr.replace(/-/g,'')+'-',idIdx=Math.max(0,d.headers.indexOf('id'));var max=d.rows.reduce(function(m,r){var rid=tr_(r[idIdx]);return rid.indexOf(pfx)===0?Math.max(m,+rid.slice(pfx.length)||0):m;},0),creator=_sn(inp.createdBy||inp.updatedBy||S_SYS)||S_SYS,st=_ns(inp.status);
-var rec={id:pfx+String(max+1).padStart(3,'0'),title:_sn(inp.title),appointmentDate:_sn(inp.appointmentDate),appointmentTime:_sn(inp.appointmentTime),location:_sn(inp.location),contactPerson:_sn(inp.contactPerson),status:st,remindDaysBefore:(inp.remindDaysBefore!=null&&inp.remindDaysBefore!=='')?+inp.remindDaysBefore:0,remindHoursBefore:(inp.remindHoursBefore!=null&&inp.remindHoursBefore!=='')?+inp.remindHoursBefore:0,notifiedDayForSlot:'',notifiedHourForSlot:'',rescheduleCount:0,notes:_sn(inp.notes),mapUrl:_sn(inp.mapUrl),imageUrl:_sn(inp.imageUrl),createdBy:creator,statusChangedBy:st!==S_CF?(_sn(inp.statusChangedBy)||creator):'',statusChangedAt:st!==S_CF?now.isoStr:'',statusReason:_sn(inp.statusReason),updatedBy:creator,createdAt:now.isoStr,updatedAt:now.isoStr,deletedAt:''};
-validateApt_(rec);appendPlainRow_(d.sh,d.headers.map(function(c){return rec[c]!==undefined?String(rec[c]):'';}),d.rows.length+1);return rec;}function updateApt_(id,patch,expUpdated,reason,currentUser,suppressSlotReset){var d=getSheetData_(SH_APTS,APT_COLS),rows=d.rows,headers=d.headers,delIdx=headers.indexOf('deletedAt'),targetRow=-1,cur=null;
-for(var r=rows.length-1;r>=0;r--){var isDel=delIdx!==-1&&Boolean(tr_(rows[r][delIdx]));if(String(rows[r][0]).trim()===String(id).trim()&&!isDel){targetRow=r+2;cur={};headers.forEach(function(c,i){cur[c]=tr_(rows[r][i]);});break;}}
-if(!cur)throw new Error('ไม่พบรหัส: '+id);if(expUpdated&&cur.updatedAt&&String(expUpdated).trim()!==String(cur.updatedAt).trim()){var err=new Error('ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว กรุณารีเฟรชก่อนทำรายการ');err.code='CONCURRENCY_CONFLICT';throw err;}
-var now=_gb(),up={};headers.forEach(function(c){up[c]=patch[c]!==undefined?_sn(patch[c]):cur[c];});up.id=cur.id;up.status=_ns(up.status);up.createdAt=cur.createdAt;up.updatedAt=now.isoStr;up.createdBy=cur.createdBy||cur.updatedBy||S_SYS;
-var actingUser=_sn(currentUser||patch.updatedBy||up.createdBy);up.updatedBy=actingUser;var statusChanged=_ns(cur.status)!==_ns(up.status);if(statusChanged){if(up.status===S_CF)up.statusChangedBy=up.statusChangedAt=up.statusReason='';
-else{up.statusChangedBy=_sn(patch.statusChangedBy||actingUser);up.statusChangedAt=now.isoStr;up.statusReason=_sn(patch.statusReason||reason);}}else{up.statusChangedBy=cur.statusChangedBy||'';up.statusChangedAt=cur.statusChangedAt||'';up.statusReason=patch.statusReason!==undefined?_sn(patch.statusReason):(cur.statusReason||'');}
-var dChg=cur.appointmentDate!==up.appointmentDate,tChg=cur.appointmentTime!==up.appointmentTime,rDChg=String(cur.remindDaysBefore)!==String(up.remindDaysBefore),rHChg=String(cur.remindHoursBefore)!==String(up.remindHoursBefore);var reop=(cur.status===S_CP||cur.status===S_CN)&&up.status===S_CF,suppressReset=Boolean(suppressSlotReset&&!dChg&&!tChg&&!rDChg&&!rHChg);
-if(!suppressReset){if(dChg||reop||rDChg)up.notifiedDayForSlot='';if(dChg||tChg||reop||rHChg)up.notifiedHourForSlot='';}else if(reop){var slotNow=(up.appointmentDate&&up.appointmentTime)?(up.appointmentDate+'T'+up.appointmentTime):'',epNow=slotNow?bkkSlotToEpoch_(up.appointmentDate,up.appointmentTime):null;
-var diffHNow=epNow?(epNow-now.epochMs)/3600000:-1,diffDNow=up.appointmentDate?diffDays_(now.dateStr,up.appointmentDate):null;if(!up.notifiedDayForSlot&&up.appointmentDate&&(+up.remindDaysBefore||0)>0&&diffDNow!==null&&diffDNow<=(+up.remindDaysBefore||0))up.notifiedDayForSlot=up.appointmentDate;
-if(!up.notifiedHourForSlot&&slotNow&&(+up.remindHoursBefore||0)>0&&diffHNow>0&&diffHNow<=(+up.remindHoursBefore||0))up.notifiedHourForSlot=slotNow;}if((cur.appointmentDate||cur.appointmentTime)&&(dChg||tChg))up.rescheduleCount=String((+cur.rescheduleCount||0)+1);validateApt_(up);
-var logs=[];['appointmentDate','appointmentTime','location','contactPerson','status'].forEach(function(f,idx){if(String(cur[f]||'')!==String(up[f]||''))logs.push({logId: 'LOG-' + now.epochMs+'-'+(idx+1),appointmentId:cur.id,changedAt:now.isoStr,changedBy:up.updatedBy,fieldChanged:f,oldValue:cur[f]||'',newValue:up[f]||'',reason:_sn(reason||up.statusReason)});});
-if(logs.length){var lSh=ensureSheet_(getSs_(),SH_RE_LOGS,RE_LOG_COLS);putGrid_(lSh,lSh.getLastRow()+1,1,logs.map(function(le){return RE_LOG_COLS.map(function(c){return le[c];});}));invalidateSheetCache_(SH_RE_LOGS);}putGrid_(d.sh,targetRow,1,[headers.map(function(c){return String(up[c]!==undefined?up[c]:'');})]);invalidateSheetCache_(SH_APTS);if (reop) up.reopened = true;
-return{appointment:up,logs:logs,needsTriggerSync:Boolean(!(suppressSlotReset&&!dChg&&!tChg&&!rHChg&&up.status===S_CF)&&(+cur.remindHoursBefore>0||+up.remindHoursBefore>0)&&(dChg||tChg||rHChg||statusChanged))};}function deleteApt_(id,user){var d=getSheetData_(SH_APTS,APT_COLS),rows=d.rows,headers=d.headers,delIdx=headers.indexOf('deletedAt'),removed=null,now=_gb();
-for(var r=rows.length-1;r>=0;r--){var rowId=String(rows[r][0]).trim(),isDel=delIdx!==-1&&Boolean(tr_(rows[r][delIdx]));if(rowId===String(id).trim()||isDel){if(rowId===String(id).trim()&&!removed){removed={};headers.forEach(function(c,i){removed[c]=tr_(rows[r][i]);});
-var lSh=ensureSheet_(getSs_(),SH_RE_LOGS,RE_LOG_COLS),le={logId:'LOG-'+now.epochMs+'-DEL',appointmentId:id,changedAt:now.isoStr,changedBy:_sn(user||S_SYS),fieldChanged:'DELETED',oldValue:removed.title||'-',newValue:'ลบนัดหมาย',reason:'ลบออกจากระบบ'};
-appendPlainRow_(lSh,RE_LOG_COLS.map(function(c){return le[c];}));}d.sh.deleteRow(r+2);}}invalidateSheetCache_(SH_APTS);return removed||{id:id};}function validateApt_(r){if(!r.title)throw new Error('กรุณาระบุหัวข้องาน');if(!r.appointmentDate||!r.appointmentTime||!r.location)throw new Error('กรุณาระบุวันที่, เวลา และสถานที่ให้ครบถ้วน');
-if(r.imageUrl&&String(r.imageUrl).length>48000)throw new Error('ขนาดรูปภาพเกินขีดจำกัดของ Google Sheets');}function rowsToMeta_(rows){return rows.reduce(function(m,r){if(r[0])m[String(r[0]).trim()]=tr_(r[1]);return m;},{});}function getMetaMap_(){if(_metaCache)return _metaCache;var revs=getRevs_();
-if(!_bypassCache){var hit=cacheReadObj_('CAL_M',revs.m);if(hit)return(_metaCache=hit);}var out=rowsToMeta_(getSheetData_(SH_META,META_COLS).rows);cacheWriteObj_('CAL_M',revs.m,'m',out,300);return(_metaCache=out);}function updateMeta_(obj){var d=getSheetData_(SH_META,META_COLS),now=_gb().isoStr,m=rowsToMeta_(d.rows),keyMap={},minR=1e9,maxR=-1,newRows=[],chgEx=false;
-for(var i=0;i<d.rows.length;i++){var k=tr_(d.rows[i][0]);if(k)keyMap[k]=i;}Object.keys(obj||{}).forEach(function(k){var v=_sn(obj[k]),idx=keyMap[k];if(idx!==undefined&&m[k]===v)return;m[k]=v;if(idx!==undefined){d.rows[idx][1]=v;d.rows[idx][2]=now;if(idx<minR)minR=idx;if(idx>maxR)maxR=idx;chgEx=true;}else{newRows.push([k,v,now]);keyMap[k]=d.rows.length+newRows.length-1;}});
-if(chgEx){var blk=[];for(var r=minR;r<=maxR;r++)blk.push([String(d.rows[r][1]!=null?d.rows[r][1]:''),String(d.rows[r][2]!=null?d.rows[r][2]:'')]);putGrid_(d.sh,minR+2,2,blk);}if(newRows.length)putGrid_(d.sh,d.rows.length+2,1,newRows);if(chgEx||newRows.length){invalidateSheetCache_(SH_META);bumpDataRev_(['meta']);}return m;}
-function readLogs_(name,cols,lim){var isRe50=name===SH_RE_LOGS&&(lim||30)===50,revs=isRe50?getRevs_():null;if(isRe50&&!_bypassCache){var hit=cacheReadObj_('CAL_L',revs.l);if(hit)return hit;}var d=getSheetData_(name,cols);if(!d.rows.length){if(isRe50)cacheWriteObj_('CAL_L',revs.l,'l',[],180);return[];}
-var out=d.rows.slice(Math.max(0,d.rows.length-(lim||30))).reverse().map(function(row){var o={};d.headers.forEach(function(c,i){o[c]=row[i];});return o;});if(isRe50)cacheWriteObj_('CAL_L',revs.l,'l',out,180);return out;}function runNotificationEngine(){return withLock_(function(){cleanExpiredTriggers_();resetLock_();var now=_gb();updateMeta_({LAST_TRIGGER_RUN_AT:now.isoStr});
-var m=getMetaMap_(),qs=+m.QUIET_HOURS_START||22,qe=+m.QUIET_HOURS_END||7,dh=+m.DAILY_DIGEST_HOUR||8;if(qs>qe?(now.hour>=qs||now.hour<qe):(now.hour>=qs&&now.hour<qe))return{sent:false,reason:'QUIET_HOURS'};var apts=readAllApts_(false,true),hourly=[],digest=[],slotUp=[];apts.forEach(function(a){if(a.status!==S_CF||!a.appointmentDate||!a.appointmentTime)return;var ep=bkkSlotToEpoch_(a.appointmentDate,a.appointmentTime);if(ep===null||now.epochMs>=ep)return;
-var slot=a.appointmentDate+'T'+a.appointmentTime,diffH=(ep-now.epochMs)/3600000,rH=+a.remindHoursBefore||0,rD=+a.remindDaysBefore||0;if(rH>0&&a.notifiedHourForSlot!==slot&&diffH>0&&diffH<=rH){hourly.push(a);slotUp.push({id:a.id,dSlot:a.appointmentDate,hSlot:slot});return;}
-var diffD=diffDays_(now.dateStr,a.appointmentDate);if(rD>0&&a.notifiedDayForSlot!==a.appointmentDate&&diffD!==null&&diffD>=0&&diffD<=rD&&now.hour>=dh){digest.push(a);slotUp.push({id:a.id,dSlot:a.appointmentDate,hSlot:a.notifiedHourForSlot||''});}});
-if(!hourly.length&&!digest.length)return{sent:false,reason:'NONE_DUE'};hourly.sort(cmpSlot_);digest.sort(cmpSlot_);var qInfo={limit:+m.CACHED_QUOTA_LIMIT||300,used:+m.CACHED_QUOTA_USED||0},flexMsg=buildReminderNotificationFlex_(hourly,digest,now.dateStr,isTrue_(m.PRIVACY_MASK_CONTACT),m.WEB_APP_URL||'',qInfo);
-var pushRes=pushLine_(getProp_('LINE_TARGET_ID'),flexMsg,Utilities.getUuid(),false,hourly.length?'HOURLY':'DAILY',slotUp.map(function(u){return u.id;}).join(','));if(pushRes.ok){applySlotUpdates_(slotUp);bumpDataRev_(['apts']);updateMeta_({CACHED_QUOTA_USED:String(qInfo.used+1)});}return{sent:pushRes.ok,httpStatus:pushRes.httpStatus,count:slotUp.length};});}
-function applySlotUpdates_(ups){var d=getSheetData_(SH_APTS,APT_COLS);if(!d.rows.length||!ups.length)return;var dCol=d.headers.indexOf('notifiedDayForSlot')+1,hCol=d.headers.indexOf('notifiedHourForSlot')+1,delIdx=d.headers.indexOf('deletedAt'),idMap={},minR=1e9,maxR=-1,touched=[];
-for(var r=0;r<d.rows.length;r++)if(!(delIdx!==-1&&tr_(d.rows[r][delIdx])))idMap[String(d.rows[r][0]).trim()]=r;ups.forEach(function(u){var ri=idMap[u.id];if(ri===undefined)return;if(dCol>0)d.rows[ri][dCol-1]=u.dSlot;if(hCol>0)d.rows[ri][hCol-1]=u.hSlot;if(ri<minR)minR=ri;if(ri>maxR)maxR=ri;touched.push(ri);});
-if(!touched.length)return;if(dCol>0&&hCol===dCol+1){var blk=[];for(var i=minR;i<=maxR;i++)blk.push([String(d.rows[i][dCol-1]||''),String(d.rows[i][hCol-1]||'')]);putGrid_(d.sh,minR+2,dCol,blk);}else touched.forEach(function(ri){if(dCol>0)d.sh.getRange(ri+2,dCol).setValue(d.rows[ri][dCol-1]);if(hCol>0)d.sh.getRange(ri+2,hCol).setValue(d.rows[ri][hCol-1]);});
-invalidateSheetCache_(SH_APTS);}function pushLine_(target,msg,retryKey,isDry,type,aptIds){var token=getProp_('LINE_CHANNEL_ACCESS_TOKEN'),now=_gb().isoStr;if(!token)return{ok:false,error:'ไม่มี Token'};var url=LN_API+(isDry?'message/validate/push':'message/push'),msgObj=(typeof msg==='object'&&msg!==null)?msg:{type:'text',text:_sn(msg)},hdrs={Authorization:'Bearer '+token};if(!isDry&&retryKey)hdrs['X-Line-Retry-Key']=retryKey;
-var res=UrlFetchApp.fetch(url,{method:'post',contentType:'application/json',headers:hdrs,payload:JSON.stringify(isDry?{messages:[msgObj]}:{to:target,messages:[msgObj]}),muteHttpExceptions:true}),code=res.getResponseCode(),ok=code>=200&&code<300;
-appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),now,type||'PUSH',aptIds||'-',target||'-',String(code),retryKey||'-',ok?'':res.getContentText()]);return{ok:ok,httpStatus:code,error:ok?null:res.getContentText()};}
-function sendLineReply_(replyToken,msg){var token=getProp_('LINE_CHANNEL_ACCESS_TOKEN');if(!token||!replyToken)return;var msgObj=(typeof msg==='object'&&msg!==null)?msg:{type:'text',text:_sn(msg)},post=function(m){return UrlFetchApp.fetch(LN_API+'message/reply',{method:'post',contentType:'application/json',headers:{Authorization:'Bearer '+token},payload:JSON.stringify({replyToken:replyToken,messages:[m]}),muteHttpExceptions:true});};
-var res=post(msgObj);if(res&&res.getResponseCode&&res.getResponseCode()!==200&&msgObj.type==='flex')post({type:'text',text:_sn(msgObj.altText||'ดำเนินการเรียบร้อย')});}function getLineUserName_(gid,uid,token){if(!token||!uid)return'สมาชิก LINE';var cKey='LN_U_'+(gid||'DM')+'_'+uid;try{var cache=sc_(),cached=cache?cache.get(cKey):'';if(cached)return cached;
-var res=UrlFetchApp.fetch(LN_API+(gid?('group/'+gid+'/member/'+uid):('profile/'+uid)),{headers:{Authorization:'Bearer '+token},muteHttpExceptions:true});if(res.getResponseCode()===200){var data=JSON.parse(res.getContentText());if(data&&data.displayName){var nm=_sn(data.displayName);if(cache)cache.put(cKey,nm,21600);return nm;}}}catch(_){}return'สมาชิก LINE';}
-function parseQueryString_(qs){var obj={};String(qs||'').split('&').forEach(function(pair){var p=pair.split('=');if(p.length===2)obj[decodeURIComponent(p[0])]=decodeURIComponent(p[1]);});return obj;}function fAssign_(b,o){if(o)Object.keys(o).forEach(function(k){if(o[k]!==undefined)b[k]=o[k];});return b;}
-function fTxt(t,o){return fAssign_({type:'text',text:sanitizeNoEmoji(String(t==null?'-':t))},o);}function fFT(t,s,c,b,o){var x={size:s,color:c};if(b)x.weight='bold';if(o)fAssign_(x,o);return fTxt(t,x);}function fBox(layout,contents,o){return fAssign_({type:'box',layout:layout,contents:contents},o);}
-function fV(c,o){return fBox('vertical',c,o);}function fBtn(style,action,color){var b={type:'button',style:style,height:'sm',action:action};if(color)b.color=color;return b;}function fSep(col,m){var s={type:'separator',color:col};if(m)s.margin=m;return s;}
-function fLinkFt(url,lbl){return url?fV([fBtn('link',{type:'uri',label:lbl,uri:url})]):null;}function fWarnBox_(t,m){return fV([fFT(t,'xs','#b45309',1,{wrap:true})],{backgroundColor:'#fffbeb',cornerRadius:'md',paddingAll:'sm',margin:m||'sm'});}
-function fRow(lbl,val,bold,col,wrap){return fBox('baseline',[fFT(lbl,'sm','#64748b',0,{flex:2}),fFT(val||'-','sm',col||'#334155',bold,{flex:5,wrap:wrap||undefined})],{spacing:'sm'});}function fBar(pct,fillCol){var p=Math.max(0,Math.min(100,Number(pct)||0));return fBox('horizontal',[fV([],{width:(p>0?p:1)+'%',height:'8px',backgroundColor:p>0?fillCol:'#e2e8f0',cornerRadius:'md'})],{height:'8px',backgroundColor:'#e2e8f0',cornerRadius:'md',margin:'md'});}
-function fBubble(bgHdr,hdrItems,bodyItems,footerBox){var b={type:'bubble',size:'mega',styles:{header:{backgroundColor:bgHdr}},header:fV(hdrItems),body:fV(bodyItems,{spacing:'sm'})};if(footerBox)b.footer=footerBox;return b;}function wrapFlex_(alt,contents){return{type:'flex',altText:sanitizeNoEmoji(alt).slice(0,400),contents:contents};}
-function getAptStatusColor_(st){var s=normalizeStatus_(st);return s===STATUS.COMPLETED?'#059669':(s===STATUS.CANCELLED?'#dc2626':'#0284c7');}function getAptFlexTheme_(st,isUpd,isReop){var s=normalizeStatus_(st);if(s===STATUS.COMPLETED)return{tag:'[แจ้งเตือนสิ้นสุดการนัดหมาย]',stColor:'#059669',bgHdr:'#ecfdf5',hdrColor:'#065f46',subColor:'#047857',sepColor:'#a7f3d0'};
-if(s===STATUS.CANCELLED)return{tag:'[แจ้งเตือนยกเลิกการนัดหมาย]',stColor:'#dc2626',bgHdr:'#fef2f2',hdrColor:'#991b1b',subColor:'#b91c1c',sepColor:'#fecaca'};return isUpd?(isReop?{tag:'[แจ้งเตือนการคืนสถานะนัดหมาย]',stColor:'#0284c7',bgHdr:'#eff6ff',hdrColor:'#1d4ed8',subColor:'#2563eb',sepColor:'#bfdbfe'}:{tag:'[แจ้งเตือนการอัปเดตนัดหมาย]',stColor:'#0284c7',bgHdr:'#eef2ff',hdrColor:'#4338ca',subColor:'#4f46e5',sepColor:'#c7d2fe'}):{tag:'[แจ้งเตือนนัดหมายใหม่]',stColor:'#0284c7',bgHdr:'#f0f9ff',hdrColor:'#0369a1',subColor:'#0284c7',sepColor:'#bae6fd'};}
-function buildStatusResultFlex_(apt,actionType,actingUser,reason,nowTime){var isC=actionType==='COMPLETED'||actionType==='quickComplete',hdr=isC?'[บันทึกสิ้นสุดนัดหมายเรียบร้อย]':'[บันทึกยกเลิกนัดหมายเรียบร้อย]',sc=isC?'#059669':'#dc2626',rows=[fRow('สถานะ',isC?'[สิ้นสุดการนัดหมาย]':'[ยกเลิกการนัดหมาย]',1,sc),fRow(isC?'ผู้เสร็จสิ้น':'ผู้ยกเลิก',actingUser||'สมาชิก LINE',1,'#1e293b')];
-if(!isC&&reason)rows.push(fRow('สาเหตุ',reason,0,'#dc2626',true));if(apt&&apt.appointmentDate)rows.push(fRow('วันนัด',fmtThaiDate_(apt.appointmentDate)+' ('+(apt.appointmentTime||'-')+' น.)',0,'#475569'));if(apt&&apt.location)rows.push(fRow('สถานที่',apt.location,0,'#334155',true));if(apt&&apt.contactPerson)rows.push(fRow('ผู้นัดพบ',apt.contactPerson,0,'#334155',true));if(apt&&apt.createdBy)rows.push(fRow('ผู้สร้าง',apt.createdBy,0,'#64748b'));
-return wrapFlex_(hdr+' ['+((apt&&apt.id)||'')+'] '+((apt&&apt.title)||''),fBubble(isC?'#ecfdf5':'#fef2f2',[fBox('baseline',[fFT(hdr,'sm',isC?'#065f46':'#991b1b',1,{flex:8}),fFT((nowTime||'')+' น.','xs','#64748b',0,{align:'end',flex:4})]),fFT((apt&&apt.id)||'-','xs',sc,1,{margin:'xs'})],[fFT((apt&&apt.title)||'-','md','#0f172a',1,{wrap:true}),fSep(isC?'#a7f3d0':'#fecaca','sm'),fV(rows,{spacing:'xs',margin:'md'})]));}
-function buildNoticeFlex_(id,title,desc,curStatus,actor,reason){var rows=[],bodyItems=[fFT(title||'รายการนี้ได้รับการดำเนินการไปแล้ว','md','#1e293b',1,{wrap:true}),fSep('#fde68a','sm'),fFT(desc||'','sm','#64748b',0,{wrap:true})];if(curStatus)rows.push(fRow('สถานะปัจจุบัน','['+curStatus+']',1,getAptStatusColor_(curStatus)));if(actor)rows.push(fRow('ดำเนินการโดย',actor+(reason?' ('+reason+')':''),0,'#475569',true));
-if(rows.length)bodyItems.push(fV(rows,{spacing:'xs',margin:'sm'}));return wrapFlex_('[แจ้งเตือน] นัดหมาย ['+id+'] '+(desc||''),fBubble('#fffbeb',[fFT('[แจ้งเตือนสถานะนัดหมาย]','sm','#b45309',1),fFT(id||'-','xs','#92400e',1,{margin:'xs'})],bodyItems));}
-function buildQuotaFlex_(used,limit,webAppUrl){var uUsed=Math.max(0,Number(used)||0),uLim=Math.max(1,Number(limit)||300),rem=Math.max(0,uLim-uUsed),pct=Math.min(100,Math.round((uUsed/uLim)*100));var t=pct>=90?{bg:'#fef2f2',hc:'#991b1b',sc:'#dc2626',bc:'#ef4444',sep:'#fecaca',st:'[วิกฤต - ใกล้เต็มโควตา]'}:(pct>=80?{bg:'#fffbeb',hc:'#92400e',sc:'#d97706',bc:'#f59e0b',sep:'#fde68a',st:'[เฝ้าระวัง - ใช้ไปเกิน 80%]'}:{bg:'#ecfdf5',hc:'#065f46',sc:'#047857',bc:'#10b981',sep:'#a7f3d0',st:'[สถานะปกติ - พร้อมใช้งาน]'});
-return wrapFlex_('[โควตา LINE] ใช้ไปแล้ว '+uUsed+'/'+uLim+' ('+pct+'%)',fBubble(t.bg,[fFT('[สถานะโควตาข้อความ LINE]','sm',t.hc,1),fFT('โควตาการส่งข้อความแจ้งเตือนประจำเดือน','xs',t.sc,0,{margin:'xs'})],[fFT('อัตราการใช้งาน: '+pct+'%','md','#0f172a',1),fBar(pct,t.bc),fSep(t.sep,'md'),fV([fRow('ใช้ไปแล้ว',uUsed+' / '+uLim+' ข้อความ ('+pct+'%)',1,'#0f172a'),fRow('คงเหลือ',rem+' ข้อความ',1,t.sc),fRow('ระดับเตือน',t.st,1,t.sc)],{spacing:'xs',margin:'md'})],fLinkFt(webAppUrl,'เปิดหน้าตั้งค่าและตารางงาน')));}
-function buildHelpFlex_(webAppUrl){var cmds=[['วันนี้','ดูนัดหมายเฉพาะวันนี้'],['พรุ่งนี้','ดูนัดหมายวันพรุ่งนี้'],['สัปดาห์นี้','ดูนัดหมาย 7 วันข้างหน้า'],['ค้างอยู่','ดูนัดหมายที่เลยกำหนดเวลา'],['ทั้งหมด','ดูนัดหมายรอพบทั้งหมด'],['เดือนนี้','ดูรายการงานประจำเดือนนี้'],['ปีนี้','สรุปผลงานและสถิติประจำปี'],['โควตา','เช็คโควตาข้อความ LINE'],['ค้นหา <คำ>','ค้นหาจากชื่อ งาน หรือสถานที่'],['สร้างนัด / สร้างงาน','เช่น สร้างนัด พรุ่งนี้ 10:30 / ประชุม / ห้อง B / คุณสมชาย'],['ผูกบัญชี / รีเซ็ตรหัส','ผูก LINE หรือขอ OTP รีเซ็ตรหัส (แชทส่วนตัว 1-on-1)']];
-var rows=cmds.map(function(c){return fBox('horizontal',[fFT(c[0],'sm','#4f46e5',1,{flex:4}),fFT(c[1],'sm','#64748b',0,{flex:6,wrap:true})],{spacing:'sm',margin:'xs'});});var qBtn=function(l,c){return fBtn('primary',{type:'message',label:l,text:l},c||'#4f46e5');},ftItems=[fBox('horizontal',[qBtn('วันนี้'),qBtn('พรุ่งนี้')],{spacing:'sm'}),fBox('horizontal',[qBtn('ค้างอยู่','#dc2626'),qBtn('ทั้งหมด','#0284c7')],{spacing:'sm'}),fBox('horizontal',[qBtn('ปีนี้','#059669'),qBtn('โควตา','#334155')],{spacing:'sm'})];
-if(webAppUrl)ftItems.push(fBtn('link',{type:'uri',label:'เปิดดูตารางงานบนเว็บแอป',uri:webAppUrl}));return wrapFlex_('[คำสั่งตรวจสอบตารางงาน] แตะเพื่อดูคำสั่งทั้งหมด',fBubble('#eef2ff',[fFT('[คำสั่งตรวจสอบตารางงาน]','sm','#4338ca',1),fFT('แตะปุ่มด้านล่างหรือพิมพ์คำสั่งเพื่อค้นหา','xs','#4f46e5',0,{margin:'xs'})],[fFT('คำสั่งลัดที่ใช้งานบ่อย:','sm','#0f172a',1),fSep('#c7d2fe'),fV(rows,{spacing:'xs',margin:'md'}),fFT('รองรับคำสั่งสั้นทันที หรือพิมพ์ "คิว ..." ตามเดิม','xxs','#64748b',0,{margin:'sm'})],fV(ftItems,{spacing:'sm'})));}
-function buildQueueFlex_(title,count,items,webAppUrl,mask,opts){var v=(opts&&opts.variant)||'default';var t=v==='overdue'?{bg:'#fef2f2',hc:'#991b1b',sc:'#dc2626',sep:'#fecaca',empty:'ไม่มีนัดหมายที่ค้างหรือเลยกำหนดเวลา'}:(v==='today'?{bg:'#fffbeb',hc:'#92400e',sc:'#d97706',sep:'#fde68a',empty:'ไม่มีนัดหมายสำหรับวันนี้'}:{bg:'#eef2ff',hc:'#3730a3',sc:'#4f46e5',sep:'#c7d2fe',empty:'ไม่มีรายการนัดหมายตามเงื่อนไขที่เลือก'});
-var safeItems=Array.isArray(items)?items:[],rows=[];safeItems.forEach(function(a,i){var c=sanitizeNoEmoji(a.contactPerson||'-');if(mask&&c.length>2)c=c.slice(0,2)+'***';var st=normalizeStatus_(a.status),stCol=v==='overdue'&&st===STATUS.CONFIRMED?'#dc2626':getAptStatusColor_(st);if(i>0)rows.push(fSep('#e2e8f0','md'));
-rows.push(fBox('horizontal',[fV([],{width:'4px',backgroundColor:stCol,cornerRadius:'sm'}),fV([fBox('baseline',[fFT((i+1)+'. '+(a.appointmentDate?fmtThaiDate_(a.appointmentDate):'-')+' '+(a.appointmentTime?a.appointmentTime+' น.':'-'),'xs','#475569',1,{flex:6}),fFT('['+st+']','xs',stCol,1,{align:'end',flex:4})],{spacing:'sm'}),fFT(a.title||'-','sm','#0f172a',1,{wrap:true}),fFT('สถานที่: '+(a.location||'-')+' | ผู้นัด: '+c,'xs','#64748b',0,{wrap:true})],{spacing:'xs',flex:1})],{spacing:'sm',margin:'md'}));});
-if(!safeItems.length)rows.push(fFT(t.empty,'sm','#64748b',0,{margin:'md'}));return wrapFlex_(title+' ('+count+' รายการ)',fBubble(t.bg,[fFT(title,'sm',t.hc,1,{wrap:true}),fFT('พบ '+count+' รายการ'+(count>safeItems.length?' (แสดง '+safeItems.length+' รายการแรก)':''),'xs',t.sc,0,{margin:'xs'})],[fFT('รายการนัดหมาย:','sm','#0f172a',1),fSep(t.sep),fV(rows)],fLinkFt(webAppUrl,'เปิดดูตารางงานทั้งหมดบนเว็บแอป')));}
-function buildYearStatsFlex_(year,total,act,comp,canc,rate,sampleItems,webAppUrl){var safeRate=Math.max(0,Math.min(100,Number(rate)||0)),yRow=function(lbl,val,col){return fBox('baseline',[fFT(lbl,'sm','#64748b',0,{flex:4}),fFT(val,'sm',col||'#1e293b',1,{flex:6})],{spacing:'sm'});};
-return wrapFlex_('[สรุปสถิติประจำปี พ.ศ. '+(year+543)+'] รวม '+total+' งาน',fBubble('#eef2ff',[fFT('[สรุปสถิติประจำปี พ.ศ. '+(year+543)+']','sm','#4338ca',1),fFT('สรุปผลงานและการดำเนินงานตลอดทั้งปี','xs','#4f46e5',0,{margin:'xs'})],[fFT('ภาพรวมผลงานประจำปี:','sm','#0f172a',1),fSep('#c7d2fe'),fV([yRow('งานทั้งหมด',total+' งาน','#0f172a'),yRow('เริ่มนัด',act+' งาน','#0284c7'),yRow('สิ้นสุดการนัดหมาย',comp+' งาน (สำเร็จ '+safeRate+'%)','#059669'),yRow('ยกเลิกการนัดหมาย',canc+' งาน','#dc2626')],{spacing:'xs',margin:'md'}),fBar(safeRate,'#10b981')],fLinkFt(webAppUrl,'เปิดดูแดชบอร์ดรายปีบนเว็บแอป')));}
-function getValidMapUri_(raw){var s=sanitizeNoEmoji(raw||'').trim();if(!s)return'';if(/^https?:\/\//i.test(s))return s.indexOf(' ')!==-1?s.replace(/ /g,'%20'):s;var ll=s.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);return ll?('https://www.google.com/maps?q='+ll[1]+','+ll[2]):'';}
-function buildAptBubble_(apt,opts){opts=opts||{};var isUpd=Boolean(opts.isUpdate),webAppUrl=opts.webAppUrl||'',mapUri=getValidMapUri_(apt.mapUrl),c=sanitizeNoEmoji(apt.contactPerson||'-');if(opts.maskContact&&c.length>2)c=c.slice(0,2)+'***';var creator=sanitizeNoEmoji(apt.createdBy||apt.updatedBy||'ผู้ใช้งานระบบ'),st=normalizeStatus_(apt.status),theme=getAptFlexTheme_(st,isUpd,Boolean(apt.reopened));
-var infoRows=[fRow('วันนัด',fmtThaiDate_(apt.appointmentDate),1,'#0f172a'),fRow('เวลา',(apt.appointmentTime||'-')+' น.',1,'#0f172a'),fRow('สถานที่',apt.location||'-',0,'#334155',true),fRow('ผู้นัดพบ',c,0,'#334155',true),fRow('สถานะ','['+st+']',1,theme.stColor),fRow('ผู้สร้าง',creator,0,'#64748b')];
-if(st===STATUS.COMPLETED&&apt.statusChangedBy)infoRows.push(fRow('ผู้เสร็จสิ้น',apt.statusChangedBy,1,'#059669'));else if(st===STATUS.CANCELLED){if(apt.statusChangedBy)infoRows.push(fRow('ผู้ยกเลิก',apt.statusChangedBy,1,'#dc2626'));if(apt.statusReason)infoRows.push(fRow('สาเหตุ',apt.statusReason,0,'#dc2626',true));}
-else if(isUpd&&apt.updatedBy&&apt.updatedBy!==creator)infoRows.push(fRow('ผู้แก้ไข',apt.updatedBy,0,'#64748b'));if(apt.notes)infoRows.push(fRow('หมายเหตุ',apt.notes,0,'#475569',true));var bodyItems=[fFT(apt.title||'-','md','#0f172a',1,{wrap:true}),fSep(opts.sepColorOverride||theme.sepColor),fV(infoRows,{spacing:'sm'})];
-if(opts.quotaWarnText)bodyItems.push(fWarnBox_(opts.quotaWarnText,'sm'));var ft=null,linkBtns=[];if(mapUri)linkBtns.push(fBtn('link',{type:'uri',label:'ดูแผนที่นำทาง',uri:mapUri}));if(webAppUrl)linkBtns.push(fBtn('link',{type:'uri',label:st===STATUS.CONFIRMED?'เปิดดูรายละเอียดบนเว็บแอป':'เปิดดูตารางงานบนเว็บแอป',uri:webAppUrl}));
-if(st===STATUS.CONFIRMED){var actionBtns=[fBtn('primary',{type:'postback',label:'เสร็จสิ้น',data:'action=quickComplete&id='+encodeURIComponent(apt.id),displayText:'บันทึกเสร็จสิ้น ['+apt.id+']'},'#10b981'),fBtn('primary',{type:'postback',label:'ยกเลิก',data:'action=quickCancel&id='+encodeURIComponent(apt.id),displayText:'ขอยกเลิกนัดหมาย ['+apt.id+']'},'#ef4444')];
-ft=linkBtns.length?fV([fBox('horizontal',actionBtns,{spacing:'md'})].concat(linkBtns),{spacing:'sm',paddingTop:'sm'}):fBox('horizontal',actionBtns,{spacing:'md',paddingTop:'sm'});}else if(linkBtns.length)ft=fV(linkBtns,{spacing:'xs',paddingTop:'sm'});
-var b=fBubble(opts.bgHdrOverride||theme.bgHdr,[fFT(opts.hdrOverride||theme.tag,'sm',opts.hdrColorOverride||theme.hdrColor,1),fFT(apt.id||'-','xs',opts.subColorOverride||theme.subColor,1,{margin:'xs'})],bodyItems,ft);b.header.paddingBottom='md';b.body.spacing='md';return b;}
-function buildAptFlexMsg_(apt,isUpdate,maskContact,webAppUrl){var theme=getAptFlexTheme_(normalizeStatus_(apt.status),Boolean(isUpdate),Boolean(apt.reopened));return wrapFlex_(theme.tag+' ['+(apt.id||'')+'] '+sanitizeNoEmoji(apt.title||''),buildAptBubble_(apt,{isUpdate:isUpdate,maskContact:maskContact,webAppUrl:webAppUrl}));}
-function buildReminderNotificationFlex_(hourly,digest,todayDateStr,maskContact,webAppUrl,qInfo){var hList=Array.isArray(hourly)?hourly:[],dList=Array.isArray(digest)?digest:[],entries=[];hList.forEach(function(a){entries.push({apt:a,kind:'HOURLY'});});dList.forEach(function(a){entries.push({apt:a,kind:'DAILY'});});
-if(!entries.length)return buildQueueFlex_('[ไม่มีนัดหมายที่ถึงกำหนดแจ้งเตือน]',0,[],webAppUrl,maskContact);var qWarn=(qInfo&&qInfo.limit>0&&(qInfo.used/qInfo.limit)>=0.8)?('[เตือนโควตา LINE] ใช้ไปแล้ว '+qInfo.used+'/'+qInfo.limit+' ข้อความ'):'',dailyTag='[สรุปคิวงานล่วงหน้า '+fmtThaiDate_(todayDateStr)+']';
-var makeBubble=function(e,warn){var isH=e.kind==='HOURLY';return buildAptBubble_(e.apt,{maskContact:maskContact,webAppUrl:webAppUrl,hdrOverride:isH?'[แจ้งเตือนก่อนเวลานัด]':dailyTag,bgHdrOverride:isH?'#fffbeb':'#f0f9ff',hdrColorOverride:isH?'#b45309':'#0369a1',subColorOverride:isH?'#d97706':'#0284c7',sepColorOverride:isH?'#fde68a':'#bae6fd',quotaWarnText:warn||''});};
-if(entries.length===1)return wrapFlex_((entries[0].kind==='HOURLY'?'[แจ้งเตือนก่อนเวลานัด]':'[สรุปคิวงานล่วงหน้า]')+' ['+(entries[0].apt.id||'')+'] '+(entries[0].apt.title||''),makeBubble(entries[0],qWarn));var bubbles=entries.slice(0,entries.length>9?9:entries.length).map(function(e,idx){return makeBubble(e,entries.length<=9&&idx===0?qWarn:'');});
-if(entries.length>9){var ov=entries.slice(9),ovRows=ov.slice(0,6).map(function(e,i){return fBox('baseline',[fFT((10+i)+'. '+(e.apt.appointmentTime?e.apt.appointmentTime+' น.':'-'),'xs','#4f46e5',1,{flex:3}),fFT(e.apt.title||'-','xs','#1e293b',0,{flex:7,wrap:true})],{spacing:'sm',margin:'xs'});});
-if(ov.length>6)ovRows.push(fFT('...และอีก '+(ov.length-6)+' รายการบนเว็บแอป','xs','#64748b',0,{margin:'sm'}));var sumBody=[fFT('รายการนัดหมายที่เหลืออีก '+ov.length+' รายการ','md','#0f172a',1,{wrap:true}),fSep('#c7d2fe'),fV(ovRows,{spacing:'xs',margin:'sm'})];
-if(qWarn)sumBody.push(fWarnBox_(qWarn,'md'));bubbles.push(fBubble('#eef2ff',[fFT('[สรุปคิวงานเพิ่มเติม]','sm','#4338ca',1),fFT('รวมทั้งหมดในรอบนี้ '+entries.length+' รายการ','xs','#4f46e5',0,{margin:'xs'})],sumBody,fLinkFt(webAppUrl,'ดูตารางงานทั้งหมดบนเว็บแอป')));}
-var alt=hList.length&&dList.length?('[แจ้งเตือน '+hList.length+' นัดด่วน + '+dList.length+' คิวล่วงหน้า]'):(hList.length?'[แจ้งเตือนก่อนเวลานัด] '+hList.length+' รายการ':dailyTag+' '+dList.length+' รายการ');return wrapFlex_(alt,{type:'carousel',contents:bubbles});}
-function buildOtpFlex_(username,otp,mins){var m=mins||10;return wrapFlex_('[รหัส OTP รีเซ็ตรหัสผ่าน] '+otp,fBubble('#eef2ff',[fFT('[รหัสยืนยันรีเซ็ตรหัสผ่าน (OTP)]','sm','#4338ca',1),fFT('บัญชี: '+sanitizeNoEmoji(username||'-'),'xs','#4f46e5',0,{margin:'xs'})],[fFT('รหัสยืนยันของคุณคือ','xs','#64748b',0),fFT(String(otp||''),'xxl','#1e293b',1,{margin:'xs',align:'center'}),fSep('#c7d2fe','md'),fWarnBox_('รหัสนี้มีอายุ '+m+' นาที และใช้ได้เพียงครั้งเดียว ห้ามเปิดเผยรหัสนี้ให้ผู้อื่น','sm')]));}
-function testNotification_(isDry,custom){var t=getProp_('LINE_TARGET_ID');if(custom)return pushLine_(t,custom,Utilities.getUuid(),isDry,isDry?'DRY_RUN':'MANUAL_TEST','TEST');var sample={id:'APT-TEST-001',title:'ทดสอบระบบแจ้งเตือนแบบโต้ตอบ (Zero-Emoji)',appointmentDate:_gb().dateStr,appointmentTime:'14:00',location:'ห้องประชุมใหญ่ ชั้น 5',contactPerson:'คุณทดสอบ',status:S_CF,createdBy:'ผู้ดูแลระบบ',notes:'ทดสอบปุ่มเสร็จสิ้นและยกเลิกบน LINE Flex Message'};
-return pushLine_(t,buildAptFlexMsg_(sample,false,false,''),Utilities.getUuid(),isDry,isDry?'DRY_RUN':'MANUAL_TEST','TEST');}function sendInstantAptNotification_(apt,isUpdate){var target=getProp_('LINE_TARGET_ID');if(!target||!apt)return{sent:false,reason:'NO_TARGET'};
-var m=getMetaMap_(),st=_ns(apt.status),notifType=st===S_CP?'INSTANT_COMPLETED':(st===S_CN?'INSTANT_CANCELLED':(isUpdate&&apt.reopened?'INSTANT_REOPEN':(isUpdate?'INSTANT_UPDATE':'INSTANT_CREATE')));var pushRes=pushLine_(target,buildAptFlexMsg_(apt,isUpdate,isTrue_(m.PRIVACY_MASK_CONTACT),m.WEB_APP_URL||''),Utilities.getUuid(),false,notifType,apt.id),preQRev=null;
-if(pushRes.ok)preQRev=withLock_(function(){resetLock_();var pr=getDataRev_(),cm=getMetaMap_();updateMeta_({CACHED_QUOTA_USED:String((+cm.CACHED_QUOTA_USED||0)+1)});return pr;});return{sent:pushRes.ok,httpStatus:pushRes.httpStatus,error:pushRes.error,preQRev:preQRev};}
-function refreshLineQuotaCache_(){var token=getProp_('LINE_CHANNEL_ACCESS_TOKEN'),m=getMetaMap_(),lim=+m.CACHED_QUOTA_LIMIT||300,used=+m.CACHED_QUOTA_USED||0;if(!token)return{limit:lim,used:used};try{var hdrs={Authorization:'Bearer '+token};
-var resps=UrlFetchApp.fetchAll([{url:LN_API+'message/quota',method:'get',headers:hdrs,muteHttpExceptions:true},{url:LN_API+'message/quota/consumption',method:'get',headers:hdrs,muteHttpExceptions:true}]);if(resps[0].getResponseCode()===200)lim=+JSON.parse(resps[0].getContentText()).value||lim;if(resps[1].getResponseCode()===200)used=+JSON.parse(resps[1].getContentText()).totalUsage||used;
-withLock_(function(){resetLock_();updateMeta_({CACHED_QUOTA_LIMIT:String(lim),CACHED_QUOTA_USED:String(used),QUOTA_UPDATED_AT:_gb().isoStr});});return{limit:lim,used:used};}catch(e){return{limit:lim,used:used,error:e.message};}}function handleLinePostback_(ev,gid,uid){var pbData=parseQueryString_((ev&&ev.postback&&ev.postback.data)||''),action=pbData.action||'',id=pbData.id||'';
-if(!id)return buildNoticeFlex_('-','ข้อมูลไม่ถูกต้อง','ไม่พบรหัสนัดหมายในการทำรายการ','','','');var actingUser=(action==='quickComplete'||action==='quickCancel')?getLineUserName_(gid,uid,getProp_('LINE_CHANNEL_ACCESS_TOKEN')):'';return withLock_(function(){resetLock_();var targetApt=readAllApts_(false,true).filter(function(a){return a.id===id;})[0],doneTtl='รายการนี้ได้รับการดำเนินการไปแล้ว';
-if(!targetApt)return buildNoticeFlex_(id,'ไม่พบรายการนัดหมาย','ไม่พบรายการนัดหมาย '+id+' ในระบบ (อาจถูกลบไปแล้ว)','','','');var curSt=_ns(targetApt.status);if(curSt===S_CP)return buildNoticeFlex_(id,doneTtl,'นัดหมายนี้ได้รับการบันทึกเสร็จสิ้นไปแล้ว',S_CP,(targetApt.statusChangedBy||'ผู้ใช้งาน')+(targetApt.statusChangedAt?' เมื่อ '+fmtThaiDate_(targetApt.statusChangedAt.slice(0,10)):''),'');
-if(curSt===S_CN)return buildNoticeFlex_(id,doneTtl,'นัดหมายนี้ได้รับการยกเลิกไปแล้ว',S_CN,targetApt.statusChangedBy||'ผู้ใช้งาน',targetApt.statusReason||'');if(action==='quickComplete'){updateApt_(id,{status:S_CP,statusChangedBy:actingUser,statusReason:'เสร็จสิ้นการนัดหมายผ่าน LINE',updatedBy:actingUser},targetApt.updatedAt,'เสร็จสิ้นผ่าน LINE',actingUser);
-bumpDataRev_(['apts','relogs']);return buildStatusResultFlex_(targetApt,'COMPLETED',actingUser,'',_gb().timeStr);}if(action==='quickCancel'){var cancelReason='ยกเลิกผ่าน LINE โดย '+actingUser;updateApt_(id,{status:S_CN,statusChangedBy:actingUser,statusReason:cancelReason,updatedBy:actingUser},targetApt.updatedAt,cancelReason,actingUser);
-bumpDataRev_(['apts','relogs']);return buildStatusResultFlex_(targetApt,'CANCELLED',actingUser,cancelReason,_gb().timeStr);}return null;});}function yr2ceGas_(y){var n=Number(y);return(!n&&y!=='0')?0:((n<100)?(n>=40?2500+n-543:2000+n):(n>2400?n-543:n));}
-function pTmGas_(r){var s=tr_(r).replace(/^(?:เวลา|เวลานัด)\s*[:：]?\s*/,'').trim();if(!s)return null;var mg=s.match(/^(\d{1,2})\s*โมง(ครึ่ง)?(?:\s*[-~ถึง].*)?$/i);if(mg)return+mg[1]<=23?(pad2_(mg[1])+':'+(mg[2]?'30':'00')):null;var m=s.replace(/(?:\s*[-~ถึง]\s*\d{1,2}(?:[:.]\d{2})?)?\s*(?:น\.?|โมง)?$/i,'').replace(/\./g,':').trim().match(/^(\d{1,2}):(\d{2})$/);
-return(!m||+m[1]>23||+m[2]>59)?null:(pad2_(m[1])+':'+pad2_(m[2]));}function pRemGas_(s){var dm=s.match(/(\d+)\s*(?:วัน|ว\.?|d)/i),hm=s.match(/(\d+)\s*(?:ชั่วโมง|ชม\.?|h)/i);return{d:dm?+dm[1]:0,h:hm?+hm[1]:0};}function parseSmartCreateGas_(arg,now){var cm=arg.match(CREATE_CMD_RE);if(!cm)return null;var body=(cm[1]||'').trim();if(!body)return{help:true};
-var pDt=function(r){var s=_sn(r).replace(/^(?:วันที่|วันนัด|วัน(?=\s|[:：]))\s*[:：]?\s*/,'').trim();if(!s)return null;if(s==='วันนี้')return now.dateStr;if(s==='พรุ่งนี้')return _gb(now.epochMs+86400000).dateStr;if(s==='มะรืน'||s==='มะรืนนี้')return _gb(now.epochMs+172800000).dateStr;
-var y=0,mo=0,dy=0,dm=s.match(/^(\d{1,2})[-/](\d{1,2})$/),m1=!dm&&s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/),m2=!m1&&s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/),th=!m2&&s.match(/^(\d{1,2})\s*([\u0E01-\u0E4E.]+?)(?:\s*(\d{2,4}))?$/);
-if(dm){y=now.year;mo=+dm[2];dy=+dm[1];}else if(m1){y=yr2ceGas_(m1[1]);mo=+m1[2];dy=+m1[3];}else if(m2){dy=+m2[1];mo=+m2[2];y=yr2ceGas_(m2[3]);}else if(th){var ms=th[2].trim();mo=TH_MO_MAP[ms]||TH_MO_MAP[ms.replace(/\./g,'')]||0;if(!mo)return null;y=th[3]?yr2ceGas_(th[3]):now.year;dy=+th[1];}else return null;
-var mx=(mo>=1&&mo<=12&&y>=1900&&y<=3000)?new Date(Date.UTC(y,mo,0)).getUTCDate():0;return(!mx||dy<1||dy>mx)?null:(y+'-'+pad2_(mo)+'-'+pad2_(dy));};var title='',dateRaw='',timeRaw='',loc='',contact='',notes='',mapUrl='',rD=0,rH=0,lines=body.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
-if(lines.length>1&&lines.some(function(l){return KV_RE.test(l);})){lines.forEach(function(l){var m=l.match(KV_RE);if(!m)return;var k=m[1],v=m[2].trim();if(/^(?:หัวข้อ|งาน|เรื่อง)$/.test(k))title=v;else if(/^(?:วันที่|วันนัด|วัน)$/.test(k))dateRaw=v;
-else if(k==='วันเวลา'){var dm2=v.match(/^(.*?)\s+(\d{1,2}(?:[:.]\d{2}|\s*โมง).*)$/);if(dm2){dateRaw=dm2[1];timeRaw=dm2[2];}else{var p=v.split(/\s+/);dateRaw=p[0]||'';timeRaw=p.slice(1).join(' ');}}else if(/^(?:เวลา|เวลานัด)$/.test(k))timeRaw=v;else if(/^(?:สถานที่|ที่นัดหมาย)$/.test(k))loc=v;else if(/^(?:ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ)$/.test(k))contact=v;
-else if(/^(?:เตือน|แจ้งเตือน)$/.test(k)){var r=pRemGas_(v);rD=r.d;rH=r.h;}else if(/^(?:หมายเหตุ|รายละเอียด)$/.test(k))notes=v;else if(/^(?:แผนที่|พิกัด)$/.test(k))mapUrl=v;});if(dateRaw&&!timeRaw){var tm2=dateRaw.match(/^(.+?)\s+(?:เวลา\s*)?(\d{1,2}[:.]\d{2}(?:\s*น\.?)?|\d{1,2}\s*โมง(?:ครึ่ง)?)$/i);if(tm2){dateRaw=tm2[1];timeRaw=tm2[2];}}
-}else{var urls=[],safeBody=body.replace(/https?:\/\/\S+/gi,function(u){urls.push(u);return'\x02'+(urls.length-1)+'\x02';}).replace(/(\d)\/(?=\d)/g,'$1\x01');var hasSep=/[\/|]/.test(safeBody),segs=(hasSep?safeBody.replace(/\r?\n/g,' ').split(/\s*[\/|]\s*/):(lines.length>1?safeBody.split(/\r?\n/):[safeBody])).map(function(s){return s.replace(/\x01/g,'/').replace(/\x02(\d+)\x02/g,function(_,idx){return urls[+idx]||'';}).trim();}).filter(Boolean),txtSegs=[];
-segs.forEach(function(seg){if(/^(?:เตือน|แจ้งเตือน)\s+/i.test(seg)){var r=pRemGas_(seg);rD=r.d;rH=r.h;return;}var w=seg;if(!dateRaw){var dm3=w.match(DT_TOK_RE);if(dm3&&pDt(dm3[1])){dateRaw=dm3[1];w=w.replace(dm3[0],' ').trim();}}if(!timeRaw){var tm3=w.match(TM_TOK_RE);if(tm3&&pTmGas_(tm3[1])){timeRaw=tm3[1];w=w.replace(tm3[0],' ').trim();}}if(w)txtSegs.push(w);});
-title=txtSegs[0]||'';loc=txtSegs[1]||'';contact=txtSegs[2]||'';notes=txtSegs.slice(3).join(' / ');}var aDate=pDt(dateRaw),aTime=pTmGas_(timeRaw),cTitle=_sn(title);if(!aDate||!aTime||!cTitle)return{error:'รูปแบบไม่ครบ (ต้องมี วันที่ เวลา และหัวข้อ) เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมตรวจรับงาน / ห้อง B / คุณสมชาย'};
-return{payload:{title:cTitle,appointmentDate:aDate,appointmentTime:aTime,location:_sn(loc)||'ไม่ระบุสถานที่',contactPerson:_sn(contact),status:S_CF,remindDaysBefore:rD,remindHoursBefore:rH,notes:_sn(notes),mapUrl:_sn(mapUrl)}};}function handleWebhookCreateApt_(arg,gid,uid,webAppUrl,mask){var now=_gb(),parsed=parseSmartCreateGas_(arg,now);if(!parsed)return null;
-if(parsed.help)return buildNoticeFlex_('-','วิธีพิมพ์สร้างนัดหมายในแชท','พิมพ์บรรทัดเดียวคั่นด้วย / เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมงาน / ห้อง B / คุณสมชาย\n(รองรับ สร้างงาน, วันนี้, พรุ่งนี้, มะรืน, วว/ดด/ปป หรือ 25 พ.ย. 69)','','','');
-if(parsed.error)return buildNoticeFlex_('-','รูปแบบการสร้างนัดไม่ถูกต้อง',parsed.error,'','','');var actingUser=getLineUserName_(gid,uid,getProp_('LINE_CHANNEL_ACCESS_TOKEN'));parsed.payload.createdBy=actingUser;if(!parsed.payload.contactPerson)parsed.payload.contactPerson=actingUser;
-try{return withLock_(function(){resetLock_();var conflicts=readAllApts_(false,true).filter(function(a){return a.status!==S_CN&&a.appointmentDate===parsed.payload.appointmentDate&&a.appointmentTime===parsed.payload.appointmentTime;});
-var apt=createApt_(parsed.payload);bumpDataRev_(['apts']);if(+apt.remindHoursBefore>0)scheduleExactReminderForApt_(apt);if(conflicts.length)return wrapFlex_('[แจ้งเตือนนัดหมายใหม่] ['+apt.id+'] '+_sn(apt.title),buildAptBubble_(apt,{isUpdate:false,maskContact:mask,webAppUrl:webAppUrl,quotaWarnText:'[คำเตือนคิวชน] เวลานี้มีนัดหมายอื่นแล้ว '+conflicts.length+' งาน ('+conflicts.map(function(c){return c.title;}).join(', ')+')'}));
-return buildAptFlexMsg_(apt,false,mask,webAppUrl);});}catch(e){return buildNoticeFlex_('-','ไม่สามารถสร้างนัดหมายได้',e.message||String(e),'','','');}}function handleLineWebhook_(body,qParams){var expKey=getProp_('WEBHOOK_SECRET_KEY');if(expKey&&String(qParams.webhookKey||'')!==expKey)return jErr_('INVALID_KEY');
-var cache=null,grps=null,usrs=null;(body.events||[]).forEach(function(ev){if(ev.type==='message'&&(!ev.message||ev.message.type!=='text'||!WEBHOOK_CMD_RE.test(_sn(ev.message.text))))return;if(!cache)cache=sc_();if(cache&&ev.webhookEventId)try{if(cache.get('WH_'+ev.webhookEventId))return;cache.put('WH_'+ev.webhookEventId,'1',600);}catch(_){}
-var src=ev.source||{},gid=src.groupId||src.roomId||'',uid=src.userId||'';if(ev.type==='join'){appendPlainRow_(ensureSheet_(getSs_(),SH_NOTIF_LOGS,NOTIF_LOG_COLS),['NLOG-'+Date.now(),_gb().isoStr,'JOIN','-',gid||uid,'200','-','พบ ID สำหรับตั้งค่า: '+(gid||uid)]);return;}
-if(!grps){grps=getProp_('ALLOWED_GROUP_IDS').split(',').map(function(s){return s.trim();}).filter(Boolean);usrs=getProp_('ALLOWED_USER_IDS').split(',').map(function(s){return s.trim();}).filter(Boolean);var tId=getProp_('LINE_TARGET_ID').trim();if(tId&&grps.length&&grps.indexOf(tId)===-1)grps.push(tId);}
-var isAcctDm=!gid&&ev.type==='message'&&ACCT_CMD_RE.test(_sn(ev.message.text));
-if(!isAcctDm&&(gid?(grps.length&&grps.indexOf(gid)===-1&&(!usrs.length||usrs.indexOf(uid)===-1)):(usrs.length&&usrs.indexOf(uid)===-1)))return;if(ev.type==='postback'){var pb=handleLinePostback_(ev,gid,uid);if(pb&&ev.replyToken)sendLineReply_(ev.replyToken,pb);return;}
-if(ev.type==='message'){var reply=parseWebhookCmd_(ev.message.text,gid,uid);if(reply&&ev.replyToken)sendLineReply_(ev.replyToken,reply);}});return json_({ok:true});}
-function handleLineAccountCmd_(txt,gid,uid){if(/^ผูกบัญชี/i.test(txt)){if(gid)return buildNoticeFlex_('-','ไม่อนุญาตในแชทกลุ่ม','เพื่อความปลอดภัย กรุณาส่งคำสั่ง "ผูกบัญชี <รหัส 6 หลัก>" ในแชทส่วนตัว (1-on-1) กับบอท LINE เท่านั้น','','','');
-var m=txt.match(/^ผูกบัญชี\s+(\d{6})$/i);if(!m)return buildNoticeFlex_('-','วิธีผูกบัญชี LINE','เข้าสู่ระบบเว็บแอป -> กด "บัญชี / LINE" -> กด "สร้างรหัสผูกบัญชี LINE" แล้วนำคำสั่ง "ผูกบัญชี XXXXXX" มาส่งในแชทส่วนตัวนี้','','','');
-var c=sc_(),raw=c?c.get('LN_BIND_'+m[1]):null;if(!raw)return buildNoticeFlex_('-','รหัสผูกบัญชีไม่ถูกต้องหรือหมดอายุ','กรุณากดสร้างรหัสผูกบัญชีใหม่บนหน้าเว็บแอป','','','');
-var rec;try{rec=JSON.parse(raw);}catch(_){rec=null;}if(!rec||!rec.userId||Date.now()>(+rec.exp||0)){if(c)c.remove('LN_BIND_'+m[1]);return buildNoticeFlex_('-','รหัสผูกบัญชีหมดอายุแล้ว','กรุณากดสร้างรหัสผูกบัญชีใหม่บนหน้าเว็บแอป','','','');}
-var boundUn='';try{withLock_(function(){resetLock_();var d=getSheetData_(SH_USERS,USER_COLS),headers=d.headers,rows=d.rows,idIdx=headers.indexOf('userId'),unIdx=headers.indexOf('username'),luIdx=headers.indexOf('lineUserId'),targetIdx=-1,curObj={};
-for(var i=0;i<rows.length;i++){if(tr_(rows[i][idIdx])===rec.userId){targetIdx=i;headers.forEach(function(h,ci){curObj[h]=tr_(rows[i][ci]);});}}
-if(targetIdx===-1)throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');if(getUserSuspensionState_(curObj,_gb()).suspended)throw new Error('บัญชีนี้ถูกระงับการใช้งาน');
-for(var j=0;j<rows.length;j++){if(j!==targetIdx&&luIdx!==-1&&tr_(rows[j][luIdx])===uid){var clrRow=headers.map(function(h,ci){return h==='lineUserId'?'':rows[j][ci];});putGrid_(d.sh,j+2,1,[clrRow]);}}
-var updRow=headers.map(function(h,ci){return h==='lineUserId'?uid:rows[targetIdx][ci];});putGrid_(d.sh,targetIdx+2,1,[updRow]);invalidateSheetCache_(SH_USERS);bumpDataRev_(['users']);c.remove('LN_BIND_'+m[1]);boundUn=curObj.username;});}catch(e){return buildNoticeFlex_('-','ผูกบัญชี LINE ไม่สำเร็จ',e.message||String(e),'','','');}
-return buildNoticeFlex_('-','ผูกบัญชี LINE สำเร็จ','ผูกบัญชี "'+boundUn+'" กับ LINE ของคุณเรียบร้อยแล้ว หากลืมรหัสผ่านสามารถพิมพ์ "รีเซ็ตรหัส" ในแชทนี้ได้ทันที','','','');}
-if(gid)return buildNoticeFlex_('-','ไม่อนุญาตในแชทกลุ่ม','เพื่อความปลอดภัย ระบบไม่ส่งรหัส OTP ในแชทกลุ่ม กรุณาทักแชทส่วนตัว (1-on-1) กับบอท LINE แล้วพิมพ์ "รีเซ็ตรหัส" อีกครั้ง','','','');
-var target=readAllUsersInternal_().filter(function(u){return u.lineUserId===uid;})[0];if(!target)return buildNoticeFlex_('-','ยังไม่ได้ผูกบัญชี LINE','LINE ของคุณยังไม่ได้ผูกกับบัญชีผู้ใช้งานในระบบ กรุณาเข้าเว็บแอป -> กด "บัญชี / LINE" เพื่อสร้างรหัสผูกบัญชีก่อน','','','');
-var susp=getUserSuspensionState_(target,_gb());if(susp.suspended)return buildNoticeFlex_('-','บัญชีถูกระงับการใช้งาน',susp.message,'','','');
-var c2=sc_();if(c2&&c2.get('PWD_CD_'+target.username.toLowerCase()))return buildNoticeFlex_('-','กรุณารอสักครู่','เพิ่งส่งรหัส OTP ไปแล้ว กรุณารอ 60 วินาที ก่อนขอรหัสใหม่อีกครั้ง','','','');
-var otp=storeResetOtp_(target.username.toLowerCase(),600,false);return buildOtpFlex_(target.username,otp,10);}
-function parseWebhookCmd_(raw,gid,uid){var txt=_sn(raw);if(!WEBHOOK_CMD_RE.test(txt))return null;if(ACCT_CMD_RE.test(txt))return handleLineAccountCmd_(txt,gid,uid);var m=getMetaMap_(),webAppUrl=m.WEB_APP_URL||'',mask=isTrue_(m.PRIVACY_MASK_CONTACT);
-if(String(m.ENABLE_LINE_BOT_QUERY).toUpperCase()==='FALSE')return buildNoticeFlex_('-','ระบบปิดค้นหาชั่วคราว','ผู้ดูแลระบบปิดการค้นหาผ่านแชทชั่วคราว กรุณาดูบนเว็บแอป','','','');var arg=txt.replace(/^คิว\s*/,'').trim();if(!arg||arg==='ช่วยเหลือ'||arg.toLowerCase()==='help')return buildHelpFlex_(webAppUrl);
-if(arg==='โควตา')return buildQuotaFlex_(m.CACHED_QUOTA_USED||'0',m.CACHED_QUOTA_LIMIT||'300',webAppUrl);if(CREATE_KW_RE.test(arg))return handleWebhookCreateApt_(arg,gid,uid,webAppUrl,mask);var now=_gb(),list=readAllApts_(),sendQ=function(title,arr,opts){var s=arr.sort(cmpSlot_);return buildQueueFlex_(title,s.length,s.slice(0,5),webAppUrl,mask,opts);};
-if(arg==='ทั้งหมด'||arg==='นัดทั้งหมด'||arg==='งานทั้งหมด')return sendQ('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]',list.filter(function(a){return a.status===S_CF&&a.appointmentDate>=now.dateStr;}));if(arg==='วันนี้'||arg==='พรุ่งนี้'){var dt=arg==='วันนี้'?now.dateStr:_gb(now.epochMs+86400000).dateStr;return sendQ('[คิวงาน'+arg+' '+fmtThaiDate_(dt)+']',list.filter(function(a){return a.appointmentDate===dt&&a.status!==S_CN;}),arg==='วันนี้'?{variant:'today'}:undefined);}
-if(arg==='สัปดาห์นี้'){var maxDt=_gb(now.epochMs+604800000).dateStr;return sendQ('[คิวงานใน 7 วันข้างหน้า]',list.filter(function(a){return a.appointmentDate&&a.status!==S_CN&&a.appointmentDate>=now.dateStr&&a.appointmentDate<=maxDt;}));}
-if(arg==='ค้างอยู่')return sendQ('[คิวงานเลยกำหนดเวลา]',list.filter(function(a){if(a.status!==S_CF||!a.appointmentDate)return false;if(a.appointmentDate<now.dateStr)return true;if(a.appointmentDate>now.dateStr)return false;var ep=bkkSlotToEpoch_(a.appointmentDate,a.appointmentTime||'23:59');return ep!==null&&now.epochMs>ep;}),{variant:'overdue'});
-if(arg==='เดือนนี้'){var pfx=now.year+'-'+pad2_(now.month)+'-';return sendQ('[งานเดือน'+TH_MONTHS[now.month-1]+' '+(now.year+543)+']',list.filter(function(a){return a.appointmentDate&&a.appointmentDate.indexOf(pfx)===0;}));}var mm=arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);if(mm){var yr=+mm[2],mo=+mm[1];if(yr>2400)yr-=543;return(mo>=1&&mo<=12)?sendQ('[งานเดือน'+(TH_MONTHS[mo-1]||mo)+' '+(yr+543)+']',list.filter(function(a){return a.appointmentDate&&a.appointmentDate.indexOf(yr+'-'+pad2_(mo)+'-')===0;})):buildNoticeFlex_('-','รูปแบบเดือนไม่ถูกต้อง','กรุณาระบุรูปแบบเดือน เช่น เดือน 12/2569','','','');}
-if(arg==='ปีนี้'||arg==='ปีหน้า'){var ty=arg==='ปีนี้'?now.year:now.year+1,yPfx=ty+'-',total=0,act=0,comp=0,canc=0;list.forEach(function(a){if(!a.appointmentDate||a.appointmentDate.indexOf(yPfx)!==0)return;total++;if(a.status===S_CP)comp++;else if(a.status===S_CN)canc++;else act++;});
-return buildYearStatsFlex_(ty,total,act,comp,canc,total>0?Math.round((comp/total)*100):0,[],webAppUrl);}var sm=arg.match(/^ค้นหา\s+(.+)$/);if(sm){var kw=sm[1].trim().toLowerCase();return sendQ('[ผลการค้นหา "'+sm[1].trim()+'"]',list.filter(function(a){return(a.id+' '+a.title+' '+a.location+' '+a.contactPerson+' '+(a.createdBy||'')+' '+(a.statusChangedBy||'')).toLowerCase().indexOf(kw)!==-1;}));}
-return buildHelpFlex_(webAppUrl);}
+
+// === 1. Constants, Schemas & Regex Patterns ===
+var API_VER = '2.8.0', SH_USERS = 'Users', SH_APTS = 'Appointments', SH_RE_LOGS = 'RescheduleLogs', SH_NOTIF_LOGS = 'NotificationLogs', SH_META = 'SystemMeta';
+var LN_API = 'https://api.line.me/v2/bot/', S_SYS = 'ผู้ใช้งานระบบ', E_PW4 = 'รหัสผ่านต้องมีความยาวอย่างน้อย 4 ตัวอักษร', E_DUP_UN = 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว กรุณาใช้ชื่ออื่น';
+var USER_COLS = ['userId', 'username', 'passwordHash', 'displayName', 'role', 'isActive', 'createdAt', 'lastLoginAt', 'lineUserId', 'suspendedUntil', 'suspendReason'];
+var META_COLS = ['key', 'value', 'updatedAt'], RE_LOG_COLS = ['logId', 'appointmentId', 'changedAt', 'changedBy', 'fieldChanged', 'oldValue', 'newValue', 'reason'];
+var NOTIF_LOG_COLS = ['logId', 'sentAt', 'triggerType', 'appointmentIds', 'targetId', 'httpStatus', 'retryKey', 'errorMessage'];
+var APT_COLS = ['id', 'title', 'appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status', 'remindDaysBefore', 'remindHoursBefore', 'notifiedDayForSlot', 'notifiedHourForSlot', 'rescheduleCount', 'notes', 'createdBy', 'statusChangedBy', 'statusChangedAt', 'statusReason', 'updatedBy', 'createdAt', 'updatedAt', 'deletedAt', 'mapUrl', 'imageUrl'];
+var SUSPEND_DAYS_MAP = { '1d': 1, '3d': 3, '7d': 7, '15d': 15, PERMANENT: 0 }, ACCT_CMD_RE = /^(?:ผูกบัญชี(?:\s+\d{1,8})?|รีเซ็ตรหัส(?:ผ่าน)?|ลืมรหัส(?:ผ่าน)?|ขอรหัส\s*otp)$/i;
+var STATUS = { CONFIRMED: 'เริ่มนัด', COMPLETED: 'สิ้นสุดการนัดหมาย', CANCELLED: 'ยกเลิกการนัดหมาย' }, S_CF = STATUS.CONFIRMED, S_CP = STATUS.COMPLETED, S_CN = STATUS.CANCELLED;
+var TH_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+var TH_MONTHS_S = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'], TH_MO_MAP = {};
+TH_MONTHS.forEach(function (m, i) { TH_MO_MAP[m] = i + 1; });
+TH_MONTHS_S.forEach(function (m, i) { TH_MO_MAP[m] = i + 1; TH_MO_MAP[m.replace(/\./g, '')] = i + 1; });
+var EMOJI_EXT_RE = /(?:[\u{1F1E6}-\u{1F1FF}]{2}|[0-9#*]\uFE0F?\u20E3|(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic}(?:\uFE0F|\u200D(?![\u00A9\u00AE\u2122](?!\uFE0F))\p{Extended_Pictographic})*)/gu;
+var EMOJI_MOD_RE = /[\uFE0F\u200D\u20E3\u{1F3FB}-\u{1F3FF}\u{1F1E6}-\u{1F1FF}]/gu, FAST_SAFE_RE = /^[\x00-\x7F\u0E00-\u0E7F]*$/;
+var Q_KEYS = 'ทั้งหมด|นัดทั้งหมด|งานทั้งหมด|วันนี้|พรุ่งนี้|สัปดาห์นี้|ค้างอยู่|เดือนนี้|ปีนี้|ปีหน้า|โควตา|ช่วยเหลือ';
+var C_KW = '(?:สร้างนัด(?:หมาย)?|เพิ่มนัด(?:หมาย)?|นัด(?:หมาย)?ใหม่|สร้างงาน|เพิ่มงาน|งานใหม่|ลงนัด|ตั้งนัด|สร้างคิว|เพิ่มคิว|จองคิว)';
+var TH_ALT_GAS = TH_MONTHS.concat(TH_MONTHS_S.map(function (s) { return s.replace(/\./g, '\\.?'); })).join('|');
+var WEBHOOK_CMD_RE = new RegExp('^คิว(?:\\s+|' + Q_KEYS + '|' + C_KW + '|$)|^(?:' + Q_KEYS + '|help|เดือน\\s+\\d{1,2}[-/]\\d{4}|ปี\\s*\\d{4}|ค้นหา\\s+.+|ผูกบัญชี(?:\\s+\\d{1,8})?|รีเซ็ตรหัส(?:ผ่าน)?|ลืมรหัส(?:ผ่าน)?|ขอรหัส\\s*otp|' + C_KW + '(?:[\\s:：]+[\\s\\S]+)?)$', 'i');
+var CREATE_CMD_RE = new RegExp('^' + C_KW + '(?:[\\s:：]+([\\s\\S]+))?$', 'i'), CREATE_KW_RE = new RegExp('^' + C_KW + '(?:[\\s:：]|$)', 'i');
+var KV_RE = /^(หัวข้อ|งาน|เรื่อง|วันที่|วันนัด|วัน|วันเวลา|เวลา|เวลานัด|สถานที่|ที่นัดหมาย|ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ|เตือน|แจ้งเตือน|หมายเหตุ|รายละเอียด|แผนที่|พิกัด)\s*[:：]\s*(.+)$/i;
+var DT_TOK_RE = new RegExp('(?:^|\\s)((?:(?:วันที่|วันนัด|วัน(?=\\s|[:：]))\\s*[:：]?\\s*)?(?:วันนี้|พรุ่งนี้|มะรืน(?:นี้)?|\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}|\\d{1,2}[-/]\\d{1,2}(?:[-/]\\d{2,4})?|\\d{1,2}\\s*(?:' + TH_ALT_GAS + ')(?:\\s*(?:\\d{4}|\\d{2}(?!\\s*(?:โมง|[:.]))))?))(?=\\s|$)', 'i');
+var TM_TOK_RE = /(?:^|\s)((?:(?:เวลา|เวลานัด)\s*[:：]?\s*)?(?:\d{1,2}[:.]\d{2}(?:\s*[-~ถึง]\s*\d{1,2}[:.]\d{2})?\s*(?:น\.?|โมง)?|\d{1,2}\s*โมง(?:ครึ่ง)?))(?=\s|$)/i;
+
+// === 2. Core Helpers, Timezone & Crypto ===
+function tr_(v) { return String(v == null ? '' : v).trim(); }
+function isTrue_(v) { return v === true || String(v).toUpperCase() === 'TRUE'; }
+function sanitizeNoEmoji(s) { if (s == null) return ''; var str = String(s); return (FAST_SAFE_RE.test(str) ? str : str.replace(EMOJI_EXT_RE, '').replace(EMOJI_MOD_RE, '')).replace(/[ \t]{2,}/g, ' ').trim(); }
+function normalizeStatus_(st) { if (st === S_CF || st === S_CP || st === S_CN) return st; var s = _sn(st || S_CF); return (s === S_CP || s === S_CN) ? s : S_CF; }
+function cmpSlot_(x, y) { var xd = x.appointmentDate || '', yd = y.appointmentDate || ''; if (xd && yd && x.appointmentTime && y.appointmentTime) return xd < yd ? -1 : (xd > yd ? 1 : (x.appointmentTime < y.appointmentTime ? -1 : (x.appointmentTime > y.appointmentTime ? 1 : 0))); var sx = xd + 'T' + (x.appointmentTime || ''), sy = yd + 'T' + (y.appointmentTime || ''); return sx < sy ? -1 : (sx > sy ? 1 : 0); }
+function hashPassword_(str) { var raw = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, String(str || ''), Utilities.Charset.UTF_8), out = ''; for (var i = 0; i < raw.length; i++) out += ((raw[i] < 0 ? raw[i] + 256 : raw[i]).toString(16)).padStart(2, '0'); return out; }
+function pad2_(n) { return String(Math.floor(Math.abs(Number(n) || 0))).padStart(2, '0'); }
+function getBkkNow_(opt) { var ep = (opt ? new Date(opt) : new Date()).getTime(), b = new Date(ep + 25200000), yr = b.getUTCFullYear(), mo = b.getUTCMonth() + 1, dy = b.getUTCDate(), hr = b.getUTCHours(), mi = b.getUTCMinutes(), sc = b.getUTCSeconds(), ds = yr + '-' + pad2_(mo) + '-' + pad2_(dy), ts = pad2_(hr) + ':' + pad2_(mi); return { epochMs: ep, year: yr, buddhistYear: yr + 543, month: mo, day: dy, hour: hr, minute: mi, dateStr: ds, timeStr: ts, isoStr: ds + 'T' + ts + ':' + pad2_(sc) + '+07:00' }; }
+var _gb = getBkkNow_, _sn = sanitizeNoEmoji, _ns = normalizeStatus_;
+function bkkSlotToEpoch_(d, t) { if (!d) return null; var dp = String(d).split('-').map(Number), tp = String(t || '00:00').split(':').map(Number); return (dp.length !== 3 || tp.length < 2) ? null : Date.UTC(dp[0], dp[1] - 1, dp[2], tp[0], tp[1], 0, 0) - 25200000; }
+function diffDays_(s, e) { var sm = bkkSlotToEpoch_(s, '00:00'), em = bkkSlotToEpoch_(e, '00:00'); return (sm === null || em === null) ? null : Math.round((em - sm) / 86400000); }
+function fmtThaiDate_(d) { var p = String(d || '').split('-').map(Number); return p.length !== 3 ? (d || 'ยังไม่กำหนดวัน') : (p[2] + ' ' + (TH_MONTHS_S[p[1] - 1] || '') + ' ' + (p[0] + 543)); }
+
+// === 3. Request/Cross-Request Cache, Scoped Revisions & Sheet Storage ===
+var _ss = null, _shMap = {}, _metaCache = null, _dataCache = {}, _propsCache = null, _ps = null, _sc = null, _scPre = null, _scPreKeys = null, _scPreAll = false, _revCache = null, _revSeq = 0, _bypassCache = false;
+var SCOPE_MAP = { apts: 'a', users: 'u', meta: 'm', relogs: 'l' }, CACHE_KEY_MAP = { a: 'CAL_A', u: 'CAL_U', m: 'CAL_M', l: 'CAL_L' }, PRE_KEYS = { CAL_REV: 1, CAL_M: 1, CAL_U: 1, CAL_L: 1, CAL_A: 1 };
+function getSs_() { return _ss || (_ss = SpreadsheetApp.getActiveSpreadsheet()); }
+function ps_() { try { return _ps || (_ps = PropertiesService.getScriptProperties()); } catch (_) { return null; } }
+function sc_() { try { return _sc || (_sc = CacheService.getScriptCache()); } catch (_) { return null; } }
+function getProps_() { if (_propsCache) return _propsCache; try { var p = ps_(); return (_propsCache = (p && p.getProperties ? p.getProperties() : null) || {}); } catch (_) { return (_propsCache = {}); } }
+function getProp_(k) { return String(getProps_()[k] || ''); }
+function setProp_(k, v) { try { var p = ps_(); if (p && typeof p.setProperty === 'function') p.setProperty(k, v); } catch (_) {} (_propsCache || (_propsCache = {}))[k] = v; }
+function delProp_(k) { try { var p = ps_(); if (p && typeof p.deleteProperty === 'function') p.deleteProperty(k); } catch (_) {} if (_propsCache) delete _propsCache[k]; }
+function parseRevObj_(raw) { var s = tr_(raw); if (!s) return null; if (s.charAt(0) === '{') try { var o = JSON.parse(s); if (o && o.g) return { g: String(o.g), a: String(o.a || o.g), u: String(o.u || o.g), m: String(o.m || o.g), l: String(o.l || o.g) }; } catch (_) {} return { g: s, a: s, u: s, m: s, l: s }; }
+function prewarmSc_(optKeys) {
+  if (_bypassCache) return null; if (_scPre && (!optKeys ? _scPreAll : optKeys.every(function (k) { return _scPreKeys && _scPreKeys[k]; }))) return _scPre; var c = sc_(), keys = optKeys || ['CAL_REV', 'CAL_M', 'CAL_U', 'CAL_L', 'CAL_A'];
+  if (c && typeof c.getAll === 'function') { try { var got = c.getAll(keys) || {}; _scPre = _scPre ? fAssign_(_scPre, got) : got; if (!_scPreKeys) _scPreKeys = {}; keys.forEach(function (k) { _scPreKeys[k] = 1; }); if (!optKeys) _scPreAll = true; } catch (_) { if (!_scPre) _scPre = null; } }
+  return _scPre;
+}
+function resolveRevs_(fullPre) {
+  if (_revCache && !_bypassCache) return _revCache; var c = sc_(), raw = ''; if (!_bypassCache) { var pre = fullPre ? prewarmSc_() : _scPre; if (pre && _scPreKeys && _scPreKeys.CAL_REV) raw = pre.CAL_REV || ''; else if (c) try { raw = c.get('CAL_REV') || ''; } catch (_) {} }
+  var ro = parseRevObj_(raw); if (!ro) { ro = parseRevObj_(getProp_('CAL_DATA_REV')) || { g: '1', a: '1', u: '1', m: '1', l: '1' }; if (c) try { c.put('CAL_REV', JSON.stringify(ro), 21600); } catch (_) {} }
+  return (_revCache = ro);
+}
+function peekRevsFast_() { return resolveRevs_(false); }
+function getRevs_() { return resolveRevs_(true); }
+function getDataRev_() { return getRevs_().g; }
+function liveRevs_() {
+  var c = sc_(), raw = ''; if (c) try { raw = c.get('CAL_REV') || ''; } catch (_) {}
+  var ro = parseRevObj_(raw); if (ro) return ro; var p = ps_(), pr = ''; if (p && typeof p.getProperty === 'function') try { pr = p.getProperty('CAL_DATA_REV') || ''; } catch (_) {}
+  return parseRevObj_(pr) || parseRevObj_(getProp_('CAL_DATA_REV')) || { g: '1', a: '1', u: '1', m: '1', l: '1' };
+}
+function bumpDataRev_(scopes) {
+  var ro = liveRevs_(), nr = Date.now().toString(36) + '-' + (++_revSeq), c = sc_(), remKeys = []; ro.g = nr; (scopes || ['apts']).forEach(function (sc) { var k = SCOPE_MAP[sc]; if (k) { ro[k] = nr; remKeys.push(CACHE_KEY_MAP[k]); } });
+  if (c && remKeys.length) try { if (remKeys.length > 1 && typeof c.removeAll === 'function') c.removeAll(remKeys); else remKeys.forEach(function (ck) { if (typeof c.remove === 'function') c.remove(ck); else c.put(ck, '', 1); }); } catch (_) {}
+  var js = JSON.stringify(ro); _revCache = ro; _scPre = null; _scPreKeys = null; _scPreAll = false; if (c) try { c.put('CAL_REV', js, 21600); } catch (_) {}
+  setProp_('CAL_DATA_REV', js); return nr;
+}
+function cacheReadObj_(key, expectedRev) {
+  var c = sc_(); if (!c) return null; var pre = (_scPre && _scPreKeys && _scPreKeys[key]) ? _scPre : (PRE_KEYS[key] ? prewarmSc_() : null), head = ''; if (pre && _scPreKeys && _scPreKeys[key]) head = pre[key] || ''; else try { head = c.get(key) || ''; } catch (_) { return null; }
+  if (!head) return null; var p1 = '1:' + expectedRev + '|'; if (head.indexOf(p1) === 0) try { return JSON.parse(head.slice(p1.length)); } catch (_) { return null; } var pm = 'M:' + expectedRev + ':'; if (head.indexOf(pm) !== 0) return null;
+  var n = +head.slice(pm.length); if (!n || n < 1 || n > 16) return null; var keys = [], raw = '', map = null; for (var i = 0; i < n; i++) keys.push(key + '_' + i); if (typeof c.getAll === 'function') try { map = c.getAll(keys) || {}; } catch (_) { map = null; }
+  for (var j = 0; j < n; j++) { var part = map ? map[keys[j]] : c.get(keys[j]); if (!part) return null; raw += part; } try { return JSON.parse(raw); } catch (_) { return null; }
+}
+function cacheWriteObj_(key, expectedRev, scopeKey, obj, ttl) {
+  var c = sc_(); if (!c) return; try {
+    if (liveRevs_()[scopeKey] !== expectedRev) return; var js = JSON.stringify(obj), single = '1:' + expectedRev + '|' + js;
+    if (single.length <= 29000 || unescape(encodeURIComponent(single)).length <= 88000) { c.put(key, single, ttl); if (_scPre) { _scPre[key] = single; if (_scPreKeys) _scPreKeys[key] = 1; } return; } var chunks = [], i = 0, len = js.length;
+    while (i < len) { var b = 0, st = i; while (i < len) { var cc = js.charCodeAt(i), cb = cc < 128 ? 1 : (cc < 2048 ? 2 : (cc >= 55296 && cc <= 56319 ? 4 : 3)); if (b + cb > 86000) break; b += cb; i += (cb === 4 ? 2 : 1); } chunks.push(js.slice(st, i)); }
+    if (chunks.length > 16) return; var batch = {}; batch[key] = 'M:' + expectedRev + ':' + chunks.length; for (var j = 0; j < chunks.length; j++) batch[key + '_' + j] = chunks[j];
+    if (typeof c.putAll === 'function') c.putAll(batch, ttl); else Object.keys(batch).forEach(function (bk) { c.put(bk, batch[bk], ttl); }); if (_scPre) { _scPre[key] = batch[key]; if (_scPreKeys) _scPreKeys[key] = 1; }
+  } catch (_) {}
+}
+function invalidateSheetCache_(name) { if (name) delete _dataCache[name]; else _dataCache = {}; if (!name || name === SH_META) _metaCache = null; _scPre = null; _scPreKeys = null; _scPreAll = false; }
+function formatPlainText_(sh, colCount) { sh.getRange(1, 1, Math.max(sh.getMaxRows(), 500), Math.max(colCount || 1, 1)).setNumberFormat('@'); }
+function putGrid_(sh, r, c, rows) { sh.getRange(r, c, rows.length, rows[0].length).setNumberFormat('@').setValues(rows); }
+function appendPlainRow_(sh, rowVals, knownLastRow) { putGrid_(sh, (knownLastRow != null ? knownLastRow : sh.getLastRow()) + 1, 1, [rowVals]); invalidateSheetCache_(sh.getName()); }
+function logNotif_(type, aptIds, target, code, retryKey, msg) { appendPlainRow_(ensureSheet_(getSs_(), SH_NOTIF_LOGS, NOTIF_LOG_COLS), ['NLOG-' + Date.now(), _gb().isoStr, type || 'INFO', aptIds || '-', target || '-', String(code || '200'), retryKey || '-', msg || '']); }
+function seedDefaultUsers_(sh) {
+  var nowIso = _gb().isoStr, defPw = hashPassword_('1234');
+  var rows = [['USR-001', 'admin', hashPassword_('admin'), 'ผู้ดูแลระบบ', 'ADMIN', 'TRUE', nowIso, nowIso, '', '', ''], ['USR-002', 'somchai', defPw, 'คุณสมชาย', 'STAFF', 'TRUE', nowIso, '', '', '', ''], ['USR-003', 'wipada', defPw, 'คุณวิภาดา', 'STAFF', 'TRUE', nowIso, '', '', '', ''], ['USR-004', 'naphatsorn', defPw, 'คุณนภัสสร', 'STAFF', 'TRUE', nowIso, '', '', '', '']];
+  putGrid_(sh, 2, 1, rows); formatPlainText_(sh, USER_COLS.length); return rows;
+}
+function ensureSheet_(ss, name, cols, isSetup) {
+  if (!isSetup && _shMap[name]) return _shMap[name]; var s = ss || getSs_(), sh = s.getSheetByName(name), created = !sh; if (created) sh = s.insertSheet(name);
+  if ((created || isSetup) && sh.getLastRow() === 0 && cols) { sh.appendRow(cols); sh.getRange(1, 1, 1, cols.length).setFontWeight('bold'); sh.setFrozenRows(1); formatPlainText_(sh, cols.length); }
+  else if (isSetup && cols) { var hdrs = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getDisplayValues()[0]; cols.forEach(function (c) { if (hdrs.indexOf(c) === -1) sh.getRange(1, sh.getLastColumn() + 1).setValue(c).setFontWeight('bold'); }); formatPlainText_(sh, Math.max(sh.getLastColumn(), cols.length)); }
+  if (name === SH_USERS && (created || isSetup) && sh.getLastRow() <= 1) seedDefaultUsers_(sh); return (_shMap[name] = sh);
+}
+function getSheetData_(name, cols) {
+  if (_dataCache[name]) return _dataCache[name]; var sh = ensureSheet_(getSs_(), name, cols), all = sh.getDataRange().getDisplayValues();
+  if (!all || !all.length || (all.length === 1 && all[0].length <= 1 && !tr_(all[0][0]))) { if (cols && cols.length) { sh.getRange(1, 1, 1, cols.length).setNumberFormat('@').setValues([cols]).setFontWeight('bold'); sh.setFrozenRows(1); } return (_dataCache[name] = { sh: sh, headers: (cols || []).slice(), rows: name === SH_USERS ? seedDefaultUsers_(sh) : [] }); }
+  var hdrs = all[0].slice(), added = false; if (cols) cols.forEach(function (c) { if (hdrs.indexOf(c) === -1) { hdrs.push(c); added = true; sh.getRange(1, hdrs.length).setNumberFormat('@').setValue(c).setFontWeight('bold'); } });
+  if (added) for (var ri = 1, diff = hdrs.length - all[0].length; ri < all.length; ri++) for (var k = 0; k < diff; k++) all[ri].push(''); var rows = all.slice(1); if (!rows.length && name === SH_USERS) rows = seedDefaultUsers_(sh);
+  return (_dataCache[name] = { sh: sh, headers: hdrs, rows: rows });
+}
+function setupDatabase() {
+  var ss = getSs_(); [[SH_USERS, USER_COLS], [SH_APTS, APT_COLS], [SH_RE_LOGS, RE_LOG_COLS], [SH_NOTIF_LOGS, NOTIF_LOG_COLS], [SH_META, META_COLS]].forEach(function (p) { ensureSheet_(ss, p[0], p[1], true); });
+  var defs = { LAST_TRIGGER_RUN_AT: '', CACHED_QUOTA_LIMIT: '300', CACHED_QUOTA_USED: '0', QUOTA_UPDATED_AT: '', DAILY_DIGEST_HOUR: '8', QUIET_HOURS_START: '22', QUIET_HOURS_END: '7', ENABLE_LINE_BOT_QUERY: 'TRUE', PRIVACY_MASK_CONTACT: 'FALSE', NOTIFY_ON_STATUS_CHANGE: 'FALSE', WEB_APP_URL: '' };
+  var cur = getMetaMap_(), now = _gb().isoStr, mSh = ensureSheet_(ss, SH_META, META_COLS, true); Object.keys(defs).forEach(function (k) { if (cur[k] === undefined) { mSh.appendRow([k, defs[k], now]); cur[k] = defs[k]; } });
+  formatPlainText_(mSh, META_COLS.length); invalidateSheetCache_(SH_META); bumpDataRev_(['apts', 'users', 'meta', 'relogs']); return 'ตั้งค่าโครงสร้างชีต Plain Text และบัญชีเริ่มต้นสำเร็จ';
+}
+
+// === 4. Trigger Management ===
+function removeNotificationTriggers() { ScriptApp.getProjectTriggers().forEach(function (t) { if (t.getHandlerFunction() === 'runNotificationEngine') ScriptApp.deleteTrigger(t); }); delProp_('ONEOFF_TRIGGERS_JSON'); return 'ลบ Trigger แจ้งเตือนอัตโนมัติทั้งหมดเรียบร้อย'; }
+function getTrigMs_(e) { return e && typeof e === 'object' ? (+e.ms || 0) : (+e || 0); }
+function getTrigId_(e) { return e && typeof e === 'object' ? String(e.id || '') : ''; }
+function cleanExpiredTriggers_(existingTriggers) {
+  try {
+    var map = JSON.parse(getProp_('ONEOFF_TRIGGERS_JSON') || '{}'), nowMs = Date.now(), changed = false; if (!Object.keys(map).some(function (u) { var ms = getTrigMs_(map[u]); return ms && ms <= nowMs; })) return;
+    (existingTriggers || ScriptApp.getProjectTriggers()).forEach(function (t) { var uid = t.getUniqueId(), ms = getTrigMs_(map[uid]); if (ms && ms <= nowMs) { ScriptApp.deleteTrigger(t); delete map[uid]; changed = true; } });
+    if (changed) setProp_('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
+  } catch (_) {}
+}
+function _tb() { return ScriptApp.newTrigger('runNotificationEngine').timeBased(); }
+function installTriggerAuto() { removeNotificationTriggers(); _tb().everyDays(1).atHour(8).create(); _tb().everyHours(1).create(); return 'ติดตั้ง Trigger แจ้งเตือนอัตโนมัติ (รอบเช้า 08:00 น. และตรวจก่อนเวลานัดทุก 1 ชั่วโมง) เรียบร้อย'; }
+function installTriggerEvery15Minutes() { removeNotificationTriggers(); _tb().everyMinutes(15).create(); return 'ติดตั้ง Trigger ตรวจเช็คทุก 15 นาที เรียบร้อย'; }
+function installTriggerDailyAt8AM() { removeNotificationTriggers(); _tb().everyDays(1).atHour(8).create(); return 'ติดตั้ง Trigger แจ้งเตือนวันละ 1 ครั้ง (ช่วง 08:00 น.) เรียบร้อย'; }
+function setupNotificationTriggers_(m) { return m === 'every15Min' ? installTriggerEvery15Minutes() : (m === 'daily' ? installTriggerDailyAt8AM() : (m === 'off' ? removeNotificationTriggers() : installTriggerAuto())); }
+function scheduleExactReminderForApt_(apt) {
+  try {
+    if (!apt || !apt.id) return; var map = JSON.parse(getProp_('ONEOFF_TRIGGERS_JSON') || '{}'), uids = Object.keys(map), aptUids = uids.filter(function (u) { return getTrigId_(map[u]) === apt.id; });
+    var ep = (apt.status === S_CF && apt.appointmentDate && apt.appointmentTime) ? bkkSlotToEpoch_(apt.appointmentDate, apt.appointmentTime) : null;
+    var rH = (apt.remindHoursBefore != null && apt.remindHoursBefore !== '') ? +apt.remindHoursBefore : 0, remindMs = (ep && rH > 0) ? ep - (rH * 3600000) : 0, nowMs = _gb().epochMs;
+    var shouldCreate = Boolean(ep && rH > 0 && remindMs > nowMs + 180000 && remindMs <= nowMs + 172800000);
+    if ((!shouldCreate && !aptUids.length) || (shouldCreate && !aptUids.length && uids.some(function (u) { return Math.abs(getTrigMs_(map[u]) - remindMs) < 60000; })) || (shouldCreate && aptUids.length === 1 && Math.abs(getTrigMs_(map[aptUids[0]]) - remindMs) < 60000)) return;
+    var allTriggers = ScriptApp.getProjectTriggers(), changed = false, activeCount = allTriggers.length, slotCovered = false;
+    allTriggers.forEach(function (t) { var uid = t.getUniqueId(), ms = getTrigMs_(map[uid]), tAptId = getTrigId_(map[uid]); if ((ms && ms <= nowMs) || (tAptId && tAptId === apt.id)) { ScriptApp.deleteTrigger(t); delete map[uid]; activeCount--; changed = true; } else if (shouldCreate && ms && Math.abs(ms - remindMs) < 60000) slotCovered = true; });
+    if (shouldCreate && !slotCovered) {
+      if (activeCount >= 16) for (var i = 0; i < allTriggers.length; i++) { var tUid = allTriggers[i].getUniqueId(); if (map[tUid]) { ScriptApp.deleteTrigger(allTriggers[i]); delete map[tUid]; break; } }
+      map[ScriptApp.newTrigger('runNotificationEngine').timeBased().at(new Date(remindMs)).create().getUniqueId()] = { ms: remindMs, id: apt.id }; changed = true;
+    }
+    if (changed) setProp_('ONEOFF_TRIGGERS_JSON', JSON.stringify(map));
+  } catch (_) {}
+}
+
+// === 5. Sync Bundle, Scoped Delta Sync & HTTP Entrypoints (doGet / doPost) ===
+function buildSyncBundle_(optUsers) { var ro = getRevs_(); return { appointments: readAllApts_(), users: optUsers || readPublicUsers_(), rescheduleLogs: readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50), meta: getMetaMap_(), rev: ro.g, scopeRevs: ro, serverTime: _gb().isoStr }; }
+function handleSyncList_(sinceRev, sinceScopes, force, includeLogs) {
+  if (force) { _bypassCache = true; invalidateSheetCache_(); } else if (sinceRev) {
+    var fastRo = peekRevsFast_(); if (String(sinceRev) === fastRo.g) return { unchanged: true, rev: fastRo.g, scopeRevs: fastRo, serverTime: _gb().isoStr }; if (sinceScopes && typeof sinceScopes === 'object') {
+      var dA = String(sinceScopes.a || '') !== fastRo.a, dU = String(sinceScopes.u || '') !== fastRo.u, dM = String(sinceScopes.m || '') !== fastRo.m, dL = includeLogs && String(sinceScopes.l || '') !== fastRo.l; if (!(dA && dU && dM && (!includeLogs || dL))) {
+        var needKeys = []; if (dA) needKeys.push('CAL_A'); if (dU) needKeys.push('CAL_U'); if (dM) needKeys.push('CAL_M'); if (dL) needKeys.push('CAL_L');
+        if (needKeys.length) { _scPre = { CAL_REV: JSON.stringify(fastRo) }; _scPreKeys = { CAL_REV: 1 }; _scPreAll = false; prewarmSc_(needKeys); } var pOut = { partial: true, rev: fastRo.g, scopeRevs: fastRo, serverTime: _gb().isoStr };
+        if (dA) pOut.appointments = readAllApts_(); if (dU) pOut.users = readPublicUsers_(); if (dL) pOut.rescheduleLogs = readLogs_(SH_RE_LOGS, RE_LOG_COLS, 50); if (dM) pOut.meta = getMetaMap_(); return pOut;
+      }
+    }
+  }
+  var ro = getRevs_(), full = includeLogs ? buildSyncBundle_() : { appointments: readAllApts_(), users: readPublicUsers_(), meta: getMetaMap_(), rev: ro.g, scopeRevs: ro, serverTime: _gb().isoStr }; _bypassCache = false; return full;
+}
+function fCloneOmitImg_(o) { var c = {}; Object.keys(o).forEach(function (k) { c[k] = k === 'imageUrl' ? '' : o[k]; }); c._imgOmitted = true; return c; }
+function resetLock_() { invalidateSheetCache_(); _revCache = null; }
+function withLock_(fn) { var l = LockService.getScriptLock(); l.waitLock(15000); try { return fn(); } finally { l.releaseLock(); } }
+function json_(o) { return ContentService.createTextOutput(JSON.stringify({ ok: Boolean(o.ok), version: API_VER, data: o.data || null, code: o.code || null, error: o.error || null })).setMimeType(ContentService.MimeType.JSON); }
+function jOk_(d) { return json_({ ok: true, data: d }); }
+function jErr_(e, c) { return json_({ ok: false, error: e, code: c }); }
+function lockMut_(scopes, fn) { return withLock_(function () { resetLock_(); var pr = getDataRev_(), r = fn(); r.prevRev = pr; r.rev = scopes ? bumpDataRev_(scopes) : getDataRev_(); r.scopeRevs = getRevs_(); return jOk_(r); }); }
+function verifyPasscode_(p) { var exp = getProp_('API_PASSCODE'); return !exp || String(p || '') === exp; }
+function doGet(e) {
+  try {
+    var p = (e && e.parameter) || {}; if (!verifyPasscode_(p.passcode)) return jErr_('API Passcode ไม่ถูกต้อง'); if ((p.action || 'list') !== 'list') return jErr_('ไม่รองรับ GET action');
+    var sc = p.sinceScopes ? (function () { try { return JSON.parse(p.sinceScopes); } catch (_) { return null; } })() : null; return jOk_(handleSyncList_(p.sinceRev, sc, isTrue_(p.force), false));
+  } catch (err) { _bypassCache = false; return jErr_(err.message || String(err)); }
+}
+function doPost(e) {
+  try {
+    var body = JSON.parse((e && e.postData && e.postData.contents) || '{}'), p = (e && e.parameter) || {}; if (Array.isArray(body.events)) return handleLineWebhook_(body, p); if (!verifyPasscode_(body.passcode)) return jErr_('API Passcode ไม่ถูกต้อง'); var a = body.action || '';
+    switch (a) {
+      case 'login': return jOk_(handleUserLogin_(body.username, body.password));
+      case 'register': return lockMut_(['users'], function () { return handleUserRegister_(body.payload || body.userPayload || {}); });
+      case 'listUsers': return jOk_({ users: readPublicUsers_(), rev: getDataRev_(), scopeRevs: getRevs_() });
+      case 'saveUser': return lockMut_(['users'], function () { return { user: saveUser_(body.userPayload, body.actorUserId) }; });
+      case 'suspendUser': return lockMut_(['users'], function () { return suspendUser_(body.userId, body.duration, body.reason, body.actorUserId); });
+      case 'deleteUser': return lockMut_(['users'], function () { return { result: deleteUser_(body.userId, body.actorUserId) }; });
+      case 'requestPasswordReset': return jOk_(requestPasswordReset_(body.username, body.notifyAdmin));
+      case 'confirmPasswordReset': return lockMut_(['users'], function () { return confirmPasswordReset_(body.username, body.otp, body.newPassword, body.confirmPassword); });
+      case 'adminGenerateResetOtp': return jOk_(adminGenerateResetOtp_(body.userId, body.actorUserId));
+      case 'createLineLinkCode': return jOk_(createLineLinkCode_(body.actorUserId));
+      case 'unlinkLineAccount': return lockMut_(['users'], function () { return unlinkLineAccount_(body.actorUserId); });
+      case 'changeOwnPassword': return lockMut_(['users'], function () { return changeOwnPassword_(body.actorUserId, body.currentPassword, body.newPassword, body.confirmPassword); });
+      case 'list': return jOk_(handleSyncList_(body.sinceRev, body.sinceScopes, isTrue_(body.force), true));
+      case 'create': {
+        var cOut = withLock_(function () { resetLock_(); var pr = getDataRev_(), apt = createApt_(body.payload || {}); return { apt: apt, rev: bumpDataRev_(['apts']), prevRev: pr }; });
+        var apt = cOut.apt, wantC = isTrue_(body.notifyLine), lineN = wantC ? sendInstantAptNotification_(apt, false) : null; var cPrev = (lineN && lineN.preQRev && lineN.preQRev !== cOut.rev) ? lineN.preQRev : cOut.prevRev;
+        if (+apt.remindHoursBefore > 0) scheduleExactReminderForApt_(apt);
+        return jOk_({ appointment: (isTrue_(body.omitImgEcho) && apt.imageUrl) ? fCloneOmitImg_(apt) : apt, lineNotification: lineN, meta: wantC ? ((lineN && lineN.meta) || getMetaMap_()) : null, rev: getDataRev_(), scopeRevs: getRevs_(), prevRev: cPrev });
+      }
+      case 'update': {
+        var wantU = isTrue_(body.notifyLine), res = withLock_(function () { resetLock_(); var pr = getDataRev_(), r = updateApt_(body.id, body.payload || {}, body.expectedUpdatedAt, body.reason, body.currentUser, !wantU); r.prevRev = pr; r.rev = bumpDataRev_(r.logs && r.logs.length ? ['apts', 'relogs'] : ['apts']); return r; });
+        if (wantU && res && res.appointment) { res.lineNotification = sendInstantAptNotification_(res.appointment, true); res.meta = (res.lineNotification && res.lineNotification.meta) || getMetaMap_(); if (res.lineNotification && res.lineNotification.preQRev && res.lineNotification.preQRev !== res.rev) res.prevRev = res.lineNotification.preQRev; }
+        if (res && res.appointment && res.needsTriggerSync) scheduleExactReminderForApt_(res.appointment); res.rev = getDataRev_(); res.scopeRevs = getRevs_();
+        if (isTrue_(body.omitImgEcho) && res.appointment && res.appointment.imageUrl) res.appointment = fCloneOmitImg_(res.appointment); return jOk_(res);
+      }
+      case 'delete': return lockMut_(['apts', 'relogs'], function () { return { appointment: deleteApt_(body.id, body.updatedBy) }; });
+      case 'updateMeta': return lockMut_(null, function () { return { meta: updateMeta_(body.meta || {}) }; });
+      case 'setupTriggers': return jOk_({ message: setupNotificationTriggers_(body.mode) });
+      case 'refreshQuota': return jOk_(refreshLineQuotaCache_());
+      case 'testNotification': return jOk_(testNotification_(body.dryRun !== false, body.sampleText));
+      case 'runEngineNow': return jOk_(runNotificationEngine());
+      default: return jErr_('ไม่รู้จัก action: ' + a);
+    }
+  } catch (err) { _bypassCache = false; return jErr_(err.message || String(err), err.code || 'SERVER_ERROR'); }
+}
+
+// === 6. User Auth, Suspension, Deletion & LINE OTP Reset ===
+function readAllUsersInternal_() { var d = getSheetData_(SH_USERS, USER_COLS), hdrs = d.headers, hLen = hdrs.length; return d.rows.reduce(function (arr, r, idx) { var o = { _rowIndex: idx + 2, _headers: hdrs, _sh: d.sh }; for (var i = 0; i < hLen; i++) o[hdrs[i]] = tr_(r[i]); if (o.userId && o.username) arr.push(o); return arr; }, []); }
+function findUserRow_(d, field, val) {
+  var colIdx = d.headers.indexOf(field), target = tr_(val), isUn = field === 'username'; if (isUn) target = target.toLowerCase();
+  for (var i = 0; i < d.rows.length; i++) { var cell = tr_(d.rows[i][colIdx]); if ((isUn ? cell.toLowerCase() : cell) === target) { var obj = {}; d.headers.forEach(function (h, ci) { obj[h] = tr_(d.rows[i][ci]); }); return { idx: i, row: d.rows[i], obj: obj }; } } return null;
+}
+function patchUserRow_(d, rowIdx, patchMap) { var updRow = d.headers.map(function (h, ci) { return patchMap[h] !== undefined ? patchMap[h] : d.rows[rowIdx][ci]; }); putGrid_(d.sh, rowIdx + 2, 1, [updRow]); invalidateSheetCache_(SH_USERS); var obj = {}; d.headers.forEach(function (h, ci) { obj[h] = tr_(updRow[ci]); }); return obj; }
+function getUserSuspensionState_(u, now) {
+  if (!u || String(u.isActive).toUpperCase() !== 'FALSE') return { suspended: false, permanent: false, expired: false, until: '', reason: '', untilDisplay: '', message: '' }; var reason = _sn(u.suspendReason || ''), raw = tr_(u.suspendedUntil), ms = raw ? Date.parse(raw) : NaN;
+  if (!raw || Number.isNaN(ms)) return { suspended: true, permanent: true, expired: false, until: '', reason: reason, untilDisplay: 'ถาวร', message: 'บัญชีนี้ถูกระงับการใช้งานถาวร' + (reason ? ' (เหตุผล: ' + reason + ')' : '') };
+  var cur = now || _gb(); if (cur.epochMs >= ms) return { suspended: false, permanent: false, expired: true, until: '', reason: '', untilDisplay: '', message: '' };
+  var rem = ms - cur.epochMs, rD = Math.floor(rem / 86400000), rH = Math.ceil((rem % 86400000) / 3600000); if (rH >= 24) { rD++; rH = 0; }
+  var ub = _gb(ms), uDisp = fmtThaiDate_(ub.dateStr) + ' เวลา ' + ub.timeStr + ' น.', rTxt = (rD > 0 ? rD + ' วัน' : '') + (rD > 0 && rH > 0 ? ' ' : '') + (rH > 0 ? rH + ' ชม.' : (rD === 0 ? 'น้อยกว่า 1 ชม.' : ''));
+  return { suspended: true, permanent: false, expired: false, until: raw, reason: reason, untilDisplay: uDisp, message: 'บัญชีนี้ถูกระงับการใช้งานชั่วคราว จนถึง ' + uDisp + ' (เหลืออีก ' + rTxt + ')' + (reason ? ' เหตุผล: ' + reason : '') };
+}
+function toPublicUser_(u) { var s = getUserSuspensionState_(u, _gb()); return { userId: u.userId, username: u.username, displayName: _sn(u.displayName || u.username), role: u.role === 'ADMIN' ? 'ADMIN' : 'STAFF', isActive: !s.suspended, createdAt: u.createdAt, lastLoginAt: u.lastLoginAt, hasLineLinked: Boolean(u.lineUserId), suspendedUntil: s.suspended ? s.until : '', suspendReason: s.suspended ? s.reason : '' }; }
+function readPublicUsers_() {
+  var revs = getRevs_(), now = _gb();
+  if (!_bypassCache) { var hit = cacheReadObj_('CAL_U', revs.u); if (hit) return hit.map(function (u) { return (!u.isActive && u.suspendedUntil && !Number.isNaN(Date.parse(u.suspendedUntil)) && now.epochMs >= Date.parse(u.suspendedUntil)) ? fAssign_({}, u, { isActive: true, suspendedUntil: '', suspendReason: '' }) : u; }); }
+  var out = readAllUsersInternal_().map(toPublicUser_); cacheWriteObj_('CAL_U', revs.u, 'u', out, 300); return out;
+}
+function buildUserRow_(headers, id, un, pwHash, disp, role, active, created, login, lineUid, suspUntil, suspReason) {
+  var map = { userId: id, username: un, passwordHash: pwHash, displayName: disp, role: role, isActive: active, createdAt: created, lastLoginAt: login || '', lineUserId: lineUid || '', suspendedUntil: suspUntil || '', suspendReason: suspReason || '' };
+  return headers.map(function (h) { return map[h] !== undefined ? map[h] : ''; });
+}
+function nextUserId_(users) { var maxNum = Number(getProp_('LAST_USER_SEQ') || 0) || 0; (users || []).forEach(function (u) { var id = u && u.userId; if (id && String(id).indexOf('USR-') === 0) maxNum = Math.max(maxNum, +String(id).slice(4) || 0); }); var next = maxNum + 1; setProp_('LAST_USER_SEQ', String(next)); return 'USR-' + String(next).padStart(3, '0'); }
+function requireAdmin_(actorUserId, allowMissingLegacy) {
+  if (!actorUserId) { if (allowMissingLegacy) return null; throw new Error('เฉพาะผู้ดูแลระบบ (ADMIN) เท่านั้นที่ทำรายการนี้ได้'); } var actor = readAllUsersInternal_().filter(function (u) { return u.userId === actorUserId; })[0];
+  if (!actor || actor.role !== 'ADMIN' || getUserSuspensionState_(actor, _gb()).suspended) throw new Error('ไม่มีสิทธิ์ผู้ดูแลระบบ (ADMIN) หรือบัญชีถูกระงับ'); return actor;
+}
+function guardAdminUserRow_(userId, actorUserId, verb) {
+  var actor = requireAdmin_(actorUserId, false); if (!userId) throw new Error('ไม่พบรหัสผู้ใช้: ' + userId); var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'userId', userId); if (!found) throw new Error('ไม่พบรหัสผู้ใช้: ' + userId);
+  var curUn = found.obj.username.toLowerCase(), curId = found.obj.userId; if (curUn === 'admin') throw new Error('ไม่สามารถ' + verb + 'บัญชีผู้ดูแลระบบหลัก (admin) ได้');
+  if (curId === actor.userId || curUn === actor.username.toLowerCase()) throw new Error('ไม่สามารถ' + verb + 'บัญชีของตนเองที่กำลังใช้งานอยู่ได้'); return { actor: actor, d: d, found: found, curId: curId, curUn: curUn };
+}
+function handleUserLogin_(username, password) {
+  var un = _sn(username).toLowerCase(), pw = String(password || ''); if (!un || !pw) throw new Error('กรุณากรอกชื่อผู้ใช้และรหัสผ่าน'); var pubUsers = null, target = null; withLock_(function () {
+    var users = readAllUsersInternal_(); target = users.filter(function (u) { return u.username.toLowerCase() === un; })[0]; if (!target) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้');
+    var now = _gb(), susp = getUserSuspensionState_(target, now); if (susp.suspended) throw new Error(susp.message); if (target.passwordHash !== hashPassword_(pw)) throw new Error('รหัสผ่านไม่ถูกต้อง'); var nowIso = now.isoStr, hdrs = target._headers || USER_COLS;
+    if (susp.expired && target._rowIndex > 1 && target._sh) {
+      target.isActive = 'TRUE'; target.suspendedUntil = ''; target.suspendReason = ''; target.lastLoginAt = nowIso;
+      putGrid_(target._sh, target._rowIndex, 1, [hdrs.map(function (h) { return h === 'isActive' ? 'TRUE' : (h === 'suspendedUntil' || h === 'suspendReason' ? '' : (h === 'lastLoginAt' ? nowIso : (target[h] || ''))); })]); invalidateSheetCache_(SH_USERS); bumpDataRev_(['users']);
+    } else { var colIdx = hdrs.indexOf('lastLoginAt') + 1; if (colIdx > 0 && target._rowIndex > 1 && target._sh) { target._sh.getRange(target._rowIndex, colIdx).setValue(nowIso); invalidateSheetCache_(SH_USERS); bumpDataRev_(['users']); } target.lastLoginAt = nowIso; }
+    pubUsers = users.map(toPublicUser_); cacheWriteObj_('CAL_U', getRevs_().u, 'u', pubUsers, 300);
+  }); var bundle = buildSyncBundle_(pubUsers);
+  bundle.user = { userId: target.userId, username: target.username, displayName: _sn(target.displayName || target.username), role: target.role === 'ADMIN' ? 'ADMIN' : 'STAFF', createdAt: target.createdAt, hasLineLinked: Boolean(target.lineUserId) }; return bundle;
+}
+function handleUserRegister_(payload) {
+  var p = payload || {}, un = _sn(p.username).toLowerCase(), disp = _sn(p.displayName), pw = String(p.password || ''), confirmPw = p.confirmPassword !== undefined ? String(p.confirmPassword || '') : pw;
+  if (!un || un.length < 3 || un.length > 30 || !/^[a-z0-9_.-]+$/.test(un)) throw new Error('ชื่อผู้ใช้ต้องเป็นตัวอักษรภาษาอังกฤษหรือตัวเลข 3-30 ตัวอักษร'); if (!disp) throw new Error('กรุณาระบุชื่อ-นามสกุล หรือชื่อเรียกที่ใช้แสดงในระบบ');
+  if (!pw || pw.length < 4) throw new Error(E_PW4); if (pw !== confirmPw) throw new Error('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน'); var d = getSheetData_(SH_USERS, USER_COLS), users = readAllUsersInternal_(), pubUsers = [];
+  for (var i = 0; i < users.length; i++) { var u = users[i]; if (u.username.toLowerCase() === un) throw new Error(E_DUP_UN); if (u.displayName && u.displayName.toLowerCase() === disp.toLowerCase()) throw new Error('ชื่อที่ใช้แสดงผลนี้มีอยู่ในระบบแล้ว กรุณาระบุชื่อหรือแผนกเพิ่มเติม'); pubUsers.push(toPublicUser_(u)); }
+  var nowIso = _gb().isoStr, newId = nextUserId_(users); appendPlainRow_(d.sh, buildUserRow_(d.headers, newId, un, hashPassword_(pw), disp, 'STAFF', 'TRUE', nowIso, nowIso, '', '', ''), d.rows.length + 1);
+  pubUsers.push({ userId: newId, username: un, displayName: disp, role: 'STAFF', isActive: true, createdAt: nowIso, lastLoginAt: nowIso, hasLineLinked: false, suspendedUntil: '', suspendReason: '' });
+  var bundle = buildSyncBundle_(pubUsers); bundle.user = { userId: newId, username: un, displayName: disp, role: 'STAFF', createdAt: nowIso, hasLineLinked: false }; return bundle;
+}
+function saveUser_(payload, actorUserId) {
+  requireAdmin_(actorUserId, true); var p = payload || {}, uid = _sn(p.userId), un = _sn(p.username).toLowerCase(), d = getSheetData_(SH_USERS, USER_COLS), rows = d.rows, headers = d.headers;
+  var idIdx = headers.indexOf('userId'), unIdx = headers.indexOf('username'), dispIdx = headers.indexOf('displayName'), roleIdx = headers.indexOf('role'), actIdx = headers.indexOf('isActive'); var foundIdx = -1, foundByUn = -1, curIds = [];
+  for (var i = 0; i < rows.length; i++) { var rId = tr_(rows[i][idIdx]), rUn = tr_(rows[i][unIdx]).toLowerCase(); if (rId) curIds.push({ userId: rId }); if (uid && rId === uid) foundIdx = i; if (un && rUn === un) foundByUn = i; }
+  if (p.isNew && foundByUn !== -1) throw new Error(E_DUP_UN); if (foundIdx === -1 && !p.isNew && foundByUn !== -1) foundIdx = foundByUn; var nowIso = _gb().isoStr; if (foundIdx !== -1) {
+    var curRow = rows[foundIdx], curUn = tr_(curRow[unIdx]).toLowerCase(), nextDisp = p.displayName !== undefined ? _sn(p.displayName) : tr_(curRow[dispIdx] || curUn); if (!nextDisp) throw new Error('กรุณาระบุชื่อที่แสดงผล');
+    var nextRole = (p.role !== undefined ? String(p.role) : String(curRow[roleIdx] || 'STAFF')).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF';
+    var nextActive = (p.isActive !== undefined ? (p.isActive !== false && String(p.isActive).toUpperCase() !== 'FALSE') : (String(curRow[actIdx]).toUpperCase() !== 'FALSE')) ? 'TRUE' : 'FALSE';
+    if (curUn === 'admin' && nextActive === 'FALSE') throw new Error('ไม่สามารถระงับบัญชีผู้ดูแลระบบหลัก (admin) ได้'); var patch = { displayName: nextDisp, role: nextRole, isActive: nextActive }; if (nextActive === 'TRUE') { patch.suspendedUntil = ''; patch.suspendReason = ''; }
+    if (p.password) { if (String(p.password).length < 4) throw new Error(E_PW4); patch.passwordHash = hashPassword_(p.password); } return toPublicUser_(patchUserRow_(d, foundIdx, patch));
+  }
+  if (uid && !p.isNew && !un) throw new Error('ไม่พบรหัสผู้ใช้: ' + uid); if (!un || un.length < 3) throw new Error('ชื่อผู้ใช้ต้องมีอย่างน้อย 3 ตัวอักษร'); var disp = _sn(p.displayName || un); if (!disp) throw new Error('กรุณาระบุชื่อที่แสดงผล');
+  if (!p.password || String(p.password).length < 4) throw new Error(E_PW4);
+  var role = (p.role || 'STAFF').toUpperCase() === 'ADMIN' ? 'ADMIN' : 'STAFF', isActive = p.isActive !== false && String(p.isActive).toUpperCase() !== 'FALSE' ? 'TRUE' : 'FALSE', newId = nextUserId_(curIds);
+  appendPlainRow_(d.sh, buildUserRow_(headers, newId, un, hashPassword_(p.password), disp, role, isActive, nowIso, '', '', '', ''), rows.length + 1);
+  return { userId: newId, username: un, displayName: disp, role: role, isActive: isActive === 'TRUE', createdAt: nowIso, lastLoginAt: '', hasLineLinked: false, suspendedUntil: '', suspendReason: '' };
+}
+function suspendUser_(userId, durationKey, reason, actorUserId) {
+  var g = guardAdminUserRow_(userId, actorUserId, 'ระงับ'), now = _gb(), dk = String(durationKey || 'PERMANENT'), nextActive = 'FALSE', nextUntil = '', nextReason = _sn(reason || '');
+  if (dk === 'UNSUSPEND') { nextActive = 'TRUE'; nextReason = ''; } else if (dk !== 'PERMANENT') { if (!SUSPEND_DAYS_MAP[dk]) throw new Error('รูปแบบระยะเวลาการระงับไม่ถูกต้อง'); nextUntil = _gb(now.epochMs + SUSPEND_DAYS_MAP[dk] * 86400000).isoStr; }
+  var pubObj = patchUserRow_(g.d, g.found.idx, { isActive: nextActive, suspendedUntil: nextUntil, suspendReason: nextReason });
+  logNotif_(dk === 'UNSUSPEND' ? 'USER_UNSUSPEND' : 'USER_SUSPEND', g.curId, g.curUn, '200', '-', g.actor.displayName + ' -> ' + dk + (nextReason ? ' (' + nextReason + ')' : '')); return { user: toPublicUser_(pubObj) };
+}
+function deleteUser_(userId, actorUserId) {
+  var g = guardAdminUserRow_(userId, actorUserId, 'ลบ'), curSeq = Number(getProp_('LAST_USER_SEQ') || 0) || 0, numPart = g.curId.indexOf('USR-') === 0 ? (+g.curId.slice(4) || 0) : 0; if (numPart > curSeq) setProp_('LAST_USER_SEQ', String(numPart));
+  g.d.sh.deleteRow(g.found.idx + 2); invalidateSheetCache_(SH_USERS); var c = sc_(); if (c) try { c.remove('PWD_OTP_' + g.curUn); c.remove('PWD_CD_' + g.curUn); } catch (_) {}
+  logNotif_('USER_DELETED', g.curId, g.curUn, '200', '-', 'ลบบัญชีถาวรโดย ' + g.actor.displayName + ' (' + g.found.obj.displayName + ')'); return { success: true, deleted: true, userId: g.curId, username: g.curUn };
+}
+function genOtp6_() { return String((parseInt(hashPassword_(Utilities.getUuid() + ':' + Date.now() + ':' + Math.random()).slice(0, 8), 16) % 900000) + 100000); }
+function storeResetOtp_(un, ttlSec, skipCooldown) {
+  var c = sc_(); if (!c) throw new Error('CacheService ไม่พร้อมใช้งาน'); var otp = genOtp6_(), salt = Utilities.getUuid().slice(0, 12), ttl = ttlSec || 600;
+  c.put('PWD_OTP_' + un, JSON.stringify({ h: hashPassword_(un + ':' + otp + ':' + salt), s: salt, exp: Date.now() + ttl * 1000, att: 0 }), ttl); if (!skipCooldown) c.put('PWD_CD_' + un, '1', 60); return otp;
+}
+function bumpQuotaUsed_(delta) { return withLock_(function () { resetLock_(); var pr = getDataRev_(), cm = getMetaMap_(), m = updateMeta_({ CACHED_QUOTA_USED: String((+cm.CACHED_QUOTA_USED || 0) + (delta || 1)) }); return { preQRev: pr, meta: m }; }); }
+function requestPasswordReset_(username, notifyAdmin) {
+  var un = _sn(username).toLowerCase(); if (!un) throw new Error('กรุณาระบุชื่อผู้ใช้ (Username)'); var allUsers = readAllUsersInternal_(), target = allUsers.filter(function (u) { return u.username.toLowerCase() === un; })[0];
+  if (!target) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ'); var susp = getUserSuspensionState_(target, _gb()); if (susp.suspended) throw new Error(susp.message); var c = sc_(); if (c && c.get('PWD_CD_' + un)) throw new Error('กรุณารอ 60 วินาที ก่อนขอรหัส OTP ใหม่อีกครั้ง');
+  if (target.lineUserId) {
+    var otp = storeResetOtp_(un, 600, false), pushRes = pushLine_(target.lineUserId, buildOtpFlex_(un, otp, 10), Utilities.getUuid(), false, 'PWD_RESET_OTP', target.userId);
+    if (pushRes.ok) { bumpQuotaUsed_(1); return { sent: true, lineLinked: true, expiresInSec: 600, cooldownSec: 60, message: 'ส่งรหัส OTP 6 หลักไปยังแชทส่วนตัว LINE ของคุณแล้ว (มีอายุ 10 นาที)' }; }
+    return { sent: false, lineLinked: true, quotaFallback: true, cooldownSec: 60, message: 'ส่ง Push ไม่สำเร็จ (อาจเป็นเพราะโควตา LINE เต็ม) กรุณาพิมพ์ "รีเซ็ตรหัส" ในแชทส่วนตัวกับบอท LINE เพื่อรับ OTP ฟรีทันที' };
+  }
+  if (!isTrue_(notifyAdmin)) return { sent: false, lineLinked: false, needsAdminReset: true, message: 'บัญชีนี้ยังไม่ได้ผูกกับ LINE กรุณากด "แจ้งผู้ดูแลระบบ (ADMIN)" หรือติดต่อ ADMIN เพื่อรับรหัส OTP ชั่วคราว' }; if (c) c.put('PWD_CD_' + un, '1', 60);
+  var admins = allUsers.filter(function (u) { return u.role === 'ADMIN' && u.lineUserId && !getUserSuspensionState_(u, _gb()).suspended; });
+  var msg = buildNoticeFlex_('-', 'คำขอรีเซ็ตรหัสผ่าน', 'บัญชี "' + un + '" (' + _sn(target.displayName || un) + ') ร้องขอรีเซ็ตรหัสผ่าน กรุณาออกรหัส OTP ชั่วคราวในหน้า ตั้งค่า -> จัดการสมาชิก (ไม่มีรหัสผ่านหรือ OTP แสดงในข้อความนี้)', '', '', ''), sentCount = 0;
+  if (admins.length) admins.forEach(function (ad) { if (pushLine_(ad.lineUserId, msg, Utilities.getUuid(), false, 'PWD_RESET_REQ_ADMIN', target.userId).ok) sentCount++; });
+  else { var tid = getProp_('LINE_TARGET_ID'); if (tid && pushLine_(tid, msg, Utilities.getUuid(), false, 'PWD_RESET_REQ_GROUP', target.userId).ok) sentCount++; } if (sentCount > 0) bumpQuotaUsed_(sentCount);
+  return { sent: false, lineLinked: false, adminNotified: true, cooldownSec: 60, message: 'แจ้งผู้ดูแลระบบ (ADMIN) แล้ว กรุณาติดต่อขอรับรหัส OTP ชั่วคราวจาก ADMIN เพื่อนำมากรอกตั้งรหัสผ่านใหม่' };
+}
+function confirmPasswordReset_(username, otp, newPassword, confirmPassword) {
+  var un = _sn(username).toLowerCase(), code = tr_(otp), pw = String(newPassword || ''), cpw = confirmPassword !== undefined ? String(confirmPassword || '') : pw; if (!un) throw new Error('กรุณาระบุชื่อผู้ใช้');
+  if (!/^\d{6}$/.test(code)) throw new Error('รหัส OTP ต้องเป็นตัวเลข 6 หลัก'); if (!pw || pw.length < 4) throw new Error(E_PW4); if (pw !== cpw) throw new Error('รหัสผ่านและการยืนยันรหัสผ่านไม่ตรงกัน');
+  var c = sc_(), raw = c ? c.get('PWD_OTP_' + un) : null; if (!raw) throw new Error('รหัส OTP ไม่ถูกต้องหรือหมดอายุแล้ว กรุณาขอรหัสใหม่'); var rec; try { rec = JSON.parse(raw); } catch (_) { rec = null; }
+  if (!rec || !rec.h || Date.now() > (+rec.exp || 0)) { if (c) c.remove('PWD_OTP_' + un); throw new Error('รหัส OTP หมดอายุแล้ว กรุณาขอรหัสใหม่'); }
+  if ((+rec.att || 0) >= 5) { if (c) c.remove('PWD_OTP_' + un); throw new Error('กรอกรหัส OTP ผิดเกิน 5 ครั้ง รหัสถูกยกเลิกแล้ว กรุณาขอรหัสใหม่'); }
+  var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'username', un); if (!found) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ'); var susp = getUserSuspensionState_(found.obj, _gb()); if (susp.suspended) throw new Error(susp.message);
+  if (hashPassword_(un + ':' + code + ':' + rec.s) !== rec.h) {
+    rec.att = (+rec.att || 0) + 1; if (rec.att >= 5) { c.remove('PWD_OTP_' + un); throw new Error('กรอกรหัส OTP ผิดครบ 5 ครั้ง รหัสถูกยกเลิกแล้ว กรุณาขอรหัสใหม่'); }
+    c.put('PWD_OTP_' + un, JSON.stringify(rec), Math.max(10, Math.ceil((rec.exp - Date.now()) / 1000))); throw new Error('รหัส OTP ไม่ถูกต้อง (เหลือโอกาสอีก ' + (5 - rec.att) + ' ครั้ง)');
+  }
+  patchUserRow_(d, found.idx, { passwordHash: hashPassword_(pw) }); c.remove('PWD_OTP_' + un); try { c.remove('PWD_CD_' + un); } catch (_) {}
+  logNotif_('PWD_RESET_OK', found.obj.userId || '-', un, '200', '-', 'รีเซ็ตรหัสผ่านสำเร็จ'); return { success: true, username: un };
+}
+function adminGenerateResetOtp_(targetUserId, actorUserId) {
+  var actor = requireAdmin_(actorUserId, false), target = readAllUsersInternal_().filter(function (u) { return u.userId === targetUserId; })[0]; if (!target) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
+  var susp = getUserSuspensionState_(target, _gb()); if (susp.suspended) throw new Error(susp.message); var otp = storeResetOtp_(target.username.toLowerCase(), 600, true); logNotif_('ADMIN_GEN_OTP', target.userId, target.username, '200', '-', 'ออก OTP โดย ' + actor.displayName);
+  return { userId: target.userId, username: target.username, displayName: _sn(target.displayName || target.username), otp: otp, expiresInSec: 600 };
+}
+function createLineLinkCode_(actorUserId) {
+  if (!actorUserId) throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ'); var target = readAllUsersInternal_().filter(function (u) { return u.userId === actorUserId; })[0]; if (!target) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
+  if (getUserSuspensionState_(target, _gb()).suspended) throw new Error('บัญชีนี้ถูกระงับการใช้งาน'); var c = sc_(); if (!c) throw new Error('CacheService ไม่พร้อมใช้งาน');
+  var code = genOtp6_(); c.put('LN_BIND_' + code, JSON.stringify({ userId: target.userId, username: target.username.toLowerCase(), exp: Date.now() + 300000 }), 300); return { code: code, command: 'ผูกบัญชี ' + code, expiresInSec: 300 };
+}
+function unlinkLineAccount_(actorUserId) { if (!actorUserId) throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ'); var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'userId', actorUserId); if (!found) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ'); patchUserRow_(d, found.idx, { lineUserId: '' }); return { success: true, hasLineLinked: false }; }
+function changeOwnPassword_(actorUserId, currentPassword, newPassword, confirmPassword) {
+  if (!actorUserId) throw new Error('กรุณาเข้าสู่ระบบก่อนทำรายการ'); var cur = String(currentPassword || ''), pw = String(newPassword || ''), cpw = confirmPassword !== undefined ? String(confirmPassword || '') : pw; if (!cur) throw new Error('กรุณาระบุรหัสผ่านปัจจุบัน');
+  if (!pw || pw.length < 4) throw new Error(E_PW4); if (pw !== cpw) throw new Error('รหัสผ่านใหม่และการยืนยันไม่ตรงกัน'); var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'userId', actorUserId); if (!found) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
+  if (getUserSuspensionState_(found.obj, _gb()).suspended) throw new Error('บัญชีนี้ถูกระงับการใช้งาน'); if (found.obj.passwordHash !== hashPassword_(cur)) throw new Error('รหัสผ่านปัจจุบันไม่ถูกต้อง');
+  patchUserRow_(d, found.idx, { passwordHash: hashPassword_(pw) }); return { success: true };
+}
+function resetAdminPassword(newPassword) {
+  var pw = String(newPassword || ''); if (pw.length < 4) throw new Error(E_PW4); var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'username', 'admin'); if (!found) throw new Error('ไม่พบบัญชี admin ในชีต Users');
+  patchUserRow_(d, found.idx, { passwordHash: hashPassword_(pw), isActive: 'TRUE', suspendedUntil: '', suspendReason: '' }); bumpDataRev_(['users']); return 'รีเซ็ตรหัสผ่านบัญชี admin และเปิดใช้งานเรียบร้อยแล้ว';
+}
+
+// === 7. Appointment CRUD, Meta, Logs & Notification Engine ===
+function readAllApts_(includeDeleted, fresh) {
+  var revs = getRevs_(); if (!includeDeleted && !fresh && !_bypassCache) { var hit = cacheReadObj_('CAL_A', revs.a); if (hit) return hit.slice(); }
+  var d = getSheetData_(SH_APTS, APT_COLS); if (!d.rows.length) { if (!includeDeleted) cacheWriteObj_('CAL_A', revs.a, 'a', [], 180); return []; }
+  var cacheKey = includeDeleted ? '_aptsAll' : '_aptsActive'; if (!fresh && d[cacheKey]) return d[cacheKey].slice(); var hdrs = d.headers, hLen = hdrs.length, delIdx = hdrs.indexOf('deletedAt'), out = []; for (var r = 0; r < d.rows.length; r++) {
+    var row = d.rows[r], isDel = delIdx !== -1 && Boolean(tr_(row[delIdx])); if (!includeDeleted && isDel) continue; var o = {}; for (var c = 0; c < hLen; c++) o[hdrs[c]] = tr_(row[c]); if (!o.id) continue;
+    o.status = _ns(o.status); o.remindDaysBefore = Number(o.remindDaysBefore) || 0; o.remindHoursBefore = Number(o.remindHoursBefore) || 0; o.rescheduleCount = Number(o.rescheduleCount) || 0;
+    o.mapUrl = _sn(o.mapUrl); o.imageUrl = _sn(o.imageUrl); o.createdBy = _sn(o.createdBy || o.updatedBy || S_SYS); o.statusChangedBy = _sn(o.statusChangedBy); o.statusChangedAt = _sn(o.statusChangedAt); o.statusReason = _sn(o.statusReason); out.push(o);
+  }
+  d[cacheKey] = out; if (!includeDeleted) cacheWriteObj_('CAL_A', revs.a, 'a', out, 180); return out.slice();
+}
+function createApt_(inp) {
+  var d = getSheetData_(SH_APTS, APT_COLS), now = _gb(), pfx = 'APT-' + now.dateStr.replace(/-/g, '') + '-', idIdx = Math.max(0, d.headers.indexOf('id'));
+  var max = d.rows.reduce(function (m, r) { var rid = tr_(r[idIdx]); return rid.indexOf(pfx) === 0 ? Math.max(m, +rid.slice(pfx.length) || 0) : m; }, 0); var creator = _sn(inp.createdBy || inp.updatedBy || S_SYS) || S_SYS, st = _ns(inp.status);
+  var rec = { id: pfx + String(max + 1).padStart(3, '0'), title: _sn(inp.title), appointmentDate: _sn(inp.appointmentDate), appointmentTime: _sn(inp.appointmentTime), location: _sn(inp.location), contactPerson: _sn(inp.contactPerson), status: st, remindDaysBefore: (inp.remindDaysBefore != null && inp.remindDaysBefore !== '') ? +inp.remindDaysBefore : 0, remindHoursBefore: (inp.remindHoursBefore != null && inp.remindHoursBefore !== '') ? +inp.remindHoursBefore : 0, notifiedDayForSlot: '', notifiedHourForSlot: '', rescheduleCount: 0, notes: _sn(inp.notes), mapUrl: _sn(inp.mapUrl), imageUrl: _sn(inp.imageUrl), createdBy: creator, statusChangedBy: st !== S_CF ? (_sn(inp.statusChangedBy) || creator) : '', statusChangedAt: st !== S_CF ? now.isoStr : '', statusReason: _sn(inp.statusReason), updatedBy: creator, createdAt: now.isoStr, updatedAt: now.isoStr, deletedAt: '' };
+  validateApt_(rec); appendPlainRow_(d.sh, d.headers.map(function (c) { return rec[c] !== undefined ? String(rec[c]) : ''; }), d.rows.length + 1); return rec;
+}
+function updateApt_(id, patch, expUpdated, reason, currentUser, suppressSlotReset) {
+  var d = getSheetData_(SH_APTS, APT_COLS), rows = d.rows, headers = d.headers, idIdx = Math.max(0, headers.indexOf('id')), delIdx = headers.indexOf('deletedAt'), targetRow = -1, cur = null;
+  for (var r = rows.length - 1; r >= 0; r--) { if (tr_(rows[r][idIdx]) === tr_(id) && !(delIdx !== -1 && tr_(rows[r][delIdx]))) { targetRow = r + 2; cur = {}; headers.forEach(function (c, i) { cur[c] = tr_(rows[r][i]); }); break; } } if (!cur) throw new Error('ไม่พบรหัส: ' + id);
+  if (expUpdated && cur.updatedAt && tr_(expUpdated) !== tr_(cur.updatedAt)) { var err = new Error('ข้อมูลถูกแก้ไขโดยผู้อื่นแล้ว กรุณารีเฟรชก่อนทำรายการ'); err.code = 'CONCURRENCY_CONFLICT'; throw err; }
+  var now = _gb(), up = {}; headers.forEach(function (c) { up[c] = patch[c] !== undefined ? _sn(patch[c]) : cur[c]; }); up.id = cur.id; up.status = _ns(up.status); up.createdAt = cur.createdAt; up.updatedAt = now.isoStr; up.createdBy = cur.createdBy || cur.updatedBy || S_SYS;
+  var actingUser = _sn(currentUser || patch.updatedBy || up.createdBy), statusChanged = _ns(cur.status) !== _ns(up.status); up.updatedBy = actingUser;
+  if (statusChanged) { if (up.status === S_CF) up.statusChangedBy = up.statusChangedAt = up.statusReason = ''; else { up.statusChangedBy = _sn(patch.statusChangedBy || actingUser); up.statusChangedAt = now.isoStr; up.statusReason = _sn(patch.statusReason || reason); } }
+  else { up.statusChangedBy = cur.statusChangedBy || ''; up.statusChangedAt = cur.statusChangedAt || ''; up.statusReason = patch.statusReason !== undefined ? _sn(patch.statusReason) : (cur.statusReason || ''); }
+  var dChg = cur.appointmentDate !== up.appointmentDate, tChg = cur.appointmentTime !== up.appointmentTime, rDChg = String(cur.remindDaysBefore) !== String(up.remindDaysBefore), rHChg = String(cur.remindHoursBefore) !== String(up.remindHoursBefore);
+  var reop = (cur.status === S_CP || cur.status === S_CN) && up.status === S_CF, suppressReset = Boolean(suppressSlotReset && !dChg && !tChg && !rDChg && !rHChg);
+  if (!suppressReset) { if (dChg || reop || rDChg) up.notifiedDayForSlot = ''; if (dChg || tChg || reop || rHChg) up.notifiedHourForSlot = ''; } else if (reop) {
+    var slotNow = (up.appointmentDate && up.appointmentTime) ? (up.appointmentDate + 'T' + up.appointmentTime) : '', epNow = slotNow ? bkkSlotToEpoch_(up.appointmentDate, up.appointmentTime) : null;
+    var diffHNow = epNow ? (epNow - now.epochMs) / 3600000 : -1, diffDNow = up.appointmentDate ? diffDays_(now.dateStr, up.appointmentDate) : null;
+    if (!up.notifiedDayForSlot && up.appointmentDate && (+up.remindDaysBefore || 0) > 0 && diffDNow !== null && diffDNow <= (+up.remindDaysBefore || 0)) up.notifiedDayForSlot = up.appointmentDate;
+    if (!up.notifiedHourForSlot && slotNow && (+up.remindHoursBefore || 0) > 0 && diffHNow > 0 && diffHNow <= (+up.remindHoursBefore || 0)) up.notifiedHourForSlot = slotNow;
+  }
+  if ((cur.appointmentDate || cur.appointmentTime) && (dChg || tChg)) up.rescheduleCount = String((+cur.rescheduleCount || 0) + 1); validateApt_(up); var logs = [];
+  ['appointmentDate', 'appointmentTime', 'location', 'contactPerson', 'status'].forEach(function (f, idx) { if (String(cur[f] || '') !== String(up[f] || '')) logs.push({ logId: 'LOG-' + now.epochMs + '-' + (idx + 1), appointmentId: cur.id, changedAt: now.isoStr, changedBy: up.updatedBy, fieldChanged: f, oldValue: cur[f] || '', newValue: up[f] || '', reason: _sn(reason || up.statusReason) }); });
+  if (logs.length) { var lSh = ensureSheet_(getSs_(), SH_RE_LOGS, RE_LOG_COLS); putGrid_(lSh, lSh.getLastRow() + 1, 1, logs.map(function (le) { return RE_LOG_COLS.map(function (c) { return le[c]; }); })); invalidateSheetCache_(SH_RE_LOGS); }
+  putGrid_(d.sh, targetRow, 1, [headers.map(function (c) { return String(up[c] !== undefined ? up[c] : ''); })]); invalidateSheetCache_(SH_APTS); if (reop) up.reopened = true;
+  return { appointment: up, logs: logs, needsTriggerSync: Boolean(!(suppressSlotReset && !dChg && !tChg && !rHChg && up.status === S_CF) && (+cur.remindHoursBefore > 0 || +up.remindHoursBefore > 0) && (dChg || tChg || rHChg || statusChanged)) };
+}
+function deleteApt_(id, user) {
+  var d = getSheetData_(SH_APTS, APT_COLS), rows = d.rows, headers = d.headers, idIdx = Math.max(0, headers.indexOf('id')), delIdx = headers.indexOf('deletedAt'), removed = null, now = _gb(); for (var r = rows.length - 1; r >= 0; r--) {
+    var rowId = tr_(rows[r][idIdx]), isDel = delIdx !== -1 && Boolean(tr_(rows[r][delIdx])); if (rowId === tr_(id) || isDel) {
+      if (rowId === tr_(id) && !removed) { removed = {}; headers.forEach(function (c, i) { removed[c] = tr_(rows[r][i]); }); var le = { logId: 'LOG-' + now.epochMs + '-DEL', appointmentId: id, changedAt: now.isoStr, changedBy: _sn(user || S_SYS), fieldChanged: 'DELETED', oldValue: removed.title || '-', newValue: 'ลบนัดหมาย', reason: 'ลบออกจากระบบ' }; appendPlainRow_(ensureSheet_(getSs_(), SH_RE_LOGS, RE_LOG_COLS), RE_LOG_COLS.map(function (c) { return le[c]; })); }
+      d.sh.deleteRow(r + 2);
+    }
+  }
+  invalidateSheetCache_(SH_APTS); return removed || { id: id };
+}
+function validateApt_(r) { if (!r.title) throw new Error('กรุณาระบุหัวข้องาน'); if (!r.appointmentDate || !r.appointmentTime || !r.location) throw new Error('กรุณาระบุวันที่, เวลา และสถานที่ให้ครบถ้วน'); if (r.imageUrl && String(r.imageUrl).length > 48000) throw new Error('ขนาดรูปภาพเกินขีดจำกัดของ Google Sheets'); }
+function rowsToMeta_(rows) { return rows.reduce(function (m, r) { if (r[0]) m[tr_(r[0])] = tr_(r[1]); return m; }, {}); }
+function getMetaMap_() { if (_metaCache) return _metaCache; var revs = getRevs_(); if (!_bypassCache) { var hit = cacheReadObj_('CAL_M', revs.m); if (hit) return (_metaCache = hit); } var out = rowsToMeta_(getSheetData_(SH_META, META_COLS).rows); cacheWriteObj_('CAL_M', revs.m, 'm', out, 300); return (_metaCache = out); }
+function updateMeta_(obj) {
+  var d = getSheetData_(SH_META, META_COLS), now = _gb().isoStr, m = rowsToMeta_(d.rows), keyMap = {}, minR = 1e9, maxR = -1, newRows = [], chgEx = false; for (var i = 0; i < d.rows.length; i++) { var k = tr_(d.rows[i][0]); if (k) keyMap[k] = i; }
+  Object.keys(obj || {}).forEach(function (k) { var v = _sn(obj[k]), idx = keyMap[k]; if (idx !== undefined && m[k] === v) return; m[k] = v; if (idx !== undefined) { d.rows[idx][1] = v; d.rows[idx][2] = now; if (idx < minR) minR = idx; if (idx > maxR) maxR = idx; chgEx = true; } else { newRows.push([k, v, now]); keyMap[k] = d.rows.length + newRows.length - 1; } });
+  if (chgEx) { var blk = []; for (var r = minR; r <= maxR; r++) blk.push([String(d.rows[r][1] != null ? d.rows[r][1] : ''), String(d.rows[r][2] != null ? d.rows[r][2] : '')]); putGrid_(d.sh, minR + 2, 2, blk); } if (newRows.length) putGrid_(d.sh, d.rows.length + 2, 1, newRows);
+  if (chgEx || newRows.length) { invalidateSheetCache_(SH_META); var nr = bumpDataRev_(['meta']); _metaCache = m; cacheWriteObj_('CAL_M', nr, 'm', m, 300); } return m;
+}
+function readLogs_(name, cols, lim) {
+  var isRe50 = name === SH_RE_LOGS && (lim || 30) === 50, revs = isRe50 ? getRevs_() : null; if (isRe50 && !_bypassCache) { var hit = cacheReadObj_('CAL_L', revs.l); if (hit) return hit; }
+  var d = getSheetData_(name, cols); if (!d.rows.length) { if (isRe50) cacheWriteObj_('CAL_L', revs.l, 'l', [], 180); return []; }
+  var out = d.rows.slice(Math.max(0, d.rows.length - (lim || 30))).reverse().map(function (row) { var o = {}; d.headers.forEach(function (c, i) { o[c] = row[i]; }); return o; }); if (isRe50) cacheWriteObj_('CAL_L', revs.l, 'l', out, 180); return out;
+}
+function runNotificationEngine() {
+  return withLock_(function () {
+    cleanExpiredTriggers_(); resetLock_(); var now = _gb(); updateMeta_({ LAST_TRIGGER_RUN_AT: now.isoStr }); var m = getMetaMap_(), qs = +m.QUIET_HOURS_START || 22, qe = +m.QUIET_HOURS_END || 7, dh = +m.DAILY_DIGEST_HOUR || 8;
+    if (qs > qe ? (now.hour >= qs || now.hour < qe) : (now.hour >= qs && now.hour < qe)) return { sent: false, reason: 'QUIET_HOURS' }; var apts = readAllApts_(false, true), hourly = [], digest = [], slotUp = []; apts.forEach(function (a) {
+      if (a.status !== S_CF || !a.appointmentDate || !a.appointmentTime) return; var ep = bkkSlotToEpoch_(a.appointmentDate, a.appointmentTime); if (ep === null || now.epochMs >= ep) return;
+      var slot = a.appointmentDate + 'T' + a.appointmentTime, diffH = (ep - now.epochMs) / 3600000, rH = +a.remindHoursBefore || 0, rD = +a.remindDaysBefore || 0;
+      if (rH > 0 && a.notifiedHourForSlot !== slot && diffH > 0 && diffH <= rH) { hourly.push(a); slotUp.push({ id: a.id, dSlot: a.appointmentDate, hSlot: slot }); return; } var diffD = diffDays_(now.dateStr, a.appointmentDate);
+      if (rD > 0 && a.notifiedDayForSlot !== a.appointmentDate && diffD !== null && diffD >= 0 && diffD <= rD && now.hour >= dh) { digest.push(a); slotUp.push({ id: a.id, dSlot: a.appointmentDate, hSlot: a.notifiedHourForSlot || '' }); }
+    }); if (!hourly.length && !digest.length) return { sent: false, reason: 'NONE_DUE' }; hourly.sort(cmpSlot_); digest.sort(cmpSlot_); var qInfo = { limit: +m.CACHED_QUOTA_LIMIT || 300, used: +m.CACHED_QUOTA_USED || 0 };
+    var flexMsg = buildReminderNotificationFlex_(hourly, digest, now.dateStr, isTrue_(m.PRIVACY_MASK_CONTACT), m.WEB_APP_URL || '', qInfo);
+    var pushRes = pushLine_(getProp_('LINE_TARGET_ID'), flexMsg, Utilities.getUuid(), false, hourly.length ? 'HOURLY' : 'DAILY', slotUp.map(function (u) { return u.id; }).join(','));
+    if (pushRes.ok) { applySlotUpdates_(slotUp); bumpDataRev_(['apts']); updateMeta_({ CACHED_QUOTA_USED: String(qInfo.used + 1) }); } return { sent: pushRes.ok, httpStatus: pushRes.httpStatus, count: slotUp.length };
+  });
+}
+function applySlotUpdates_(ups) {
+  var d = getSheetData_(SH_APTS, APT_COLS); if (!d.rows.length || !ups.length) return;
+  var idIdx = Math.max(0, d.headers.indexOf('id')), dCol = d.headers.indexOf('notifiedDayForSlot') + 1, hCol = d.headers.indexOf('notifiedHourForSlot') + 1, delIdx = d.headers.indexOf('deletedAt'), idMap = {}, minR = 1e9, maxR = -1, touched = [];
+  for (var r = 0; r < d.rows.length; r++) if (!(delIdx !== -1 && tr_(d.rows[r][delIdx]))) idMap[tr_(d.rows[r][idIdx])] = r;
+  ups.forEach(function (u) { var ri = idMap[u.id]; if (ri === undefined) return; if (dCol > 0) d.rows[ri][dCol - 1] = u.dSlot; if (hCol > 0) d.rows[ri][hCol - 1] = u.hSlot; if (ri < minR) minR = ri; if (ri > maxR) maxR = ri; touched.push(ri); }); if (!touched.length) return;
+  if (dCol > 0 && hCol === dCol + 1) { var blk = []; for (var i = minR; i <= maxR; i++) blk.push([String(d.rows[i][dCol - 1] || ''), String(d.rows[i][hCol - 1] || '')]); putGrid_(d.sh, minR + 2, dCol, blk); }
+  else touched.forEach(function (ri) { if (dCol > 0) d.sh.getRange(ri + 2, dCol).setValue(d.rows[ri][dCol - 1]); if (hCol > 0) d.sh.getRange(ri + 2, hCol).setValue(d.rows[ri][hCol - 1]); }); invalidateSheetCache_(SH_APTS);
+}
+
+// === 8. LINE Transport & Flex Message Builders ===
+function pushLine_(target, msg, retryKey, isDry, type, aptIds) {
+  var token = getProp_('LINE_CHANNEL_ACCESS_TOKEN'); if (!token) return { ok: false, error: 'ไม่มี Token' };
+  var url = LN_API + (isDry ? 'message/validate/push' : 'message/push'), msgObj = (typeof msg === 'object' && msg !== null) ? msg : { type: 'text', text: _sn(msg) }, hdrs = { Authorization: 'Bearer ' + token }; if (!isDry && retryKey) hdrs['X-Line-Retry-Key'] = retryKey;
+  var res = UrlFetchApp.fetch(url, { method: 'post', contentType: 'application/json', headers: hdrs, payload: JSON.stringify(isDry ? { messages: [msgObj] } : { to: target, messages: [msgObj] }), muteHttpExceptions: true }), code = res.getResponseCode(), ok = code >= 200 && code < 300;
+  logNotif_(type || 'PUSH', aptIds || '-', target || '-', code, retryKey || '-', ok ? '' : res.getContentText()); return { ok: ok, httpStatus: code, error: ok ? null : res.getContentText() };
+}
+function sendLineReply_(replyToken, msg) {
+  var token = getProp_('LINE_CHANNEL_ACCESS_TOKEN'); if (!token || !replyToken) return; var msgObj = (typeof msg === 'object' && msg !== null) ? msg : { type: 'text', text: _sn(msg) };
+  var post = function (m) { return UrlFetchApp.fetch(LN_API + 'message/reply', { method: 'post', contentType: 'application/json', headers: { Authorization: 'Bearer ' + token }, payload: JSON.stringify({ replyToken: replyToken, messages: [m] }), muteHttpExceptions: true }); };
+  var res = post(msgObj); if (res && res.getResponseCode && res.getResponseCode() !== 200 && msgObj.type === 'flex') post({ type: 'text', text: _sn(msgObj.altText || 'ดำเนินการเรียบร้อย') });
+}
+function getLineUserName_(gid, uid, token) {
+  if (!token || !uid) return 'สมาชิก LINE'; var cKey = 'LN_U_' + (gid || 'DM') + '_' + uid; try {
+    var cache = sc_(), cached = cache ? cache.get(cKey) : ''; if (cached) return cached; var res = UrlFetchApp.fetch(LN_API + (gid ? ('group/' + gid + '/member/' + uid) : ('profile/' + uid)), { headers: { Authorization: 'Bearer ' + token }, muteHttpExceptions: true });
+    if (res.getResponseCode() === 200) { var data = JSON.parse(res.getContentText()); if (data && data.displayName) { var nm = _sn(data.displayName); if (cache) cache.put(cKey, nm, 21600); return nm; } }
+  } catch (_) {}
+  return 'สมาชิก LINE';
+}
+function parseQueryString_(qs) { var obj = {}; String(qs || '').split('&').forEach(function (pair) { var p = pair.split('='); if (p.length === 2) obj[decodeURIComponent(p[0])] = decodeURIComponent(p[1]); }); return obj; }
+function fAssign_(b) { for (var i = 1; i < arguments.length; i++) { var o = arguments[i]; if (o) Object.keys(o).forEach(function (k) { if (o[k] !== undefined) b[k] = o[k]; }); } return b; }
+function fTxt(t, o) { return fAssign_({ type: 'text', text: sanitizeNoEmoji(String(t == null ? '-' : t)) }, o); }
+function fFT(t, s, c, b, o) { var x = { size: s, color: c }; if (b) x.weight = 'bold'; if (o) fAssign_(x, o); return fTxt(t, x); }
+function fBox(layout, contents, o) { return fAssign_({ type: 'box', layout: layout, contents: contents }, o); }
+function fV(c, o) { return fBox('vertical', c, o); }
+function fBtn(style, action, color) { var b = { type: 'button', style: style, height: 'sm', action: action }; if (color) b.color = color; return b; }
+function fSep(col, m) { var s = { type: 'separator', color: col }; if (m) s.margin = m; return s; }
+function fLinkFt(url, lbl) { return url ? fV([fBtn('link', { type: 'uri', label: lbl, uri: url })]) : null; }
+function fWarnBox_(t, m) { return fV([fFT(t, 'xs', '#b45309', 1, { wrap: true })], { backgroundColor: '#fffbeb', cornerRadius: 'md', paddingAll: 'sm', margin: m || 'sm' }); }
+function fRow(lbl, val, bold, col, wrap) { return fBox('baseline', [fFT(lbl, 'sm', '#64748b', 0, { flex: 2 }), fFT(val || '-', 'sm', col || '#334155', bold, { flex: 5, wrap: wrap || undefined })], { spacing: 'sm' }); }
+function fBar(pct, fillCol) { var p = Math.max(0, Math.min(100, Number(pct) || 0)); return fBox('horizontal', [fV([], { width: (p > 0 ? p : 1) + '%', height: '8px', backgroundColor: p > 0 ? fillCol : '#e2e8f0', cornerRadius: 'md' })], { height: '8px', backgroundColor: '#e2e8f0', cornerRadius: 'md', margin: 'md' }); }
+function fBubble(bgHdr, hdrItems, bodyItems, footerBox) { var b = { type: 'bubble', size: 'mega', styles: { header: { backgroundColor: bgHdr } }, header: fV(hdrItems), body: fV(bodyItems, { spacing: 'sm' }) }; if (footerBox) b.footer = footerBox; return b; }
+function wrapFlex_(alt, contents) { return { type: 'flex', altText: sanitizeNoEmoji(alt).slice(0, 400), contents: contents }; }
+function getAptStatusColor_(st) { var s = normalizeStatus_(st); return s === STATUS.COMPLETED ? '#059669' : (s === STATUS.CANCELLED ? '#dc2626' : '#0284c7'); }
+function getAptFlexTheme_(st, isUpd, isReop) {
+  var s = normalizeStatus_(st); if (s === STATUS.COMPLETED) return { tag: '[แจ้งเตือนสิ้นสุดการนัดหมาย]', stColor: '#059669', bgHdr: '#ecfdf5', hdrColor: '#065f46', subColor: '#047857', sepColor: '#a7f3d0' };
+  if (s === STATUS.CANCELLED) return { tag: '[แจ้งเตือนยกเลิกการนัดหมาย]', stColor: '#dc2626', bgHdr: '#fef2f2', hdrColor: '#991b1b', subColor: '#b91c1c', sepColor: '#fecaca' };
+  return isUpd ? (isReop ? { tag: '[แจ้งเตือนการคืนสถานะนัดหมาย]', stColor: '#0284c7', bgHdr: '#eff6ff', hdrColor: '#1d4ed8', subColor: '#2563eb', sepColor: '#bfdbfe' } : { tag: '[แจ้งเตือนการอัปเดตนัดหมาย]', stColor: '#0284c7', bgHdr: '#eef2ff', hdrColor: '#4338ca', subColor: '#4f46e5', sepColor: '#c7d2fe' }) : { tag: '[แจ้งเตือนนัดหมายใหม่]', stColor: '#0284c7', bgHdr: '#f0f9ff', hdrColor: '#0369a1', subColor: '#0284c7', sepColor: '#bae6fd' };
+}
+function buildStatusResultFlex_(apt, actionType, actingUser, reason, nowTime) {
+  var isC = actionType === 'COMPLETED' || actionType === 'quickComplete', hdr = isC ? '[บันทึกสิ้นสุดนัดหมายเรียบร้อย]' : '[บันทึกยกเลิกนัดหมายเรียบร้อย]', sc = isC ? '#059669' : '#dc2626';
+  var rows = [fRow('สถานะ', isC ? '[สิ้นสุดการนัดหมาย]' : '[ยกเลิกการนัดหมาย]', 1, sc), fRow(isC ? 'ผู้เสร็จสิ้น' : 'ผู้ยกเลิก', actingUser || 'สมาชิก LINE', 1, '#1e293b')]; if (!isC && reason) rows.push(fRow('สาเหตุ', reason, 0, '#dc2626', true));
+  if (apt && apt.appointmentDate) rows.push(fRow('วันนัด', fmtThaiDate_(apt.appointmentDate) + ' (' + (apt.appointmentTime || '-') + ' น.)', 0, '#475569')); if (apt && apt.location) rows.push(fRow('สถานที่', apt.location, 0, '#334155', true));
+  if (apt && apt.contactPerson) rows.push(fRow('ผู้นัดพบ', apt.contactPerson, 0, '#334155', true)); if (apt && apt.createdBy) rows.push(fRow('ผู้สร้าง', apt.createdBy, 0, '#64748b'));
+  return wrapFlex_(hdr + ' [' + ((apt && apt.id) || '') + '] ' + ((apt && apt.title) || ''), fBubble(isC ? '#ecfdf5' : '#fef2f2', [fBox('baseline', [fFT(hdr, 'sm', isC ? '#065f46' : '#991b1b', 1, { flex: 8 }), fFT((nowTime || '') + ' น.', 'xs', '#64748b', 0, { align: 'end', flex: 4 })]), fFT((apt && apt.id) || '-', 'xs', sc, 1, { margin: 'xs' })], [fFT((apt && apt.title) || '-', 'md', '#0f172a', 1, { wrap: true }), fSep(isC ? '#a7f3d0' : '#fecaca', 'sm'), fV(rows, { spacing: 'xs', margin: 'md' })]));
+}
+function buildNoticeFlex_(id, title, desc, curStatus, actor, reason) {
+  var rows = [], bodyItems = [fFT(title || 'รายการนี้ได้รับการดำเนินการไปแล้ว', 'md', '#1e293b', 1, { wrap: true }), fSep('#fde68a', 'sm'), fFT(desc || '', 'sm', '#64748b', 0, { wrap: true })];
+  if (curStatus) rows.push(fRow('สถานะปัจจุบัน', '[' + curStatus + ']', 1, getAptStatusColor_(curStatus))); if (actor) rows.push(fRow('ดำเนินการโดย', actor + (reason ? ' (' + reason + ')' : ''), 0, '#475569', true));
+  if (rows.length) bodyItems.push(fV(rows, { spacing: 'xs', margin: 'sm' }));
+  return wrapFlex_('[แจ้งเตือน] นัดหมาย [' + id + '] ' + (desc || ''), fBubble('#fffbeb', [fFT('[แจ้งเตือนสถานะนัดหมาย]', 'sm', '#b45309', 1), fFT(id || '-', 'xs', '#92400e', 1, { margin: 'xs' })], bodyItems));
+}
+function buildQuotaFlex_(used, limit, webAppUrl) {
+  var uUsed = Math.max(0, Number(used) || 0), uLim = Math.max(1, Number(limit) || 300), rem = Math.max(0, uLim - uUsed), pct = Math.min(100, Math.round((uUsed / uLim) * 100));
+  var t = pct >= 90 ? { bg: '#fef2f2', hc: '#991b1b', sc: '#dc2626', bc: '#ef4444', sep: '#fecaca', st: '[วิกฤต - ใกล้เต็มโควตา]' } : (pct >= 80 ? { bg: '#fffbeb', hc: '#92400e', sc: '#d97706', bc: '#f59e0b', sep: '#fde68a', st: '[เฝ้าระวัง - ใช้ไปเกิน 80%]' } : { bg: '#ecfdf5', hc: '#065f46', sc: '#047857', bc: '#10b981', sep: '#a7f3d0', st: '[สถานะปกติ - พร้อมใช้งาน]' });
+  return wrapFlex_('[โควตา LINE] ใช้ไปแล้ว ' + uUsed + '/' + uLim + ' (' + pct + '%)', fBubble(t.bg, [fFT('[สถานะโควตาข้อความ LINE]', 'sm', t.hc, 1), fFT('โควตาการส่งข้อความแจ้งเตือนประจำเดือน', 'xs', t.sc, 0, { margin: 'xs' })], [fFT('อัตราการใช้งาน: ' + pct + '%', 'md', '#0f172a', 1), fBar(pct, t.bc), fSep(t.sep, 'md'), fV([fRow('ใช้ไปแล้ว', uUsed + ' / ' + uLim + ' ข้อความ (' + pct + '%)', 1, '#0f172a'), fRow('คงเหลือ', rem + ' ข้อความ', 1, t.sc), fRow('ระดับเตือน', t.st, 1, t.sc)], { spacing: 'xs', margin: 'md' })], fLinkFt(webAppUrl, 'เปิดหน้าตั้งค่าและตารางงาน')));
+}
+function buildHelpFlex_(webAppUrl) {
+  var cmds = [['วันนี้', 'ดูนัดหมายเฉพาะวันนี้'], ['พรุ่งนี้', 'ดูนัดหมายวันพรุ่งนี้'], ['สัปดาห์นี้', 'ดูนัดหมาย 7 วันข้างหน้า'], ['ค้างอยู่', 'ดูนัดหมายที่เลยกำหนดเวลา'], ['ทั้งหมด', 'ดูนัดหมายรอพบทั้งหมด'], ['เดือนนี้', 'ดูรายการงานประจำเดือนนี้'], ['ปีนี้', 'สรุปผลงานและสถิติประจำปี'], ['โควตา', 'เช็คโควตาข้อความ LINE'], ['ค้นหา <คำ>', 'ค้นหาจากชื่อ งาน หรือสถานที่'], ['สร้างนัด / สร้างงาน', 'เช่น สร้างนัด พรุ่งนี้ 10:30 / ประชุม / ห้อง B / คุณสมชาย'], ['ผูกบัญชี / รีเซ็ตรหัส', 'ผูก LINE หรือขอ OTP รีเซ็ตรหัส (แชทส่วนตัว 1-on-1)']];
+  var rows = cmds.map(function (c) { return fBox('horizontal', [fFT(c[0], 'sm', '#4f46e5', 1, { flex: 4 }), fFT(c[1], 'sm', '#64748b', 0, { flex: 6, wrap: true })], { spacing: 'sm', margin: 'xs' }); }), qBtn = function (l, c) { return fBtn('primary', { type: 'message', label: l, text: l }, c || '#4f46e5'); };
+  var ftItems = [fBox('horizontal', [qBtn('วันนี้'), qBtn('พรุ่งนี้')], { spacing: 'sm' }), fBox('horizontal', [qBtn('ค้างอยู่', '#dc2626'), qBtn('ทั้งหมด', '#0284c7')], { spacing: 'sm' }), fBox('horizontal', [qBtn('ปีนี้', '#059669'), qBtn('โควตา', '#334155')], { spacing: 'sm' })];
+  if (webAppUrl) ftItems.push(fBtn('link', { type: 'uri', label: 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }));
+  return wrapFlex_('[คำสั่งตรวจสอบตารางงาน] แตะเพื่อดูคำสั่งทั้งหมด', fBubble('#eef2ff', [fFT('[คำสั่งตรวจสอบตารางงาน]', 'sm', '#4338ca', 1), fFT('แตะปุ่มด้านล่างหรือพิมพ์คำสั่งเพื่อค้นหา', 'xs', '#4f46e5', 0, { margin: 'xs' })], [fFT('คำสั่งลัดที่ใช้งานบ่อย:', 'sm', '#0f172a', 1), fSep('#c7d2fe'), fV(rows, { spacing: 'xs', margin: 'md' }), fFT('รองรับคำสั่งสั้นทันที หรือพิมพ์ "คิว ..." ตามเดิม', 'xxs', '#64748b', 0, { margin: 'sm' })], fV(ftItems, { spacing: 'sm' })));
+}
+function buildQueueFlex_(title, count, items, webAppUrl, mask, opts) {
+  var v = (opts && opts.variant) || 'default', t = v === 'overdue' ? { bg: '#fef2f2', hc: '#991b1b', sc: '#dc2626', sep: '#fecaca', empty: 'ไม่มีนัดหมายที่ค้างหรือเลยกำหนดเวลา' } : (v === 'today' ? { bg: '#fffbeb', hc: '#92400e', sc: '#d97706', sep: '#fde68a', empty: 'ไม่มีนัดหมายสำหรับวันนี้' } : { bg: '#eef2ff', hc: '#3730a3', sc: '#4f46e5', sep: '#c7d2fe', empty: 'ไม่มีรายการนัดหมายตามเงื่อนไขที่เลือก' });
+  var safeItems = Array.isArray(items) ? items : [], rows = []; safeItems.forEach(function (a, i) {
+    var c = sanitizeNoEmoji(a.contactPerson || '-'); if (mask && c.length > 2) c = c.slice(0, 2) + '***'; var st = normalizeStatus_(a.status), stCol = v === 'overdue' && st === STATUS.CONFIRMED ? '#dc2626' : getAptStatusColor_(st); if (i > 0) rows.push(fSep('#e2e8f0', 'md'));
+    rows.push(fBox('horizontal', [fV([], { width: '4px', backgroundColor: stCol, cornerRadius: 'sm' }), fV([fBox('baseline', [fFT((i + 1) + '. ' + (a.appointmentDate ? fmtThaiDate_(a.appointmentDate) : '-') + ' ' + (a.appointmentTime ? a.appointmentTime + ' น.' : '-'), 'xs', '#475569', 1, { flex: 6 }), fFT('[' + st + ']', 'xs', stCol, 1, { align: 'end', flex: 4 })], { spacing: 'sm' }), fFT(a.title || '-', 'sm', '#0f172a', 1, { wrap: true }), fFT('สถานที่: ' + (a.location || '-') + ' | ผู้นัด: ' + c, 'xs', '#64748b', 0, { wrap: true })], { spacing: 'xs', flex: 1 })], { spacing: 'sm', margin: 'md' }));
+  }); if (!safeItems.length) rows.push(fFT(t.empty, 'sm', '#64748b', 0, { margin: 'md' }));
+  return wrapFlex_(title + ' (' + count + ' รายการ)', fBubble(t.bg, [fFT(title, 'sm', t.hc, 1, { wrap: true }), fFT('พบ ' + count + ' รายการ' + (count > safeItems.length ? ' (แสดง ' + safeItems.length + ' รายการแรก)' : ''), 'xs', t.sc, 0, { margin: 'xs' })], [fFT('รายการนัดหมาย:', 'sm', '#0f172a', 1), fSep(t.sep), fV(rows)], fLinkFt(webAppUrl, 'เปิดดูตารางงานทั้งหมดบนเว็บแอป')));
+}
+function buildYearStatsFlex_(year, total, act, comp, canc, rate, sampleItems, webAppUrl) {
+  var safeRate = Math.max(0, Math.min(100, Number(rate) || 0)), yRow = function (lbl, val, col) { return fBox('baseline', [fFT(lbl, 'sm', '#64748b', 0, { flex: 4 }), fFT(val, 'sm', col || '#1e293b', 1, { flex: 6 })], { spacing: 'sm' }); };
+  return wrapFlex_('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + '] รวม ' + total + ' งาน', fBubble('#eef2ff', [fFT('[สรุปสถิติประจำปี พ.ศ. ' + (year + 543) + ']', 'sm', '#4338ca', 1), fFT('สรุปผลงานและการดำเนินงานตลอดทั้งปี', 'xs', '#4f46e5', 0, { margin: 'xs' })], [fFT('ภาพรวมผลงานประจำปี:', 'sm', '#0f172a', 1), fSep('#c7d2fe'), fV([yRow('งานทั้งหมด', total + ' งาน', '#0f172a'), yRow('เริ่มนัด', act + ' งาน', '#0284c7'), yRow('สิ้นสุดการนัดหมาย', comp + ' งาน (สำเร็จ ' + safeRate + '%)', '#059669'), yRow('ยกเลิกการนัดหมาย', canc + ' งาน', '#dc2626')], { spacing: 'xs', margin: 'md' }), fBar(safeRate, '#10b981')], fLinkFt(webAppUrl, 'เปิดดูแดชบอร์ดรายปีบนเว็บแอป')));
+}
+function getValidMapUri_(raw) { var s = sanitizeNoEmoji(raw || '').trim(); if (!s) return ''; if (/^https?:\/\//i.test(s)) return s.indexOf(' ') !== -1 ? s.replace(/ /g, '%20') : s; var ll = s.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/); return ll ? ('https://www.google.com/maps?q=' + ll[1] + ',' + ll[2]) : ''; }
+function buildAptBubble_(apt, opts) {
+  opts = opts || {}; var isUpd = Boolean(opts.isUpdate), webAppUrl = opts.webAppUrl || '', mapUri = getValidMapUri_(apt.mapUrl), c = sanitizeNoEmoji(apt.contactPerson || '-'); if (opts.maskContact && c.length > 2) c = c.slice(0, 2) + '***';
+  var creator = sanitizeNoEmoji(apt.createdBy || apt.updatedBy || 'ผู้ใช้งานระบบ'), st = normalizeStatus_(apt.status), theme = getAptFlexTheme_(st, isUpd, Boolean(apt.reopened));
+  var infoRows = [fRow('วันนัด', fmtThaiDate_(apt.appointmentDate), 1, '#0f172a'), fRow('เวลา', (apt.appointmentTime || '-') + ' น.', 1, '#0f172a'), fRow('สถานที่', apt.location || '-', 0, '#334155', true), fRow('ผู้นัดพบ', c, 0, '#334155', true), fRow('สถานะ', '[' + st + ']', 1, theme.stColor), fRow('ผู้สร้าง', creator, 0, '#64748b')];
+  if (st === STATUS.COMPLETED && apt.statusChangedBy) infoRows.push(fRow('ผู้เสร็จสิ้น', apt.statusChangedBy, 1, '#059669'));
+  else if (st === STATUS.CANCELLED) { if (apt.statusChangedBy) infoRows.push(fRow('ผู้ยกเลิก', apt.statusChangedBy, 1, '#dc2626')); if (apt.statusReason) infoRows.push(fRow('สาเหตุ', apt.statusReason, 0, '#dc2626', true)); }
+  else if (isUpd && apt.updatedBy && apt.updatedBy !== creator) infoRows.push(fRow('ผู้แก้ไข', apt.updatedBy, 0, '#64748b')); if (apt.notes) infoRows.push(fRow('หมายเหตุ', apt.notes, 0, '#475569', true));
+  var bodyItems = [fFT(apt.title || '-', 'md', '#0f172a', 1, { wrap: true }), fSep(opts.sepColorOverride || theme.sepColor), fV(infoRows, { spacing: 'sm' })]; if (opts.quotaWarnText) bodyItems.push(fWarnBox_(opts.quotaWarnText, 'sm')); var ft = null, linkBtns = [];
+  if (mapUri) linkBtns.push(fBtn('link', { type: 'uri', label: 'ดูแผนที่นำทาง', uri: mapUri })); if (webAppUrl) linkBtns.push(fBtn('link', { type: 'uri', label: st === STATUS.CONFIRMED ? 'เปิดดูรายละเอียดบนเว็บแอป' : 'เปิดดูตารางงานบนเว็บแอป', uri: webAppUrl }));
+  if (st === STATUS.CONFIRMED) {
+    var actionBtns = [fBtn('primary', { type: 'postback', label: 'เสร็จสิ้น', data: 'action=quickComplete&id=' + encodeURIComponent(apt.id), displayText: 'บันทึกเสร็จสิ้น [' + apt.id + ']' }, '#10b981'), fBtn('primary', { type: 'postback', label: 'ยกเลิก', data: 'action=quickCancel&id=' + encodeURIComponent(apt.id), displayText: 'ขอยกเลิกนัดหมาย [' + apt.id + ']' }, '#ef4444')];
+    ft = linkBtns.length ? fV([fBox('horizontal', actionBtns, { spacing: 'md' })].concat(linkBtns), { spacing: 'sm', paddingTop: 'sm' }) : fBox('horizontal', actionBtns, { spacing: 'md', paddingTop: 'sm' });
+  } else if (linkBtns.length) ft = fV(linkBtns, { spacing: 'xs', paddingTop: 'sm' });
+  var b = fBubble(opts.bgHdrOverride || theme.bgHdr, [fFT(opts.hdrOverride || theme.tag, 'sm', opts.hdrColorOverride || theme.hdrColor, 1), fFT(apt.id || '-', 'xs', opts.subColorOverride || theme.subColor, 1, { margin: 'xs' })], bodyItems, ft);
+  b.header.paddingBottom = 'md'; b.body.spacing = 'md'; return b;
+}
+function buildAptFlexMsg_(apt, isUpdate, maskContact, webAppUrl) { var theme = getAptFlexTheme_(normalizeStatus_(apt.status), Boolean(isUpdate), Boolean(apt.reopened)); return wrapFlex_(theme.tag + ' [' + (apt.id || '') + '] ' + sanitizeNoEmoji(apt.title || ''), buildAptBubble_(apt, { isUpdate: isUpdate, maskContact: maskContact, webAppUrl: webAppUrl })); }
+function buildReminderNotificationFlex_(hourly, digest, todayDateStr, maskContact, webAppUrl, qInfo) {
+  var hList = Array.isArray(hourly) ? hourly : [], dList = Array.isArray(digest) ? digest : [], entries = []; hList.forEach(function (a) { entries.push({ apt: a, kind: 'HOURLY' }); }); dList.forEach(function (a) { entries.push({ apt: a, kind: 'DAILY' }); });
+  if (!entries.length) return buildQueueFlex_('[ไม่มีนัดหมายที่ถึงกำหนดแจ้งเตือน]', 0, [], webAppUrl, maskContact);
+  var qWarn = (qInfo && qInfo.limit > 0 && (qInfo.used / qInfo.limit) >= 0.8) ? ('[เตือนโควตา LINE] ใช้ไปแล้ว ' + qInfo.used + '/' + qInfo.limit + ' ข้อความ') : '', dailyTag = '[สรุปคิวงานล่วงหน้า ' + fmtThaiDate_(todayDateStr) + ']';
+  var makeBubble = function (e, warn) { var isH = e.kind === 'HOURLY'; return buildAptBubble_(e.apt, { maskContact: maskContact, webAppUrl: webAppUrl, hdrOverride: isH ? '[แจ้งเตือนก่อนเวลานัด]' : dailyTag, bgHdrOverride: isH ? '#fffbeb' : '#f0f9ff', hdrColorOverride: isH ? '#b45309' : '#0369a1', subColorOverride: isH ? '#d97706' : '#0284c7', sepColorOverride: isH ? '#fde68a' : '#bae6fd', quotaWarnText: warn || '' }); };
+  if (entries.length === 1) return wrapFlex_((entries[0].kind === 'HOURLY' ? '[แจ้งเตือนก่อนเวลานัด]' : '[สรุปคิวงานล่วงหน้า]') + ' [' + (entries[0].apt.id || '') + '] ' + (entries[0].apt.title || ''), makeBubble(entries[0], qWarn));
+  var bubbles = entries.slice(0, entries.length > 9 ? 9 : entries.length).map(function (e, idx) { return makeBubble(e, entries.length <= 9 && idx === 0 ? qWarn : ''); }); if (entries.length > 9) {
+    var ov = entries.slice(9), ovRows = ov.slice(0, 6).map(function (e, i) { return fBox('baseline', [fFT((10 + i) + '. ' + (e.apt.appointmentTime ? e.apt.appointmentTime + ' น.' : '-'), 'xs', '#4f46e5', 1, { flex: 3 }), fFT(e.apt.title || '-', 'xs', '#1e293b', 0, { flex: 7, wrap: true })], { spacing: 'sm', margin: 'xs' }); });
+    if (ov.length > 6) ovRows.push(fFT('...และอีก ' + (ov.length - 6) + ' รายการบนเว็บแอป', 'xs', '#64748b', 0, { margin: 'sm' }));
+    var sumBody = [fFT('รายการนัดหมายที่เหลืออีก ' + ov.length + ' รายการ', 'md', '#0f172a', 1, { wrap: true }), fSep('#c7d2fe'), fV(ovRows, { spacing: 'xs', margin: 'sm' })]; if (qWarn) sumBody.push(fWarnBox_(qWarn, 'md'));
+    bubbles.push(fBubble('#eef2ff', [fFT('[สรุปคิวงานเพิ่มเติม]', 'sm', '#4338ca', 1), fFT('รวมทั้งหมดในรอบนี้ ' + entries.length + ' รายการ', 'xs', '#4f46e5', 0, { margin: 'xs' })], sumBody, fLinkFt(webAppUrl, 'ดูตารางงานทั้งหมดบนเว็บแอป')));
+  }
+  var alt = hList.length && dList.length ? ('[แจ้งเตือน ' + hList.length + ' นัดด่วน + ' + dList.length + ' คิวล่วงหน้า]') : (hList.length ? '[แจ้งเตือนก่อนเวลานัด] ' + hList.length + ' รายการ' : dailyTag + ' ' + dList.length + ' รายการ');
+  return wrapFlex_(alt, { type: 'carousel', contents: bubbles });
+}
+function buildOtpFlex_(username, otp, mins) { var m = mins || 10; return wrapFlex_('[รหัส OTP รีเซ็ตรหัสผ่าน] ' + otp, fBubble('#eef2ff', [fFT('[รหัสยืนยันรีเซ็ตรหัสผ่าน (OTP)]', 'sm', '#4338ca', 1), fFT('บัญชี: ' + sanitizeNoEmoji(username || '-'), 'xs', '#4f46e5', 0, { margin: 'xs' })], [fFT('รหัสยืนยันของคุณคือ', 'xs', '#64748b', 0), fFT(String(otp || ''), 'xxl', '#1e293b', 1, { margin: 'xs', align: 'center' }), fSep('#c7d2fe', 'md'), fWarnBox_('รหัสนี้มีอายุ ' + m + ' นาที และใช้ได้เพียงครั้งเดียว ห้ามเปิดเผยรหัสนี้ให้ผู้อื่น', 'sm')])); }
+function testNotification_(isDry, custom) {
+  var t = getProp_('LINE_TARGET_ID'); if (custom) return pushLine_(t, custom, Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
+  var sample = { id: 'APT-TEST-001', title: 'ทดสอบระบบแจ้งเตือนแบบโต้ตอบ (Zero-Emoji)', appointmentDate: _gb().dateStr, appointmentTime: '14:00', location: 'ห้องประชุมใหญ่ ชั้น 5', contactPerson: 'คุณทดสอบ', status: S_CF, createdBy: 'ผู้ดูแลระบบ', notes: 'ทดสอบปุ่มเสร็จสิ้นและยกเลิกบน LINE Flex Message' };
+  return pushLine_(t, buildAptFlexMsg_(sample, false, false, ''), Utilities.getUuid(), isDry, isDry ? 'DRY_RUN' : 'MANUAL_TEST', 'TEST');
+}
+function sendInstantAptNotification_(apt, isUpdate) {
+  var target = getProp_('LINE_TARGET_ID'); if (!target || !apt) return { sent: false, reason: 'NO_TARGET' };
+  var m = getMetaMap_(), st = _ns(apt.status), notifType = st === S_CP ? 'INSTANT_COMPLETED' : (st === S_CN ? 'INSTANT_CANCELLED' : (isUpdate && apt.reopened ? 'INSTANT_REOPEN' : (isUpdate ? 'INSTANT_UPDATE' : 'INSTANT_CREATE')));
+  var pushRes = pushLine_(target, buildAptFlexMsg_(apt, isUpdate, isTrue_(m.PRIVACY_MASK_CONTACT), m.WEB_APP_URL || ''), Utilities.getUuid(), false, notifType, apt.id);
+  if (!pushRes.ok) return { sent: false, httpStatus: pushRes.httpStatus, error: pushRes.error, preQRev: null, meta: null }; var qUp = bumpQuotaUsed_(1); return { sent: true, httpStatus: pushRes.httpStatus, error: null, preQRev: qUp.preQRev, meta: qUp.meta };
+}
+function refreshLineQuotaCache_() {
+  var token = getProp_('LINE_CHANNEL_ACCESS_TOKEN'), m = getMetaMap_(), lim = +m.CACHED_QUOTA_LIMIT || 300, used = +m.CACHED_QUOTA_USED || 0; if (!token) return { limit: lim, used: used }; try {
+    var hdrs = { Authorization: 'Bearer ' + token }, resps = UrlFetchApp.fetchAll([{ url: LN_API + 'message/quota', method: 'get', headers: hdrs, muteHttpExceptions: true }, { url: LN_API + 'message/quota/consumption', method: 'get', headers: hdrs, muteHttpExceptions: true }]);
+    if (resps[0].getResponseCode() === 200) lim = +JSON.parse(resps[0].getContentText()).value || lim; if (resps[1].getResponseCode() === 200) used = +JSON.parse(resps[1].getContentText()).totalUsage || used;
+    withLock_(function () { resetLock_(); updateMeta_({ CACHED_QUOTA_LIMIT: String(lim), CACHED_QUOTA_USED: String(used), QUOTA_UPDATED_AT: _gb().isoStr }); }); return { limit: lim, used: used };
+  } catch (e) { return { limit: lim, used: used, error: e.message }; }
+}
+
+// === 9. LINE Webhook, Postback & Natural Command Router ===
+function handleLinePostback_(ev, gid, uid) {
+  var pbData = parseQueryString_((ev && ev.postback && ev.postback.data) || ''), action = pbData.action || '', id = pbData.id || ''; if (!id) return buildNoticeFlex_('-', 'ข้อมูลไม่ถูกต้อง', 'ไม่พบรหัสนัดหมายในการทำรายการ', '', '', '');
+  var actingUser = (action === 'quickComplete' || action === 'quickCancel') ? getLineUserName_(gid, uid, getProp_('LINE_CHANNEL_ACCESS_TOKEN')) : ''; return withLock_(function () {
+    resetLock_(); var targetApt = readAllApts_(false, true).filter(function (a) { return a.id === id; })[0], doneTtl = 'รายการนี้ได้รับการดำเนินการไปแล้ว';
+    if (!targetApt) return buildNoticeFlex_(id, 'ไม่พบรายการนัดหมาย', 'ไม่พบรายการนัดหมาย ' + id + ' ในระบบ (อาจถูกลบไปแล้ว)', '', '', ''); var curSt = _ns(targetApt.status);
+    if (curSt === S_CP) return buildNoticeFlex_(id, doneTtl, 'นัดหมายนี้ได้รับการบันทึกเสร็จสิ้นไปแล้ว', S_CP, (targetApt.statusChangedBy || 'ผู้ใช้งาน') + (targetApt.statusChangedAt ? ' เมื่อ ' + fmtThaiDate_(targetApt.statusChangedAt.slice(0, 10)) : ''), '');
+    if (curSt === S_CN) return buildNoticeFlex_(id, doneTtl, 'นัดหมายนี้ได้รับการยกเลิกไปแล้ว', S_CN, targetApt.statusChangedBy || 'ผู้ใช้งาน', targetApt.statusReason || '');
+    if (action === 'quickComplete') { updateApt_(id, { status: S_CP, statusChangedBy: actingUser, statusReason: 'เสร็จสิ้นการนัดหมายผ่าน LINE', updatedBy: actingUser }, targetApt.updatedAt, 'เสร็จสิ้นผ่าน LINE', actingUser); bumpDataRev_(['apts', 'relogs']); return buildStatusResultFlex_(targetApt, 'COMPLETED', actingUser, '', _gb().timeStr); }
+    if (action === 'quickCancel') { var cancelReason = 'ยกเลิกผ่าน LINE โดย ' + actingUser; updateApt_(id, { status: S_CN, statusChangedBy: actingUser, statusReason: cancelReason, updatedBy: actingUser }, targetApt.updatedAt, cancelReason, actingUser); bumpDataRev_(['apts', 'relogs']); return buildStatusResultFlex_(targetApt, 'CANCELLED', actingUser, cancelReason, _gb().timeStr); }
+    return null;
+  });
+}
+function yr2ceGas_(y) { var n = Number(y); return (!n && y !== '0') ? 0 : ((n < 100) ? (n >= 40 ? 2500 + n - 543 : 2000 + n) : (n > 2400 ? n - 543 : n)); }
+function pTmGas_(r) { var s = tr_(r).replace(/^(?:เวลา|เวลานัด)\s*[:：]?\s*/, '').trim(); if (!s) return null; var mg = s.match(/^(\d{1,2})\s*โมง(ครึ่ง)?(?:\s*[-~ถึง].*)?$/i); if (mg) return +mg[1] <= 23 ? (pad2_(mg[1]) + ':' + (mg[2] ? '30' : '00')) : null; var m = s.replace(/(?:\s*[-~ถึง]\s*\d{1,2}(?:[:.]\d{2})?)?\s*(?:น\.?|โมง)?$/i, '').replace(/\./g, ':').trim().match(/^(\d{1,2}):(\d{2})$/); return (!m || +m[1] > 23 || +m[2] > 59) ? null : (pad2_(m[1]) + ':' + pad2_(m[2])); }
+function pRemGas_(s) { var dm = s.match(/(\d+)\s*(?:วัน|ว\.?|d)/i), hm = s.match(/(\d+)\s*(?:ชั่วโมง|ชม\.?|h)/i); return { d: dm ? +dm[1] : 0, h: hm ? +hm[1] : 0 }; }
+function parseSmartCreateGas_(arg, now) {
+  var cm = arg.match(CREATE_CMD_RE); if (!cm) return null; var body = (cm[1] || '').trim(); if (!body) return { help: true }; var pDt = function (r) {
+    var s = _sn(r).replace(/^(?:วันที่|วันนัด|วัน(?=\s|[:：]))\s*[:：]?\s*/, '').trim(); if (!s) return null;
+    if (s === 'วันนี้') return now.dateStr; if (s === 'พรุ่งนี้') return _gb(now.epochMs + 86400000).dateStr; if (s === 'มะรืน' || s === 'มะรืนนี้') return _gb(now.epochMs + 172800000).dateStr;
+    var y = 0, mo = 0, dy = 0, dm = s.match(/^(\d{1,2})[-/](\d{1,2})$/), m1 = !dm && s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/), m2 = !m1 && s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})$/), th = !m2 && s.match(/^(\d{1,2})\s*([\u0E01-\u0E4E.]+?)(?:\s*(\d{2,4}))?$/);
+    if (dm) { y = now.year; mo = +dm[2]; dy = +dm[1]; } else if (m1) { y = yr2ceGas_(m1[1]); mo = +m1[2]; dy = +m1[3]; } else if (m2) { dy = +m2[1]; mo = +m2[2]; y = yr2ceGas_(m2[3]); } else if (th) { var ms = th[2].trim(); mo = TH_MO_MAP[ms] || TH_MO_MAP[ms.replace(/\./g, '')] || 0; if (!mo) return null; y = th[3] ? yr2ceGas_(th[3]) : now.year; dy = +th[1]; } else return null;
+    var mx = (mo >= 1 && mo <= 12 && y >= 1900 && y <= 3000) ? new Date(Date.UTC(y, mo, 0)).getUTCDate() : 0; return (!mx || dy < 1 || dy > mx) ? null : (y + '-' + pad2_(mo) + '-' + pad2_(dy));
+  }; var title = '', dateRaw = '', timeRaw = '', loc = '', contact = '', notes = '', mapUrl = '', rD = 0, rH = 0, lines = body.split(/\r?\n/).map(function (l) { return l.trim(); }).filter(Boolean); if (lines.length > 1 && lines.some(function (l) { return KV_RE.test(l); })) {
+    lines.forEach(function (l) {
+      var m = l.match(KV_RE); if (!m) return; var k = m[1], v = m[2].trim(); if (/^(?:หัวข้อ|งาน|เรื่อง)$/.test(k)) title = v; else if (/^(?:วันที่|วันนัด|วัน)$/.test(k)) dateRaw = v;
+      else if (k === 'วันเวลา') { var dm2 = v.match(/^(.*?)\s+(\d{1,2}(?:[:.]\d{2}|\s*โมง).*)$/); if (dm2) { dateRaw = dm2[1]; timeRaw = dm2[2]; } else { var p = v.split(/\s+/); dateRaw = p[0] || ''; timeRaw = p.slice(1).join(' '); } }
+      else if (/^(?:เวลา|เวลานัด)$/.test(k)) timeRaw = v; else if (/^(?:สถานที่|ที่นัดหมาย)$/.test(k)) loc = v; else if (/^(?:ผู้นัดพบ|ผู้นัด|ลูกค้า|ผู้ติดต่อ)$/.test(k)) contact = v;
+      else if (/^(?:เตือน|แจ้งเตือน)$/.test(k)) { var r = pRemGas_(v); rD = r.d; rH = r.h; } else if (/^(?:หมายเหตุ|รายละเอียด)$/.test(k)) notes = v; else if (/^(?:แผนที่|พิกัด)$/.test(k)) mapUrl = v;
+    }); if (dateRaw && !timeRaw) { var tm2 = dateRaw.match(/^(.+?)\s+(?:เวลา\s*)?(\d{1,2}[:.]\d{2}(?:\s*น\.?)?|\d{1,2}\s*โมง(?:ครึ่ง)?)$/i); if (tm2) { dateRaw = tm2[1]; timeRaw = tm2[2]; } }
+  } else {
+    var urls = [], safeBody = body.replace(/https?:\/\/\S+/gi, function (u) { urls.push(u); return '\x02' + (urls.length - 1) + '\x02'; }).replace(/(\d)\/(?=\d)/g, '$1\x01');
+    var hasSep = /[\/|]/.test(safeBody), segs = (hasSep ? safeBody.replace(/\r?\n/g, ' ').split(/\s*[\/|]\s*/) : (lines.length > 1 ? safeBody.split(/\r?\n/) : [safeBody])).map(function (s) { return s.replace(/\x01/g, '/').replace(/\x02(\d+)\x02/g, function (_, idx) { return urls[+idx] || ''; }).trim(); }).filter(Boolean), txtSegs = [];
+    segs.forEach(function (seg) {
+      if (/^(?:เตือน|แจ้งเตือน)\s+/i.test(seg)) { var r = pRemGas_(seg); rD = r.d; rH = r.h; return; } var w = seg; if (!dateRaw) { var dm3 = w.match(DT_TOK_RE); if (dm3 && pDt(dm3[1])) { dateRaw = dm3[1]; w = w.replace(dm3[0], ' ').trim(); } }
+      if (!timeRaw) { var tm3 = w.match(TM_TOK_RE); if (tm3 && pTmGas_(tm3[1])) { timeRaw = tm3[1]; w = w.replace(tm3[0], ' ').trim(); } } if (w) txtSegs.push(w);
+    }); title = txtSegs[0] || ''; loc = txtSegs[1] || ''; contact = txtSegs[2] || ''; notes = txtSegs.slice(3).join(' / ');
+  }
+  var aDate = pDt(dateRaw), aTime = pTmGas_(timeRaw), cTitle = _sn(title); if (!aDate || !aTime || !cTitle) return { error: 'รูปแบบไม่ครบ (ต้องมี วันที่ เวลา และหัวข้อ) เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมตรวจรับงาน / ห้อง B / คุณสมชาย' };
+  return { payload: { title: cTitle, appointmentDate: aDate, appointmentTime: aTime, location: _sn(loc) || 'ไม่ระบุสถานที่', contactPerson: _sn(contact), status: S_CF, remindDaysBefore: rD, remindHoursBefore: rH, notes: _sn(notes), mapUrl: _sn(mapUrl) } };
+}
+function handleWebhookCreateApt_(arg, gid, uid, webAppUrl, mask) {
+  var now = _gb(), parsed = parseSmartCreateGas_(arg, now); if (!parsed) return null;
+  if (parsed.help) return buildNoticeFlex_('-', 'วิธีพิมพ์สร้างนัดหมายในแชท', 'พิมพ์บรรทัดเดียวคั่นด้วย / เช่น:\nสร้างนัด พรุ่งนี้ 10:30 / ประชุมงาน / ห้อง B / คุณสมชาย\n(รองรับ สร้างงาน, วันนี้, พรุ่งนี้, มะรืน, วว/ดด/ปป หรือ 25 พ.ย. 69)', '', '', '');
+  if (parsed.error) return buildNoticeFlex_('-', 'รูปแบบการสร้างนัดไม่ถูกต้อง', parsed.error, '', '', '');
+  var actingUser = getLineUserName_(gid, uid, getProp_('LINE_CHANNEL_ACCESS_TOKEN')); parsed.payload.createdBy = actingUser; if (!parsed.payload.contactPerson) parsed.payload.contactPerson = actingUser; try {
+    return withLock_(function () {
+      resetLock_(); var conflicts = readAllApts_(false, true).filter(function (a) { return a.status !== S_CN && a.appointmentDate === parsed.payload.appointmentDate && a.appointmentTime === parsed.payload.appointmentTime; });
+      var apt = createApt_(parsed.payload); bumpDataRev_(['apts']); if (+apt.remindHoursBefore > 0) scheduleExactReminderForApt_(apt);
+      if (conflicts.length) return wrapFlex_('[แจ้งเตือนนัดหมายใหม่] [' + apt.id + '] ' + _sn(apt.title), buildAptBubble_(apt, { isUpdate: false, maskContact: mask, webAppUrl: webAppUrl, quotaWarnText: '[คำเตือนคิวชน] เวลานี้มีนัดหมายอื่นแล้ว ' + conflicts.length + ' งาน (' + conflicts.map(function (c) { return c.title; }).join(', ') + ')' }));
+      return buildAptFlexMsg_(apt, false, mask, webAppUrl);
+    });
+  } catch (e) { return buildNoticeFlex_('-', 'ไม่สามารถสร้างนัดหมายได้', e.message || String(e), '', '', ''); }
+}
+function handleLineWebhook_(body, qParams) {
+  var expKey = getProp_('WEBHOOK_SECRET_KEY'); if (expKey && String(qParams.webhookKey || '') !== expKey) return jErr_('INVALID_KEY'); var cache = null, grps = null, usrs = null; (body.events || []).forEach(function (ev) {
+    if (ev.type === 'message' && (!ev.message || ev.message.type !== 'text' || !WEBHOOK_CMD_RE.test(_sn(ev.message.text)))) return; if (!cache) cache = sc_();
+    if (cache && ev.webhookEventId) try { if (cache.get('WH_' + ev.webhookEventId)) return; cache.put('WH_' + ev.webhookEventId, '1', 600); } catch (_) {} var src = ev.source || {}, gid = src.groupId || src.roomId || '', uid = src.userId || '';
+    if (ev.type === 'join') { logNotif_('JOIN', '-', gid || uid, '200', '-', 'พบ ID สำหรับตั้งค่า: ' + (gid || uid)); return; }
+    if (!grps) { grps = getProp_('ALLOWED_GROUP_IDS').split(',').map(function (s) { return s.trim(); }).filter(Boolean); usrs = getProp_('ALLOWED_USER_IDS').split(',').map(function (s) { return s.trim(); }).filter(Boolean); var tId = getProp_('LINE_TARGET_ID').trim(); if (tId && grps.length && grps.indexOf(tId) === -1) grps.push(tId); }
+    var isAcctDm = !gid && ev.type === 'message' && ACCT_CMD_RE.test(_sn(ev.message.text)); if (!isAcctDm && (gid ? (grps.length && grps.indexOf(gid) === -1 && (!usrs.length || usrs.indexOf(uid) === -1)) : (usrs.length && usrs.indexOf(uid) === -1))) return;
+    if (ev.type === 'postback') { var pb = handleLinePostback_(ev, gid, uid); if (pb && ev.replyToken) sendLineReply_(ev.replyToken, pb); return; }
+    if (ev.type === 'message') { var reply = parseWebhookCmd_(ev.message.text, gid, uid); if (reply && ev.replyToken) sendLineReply_(ev.replyToken, reply); }
+  }); return json_({ ok: true });
+}
+function handleLineAccountCmd_(txt, gid, uid) {
+  if (/^ผูกบัญชี/i.test(txt)) {
+    if (gid) return buildNoticeFlex_('-', 'ไม่อนุญาตในแชทกลุ่ม', 'เพื่อความปลอดภัย กรุณาส่งคำสั่ง "ผูกบัญชี <รหัส 6 หลัก>" ในแชทส่วนตัว (1-on-1) กับบอท LINE เท่านั้น', '', '', '');
+    var m = txt.match(/^ผูกบัญชี\s+(\d{6})$/i); if (!m) return buildNoticeFlex_('-', 'วิธีผูกบัญชี LINE', 'เข้าสู่ระบบเว็บแอป -> กด "บัญชี / LINE" -> กด "สร้างรหัสผูกบัญชี LINE" แล้วนำคำสั่ง "ผูกบัญชี XXXXXX" มาส่งในแชทส่วนตัวนี้', '', '', '');
+    var c = sc_(), raw = c ? c.get('LN_BIND_' + m[1]) : null; if (!raw) return buildNoticeFlex_('-', 'รหัสผูกบัญชีไม่ถูกต้องหรือหมดอายุ', 'กรุณากดสร้างรหัสผูกบัญชีใหม่บนหน้าเว็บแอป', '', '', ''); var rec; try { rec = JSON.parse(raw); } catch (_) { rec = null; }
+    if (!rec || !rec.userId || Date.now() > (+rec.exp || 0)) { if (c) c.remove('LN_BIND_' + m[1]); return buildNoticeFlex_('-', 'รหัสผูกบัญชีหมดอายุแล้ว', 'กรุณากดสร้างรหัสผูกบัญชีใหม่บนหน้าเว็บแอป', '', '', ''); } var boundUn = ''; try {
+      withLock_(function () {
+        resetLock_(); var d = getSheetData_(SH_USERS, USER_COLS), found = findUserRow_(d, 'userId', rec.userId), luIdx = d.headers.indexOf('lineUserId'); if (!found) throw new Error('ไม่พบบัญชีผู้ใช้งานนี้ในระบบ');
+        if (getUserSuspensionState_(found.obj, _gb()).suspended) throw new Error('บัญชีนี้ถูกระงับการใช้งาน'); for (var j = 0; j < d.rows.length; j++) if (j !== found.idx && luIdx !== -1 && tr_(d.rows[j][luIdx]) === uid) patchUserRow_(d, j, { lineUserId: '' });
+        patchUserRow_(d, found.idx, { lineUserId: uid }); bumpDataRev_(['users']); c.remove('LN_BIND_' + m[1]); boundUn = found.obj.username;
+      });
+    } catch (e) { return buildNoticeFlex_('-', 'ผูกบัญชี LINE ไม่สำเร็จ', e.message || String(e), '', '', ''); }
+    return buildNoticeFlex_('-', 'ผูกบัญชี LINE สำเร็จ', 'ผูกบัญชี "' + boundUn + '" กับ LINE ของคุณเรียบร้อยแล้ว หากลืมรหัสผ่านสามารถพิมพ์ "รีเซ็ตรหัส" ในแชทนี้ได้ทันที', '', '', '');
+  }
+  if (gid) return buildNoticeFlex_('-', 'ไม่อนุญาตในแชทกลุ่ม', 'เพื่อความปลอดภัย ระบบไม่ส่งรหัส OTP ในแชทกลุ่ม กรุณาทักแชทส่วนตัว (1-on-1) กับบอท LINE แล้วพิมพ์ "รีเซ็ตรหัส" อีกครั้ง', '', '', '');
+  var target = readAllUsersInternal_().filter(function (u) { return u.lineUserId === uid; })[0];
+  if (!target) return buildNoticeFlex_('-', 'ยังไม่ได้ผูกบัญชี LINE', 'LINE ของคุณยังไม่ได้ผูกกับบัญชีผู้ใช้งานในระบบ กรุณาเข้าเว็บแอป -> กด "บัญชี / LINE" เพื่อสร้างรหัสผูกบัญชีก่อน', '', '', '');
+  var susp = getUserSuspensionState_(target, _gb()); if (susp.suspended) return buildNoticeFlex_('-', 'บัญชีถูกระงับการใช้งาน', susp.message, '', '', '');
+  var c2 = sc_(); if (c2 && c2.get('PWD_CD_' + target.username.toLowerCase())) return buildNoticeFlex_('-', 'กรุณารอสักครู่', 'เพิ่งส่งรหัส OTP ไปแล้ว กรุณารอ 60 วินาที ก่อนขอรหัสใหม่อีกครั้ง', '', '', '');
+  return buildOtpFlex_(target.username, storeResetOtp_(target.username.toLowerCase(), 600, false), 10);
+}
+function parseWebhookCmd_(raw, gid, uid) {
+  var txt = _sn(raw); if (!WEBHOOK_CMD_RE.test(txt)) return null; if (ACCT_CMD_RE.test(txt)) return handleLineAccountCmd_(txt, gid, uid); var m = getMetaMap_(), webAppUrl = m.WEB_APP_URL || '', mask = isTrue_(m.PRIVACY_MASK_CONTACT);
+  if (String(m.ENABLE_LINE_BOT_QUERY).toUpperCase() === 'FALSE') return buildNoticeFlex_('-', 'ระบบปิดค้นหาชั่วคราว', 'ผู้ดูแลระบบปิดการค้นหาผ่านแชทชั่วคราว กรุณาดูบนเว็บแอป', '', '', ''); var arg = txt.replace(/^คิว\s*/, '').trim();
+  if (!arg || arg === 'ช่วยเหลือ' || arg.toLowerCase() === 'help') return buildHelpFlex_(webAppUrl); if (arg === 'โควตา') return buildQuotaFlex_(m.CACHED_QUOTA_USED || '0', m.CACHED_QUOTA_LIMIT || '300', webAppUrl);
+  if (CREATE_KW_RE.test(arg)) return handleWebhookCreateApt_(arg, gid, uid, webAppUrl, mask);
+  var now = _gb(), list = readAllApts_(), sendQ = function (title, arr, opts) { var s = arr.sort(cmpSlot_); return buildQueueFlex_(title, s.length, s.slice(0, 5), webAppUrl, mask, opts); };
+  if (arg === 'ทั้งหมด' || arg === 'นัดทั้งหมด' || arg === 'งานทั้งหมด') return sendQ('[คิวนัดหมายที่กำลังจะมาถึงทั้งหมด]', list.filter(function (a) { return a.status === S_CF && a.appointmentDate >= now.dateStr; }));
+  if (arg === 'วันนี้' || arg === 'พรุ่งนี้') { var dt = arg === 'วันนี้' ? now.dateStr : _gb(now.epochMs + 86400000).dateStr; return sendQ('[คิวงาน' + arg + ' ' + fmtThaiDate_(dt) + ']', list.filter(function (a) { return a.appointmentDate === dt && a.status !== S_CN; }), arg === 'วันนี้' ? { variant: 'today' } : undefined); }
+  if (arg === 'สัปดาห์นี้') { var maxDt = _gb(now.epochMs + 604800000).dateStr; return sendQ('[คิวงานใน 7 วันข้างหน้า]', list.filter(function (a) { return a.appointmentDate && a.status !== S_CN && a.appointmentDate >= now.dateStr && a.appointmentDate <= maxDt; })); }
+  if (arg === 'ค้างอยู่') return sendQ('[คิวงานเลยกำหนดเวลา]', list.filter(function (a) { if (a.status !== S_CF || !a.appointmentDate) return false; if (a.appointmentDate < now.dateStr) return true; if (a.appointmentDate > now.dateStr) return false; var ep = bkkSlotToEpoch_(a.appointmentDate, a.appointmentTime || '23:59'); return ep !== null && now.epochMs > ep; }), { variant: 'overdue' });
+  if (arg === 'เดือนนี้') { var pfx = now.year + '-' + pad2_(now.month) + '-'; return sendQ('[งานเดือน' + TH_MONTHS[now.month - 1] + ' ' + (now.year + 543) + ']', list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(pfx) === 0; })); }
+  var mm = arg.match(/^เดือน\s+(\d{1,2})[-/](\d{4})$/);
+  if (mm) { var yr = +mm[2], mo = +mm[1]; if (yr > 2400) yr -= 543; return (mo >= 1 && mo <= 12) ? sendQ('[งานเดือน' + (TH_MONTHS[mo - 1] || mo) + ' ' + (yr + 543) + ']', list.filter(function (a) { return a.appointmentDate && a.appointmentDate.indexOf(yr + '-' + pad2_(mo) + '-') === 0; })) : buildNoticeFlex_('-', 'รูปแบบเดือนไม่ถูกต้อง', 'กรุณาระบุรูปแบบเดือน เช่น เดือน 12/2569', '', '', ''); }
+  if (arg === 'ปีนี้' || arg === 'ปีหน้า') { var ty = arg === 'ปีนี้' ? now.year : now.year + 1, yPfx = ty + '-', total = 0, act = 0, comp = 0, canc = 0; list.forEach(function (a) { if (!a.appointmentDate || a.appointmentDate.indexOf(yPfx) !== 0) return; total++; if (a.status === S_CP) comp++; else if (a.status === S_CN) canc++; else act++; }); return buildYearStatsFlex_(ty, total, act, comp, canc, total > 0 ? Math.round((comp / total) * 100) : 0, [], webAppUrl); }
+  var sm = arg.match(/^ค้นหา\s+(.+)$/);
+  if (sm) { var kw = sm[1].trim().toLowerCase(); return sendQ('[ผลการค้นหา "' + sm[1].trim() + '"]', list.filter(function (a) { return (a.id + ' ' + a.title + ' ' + a.location + ' ' + a.contactPerson + ' ' + (a.createdBy || '') + ' ' + (a.statusChangedBy || '')).toLowerCase().indexOf(kw) !== -1; })); }
+  return buildHelpFlex_(webAppUrl);
+}

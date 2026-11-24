@@ -311,7 +311,7 @@
       fetch: fetchImpl
     };
     sandbox.window.window = sandbox.window;
-    let appSrc = readF('app.js').replace("window.addEventListener('DOMContentLoaded', initApp); })();", "globalThis.__APP_T__ = { state, pendingIds, syncWithServer, applySyncBundle, applyMutationRev, saveLiveCache, loadLiveCache, callGasApi, initApp, findApt, renderActiveTab, getListRenderCount: () => __rc }; })();");
+    let appSrc = readF('app.js').replace("window.addEventListener('DOMContentLoaded', initApp); })();", "globalThis.__APP_T__ = { state, pendingIds, syncWithServer, applySyncBundle, applyMutationRev, syncAptMutation, handleUnsuspendUser, saveLiveCache, loadLiveCache, callGasApi, initApp, findApt, renderActiveTab, getListRenderCount: () => __rc }; })();");
     appSrc = 'let __rc = 0;\n' + appSrc.replace('function renderListTab(cachedNowBkk) {', 'function renderListTab(cachedNowBkk) { __rc++;');
     vm.runInNewContext(appSrc, sandbox);
     const api = sandbox.__APP_T__;
@@ -652,6 +652,106 @@
     hCustom.lsMap.set('CAL_CONN_CFG_V2', JSON.stringify({ gasUrl: customUrl, passcode: 'TEAM99', isLive: true }));
     hCustom.api.initApp();
     assertEq(hCustom.api.state.gasUrl, customUrl, 'ต้องไม่เขียนทับลิงก์ที่ผู้ใช้กำหนดเอง');
+  });
+
+  // --- Suite E: Refactored Scoped Partial Sync, Write-Through Cache & Surgical Rollback ---
+  test('A12. GAS Fast Rev Check', 'Conditional list ที่ sinceRev ตรงต้องอ่านเฉพาะ CAL_REV เดียวโดยไม่ดึง Cache ก้อนใหญ่', () => {
+    const env = createGasEnv();
+    const first = env.callPost({ action: 'list' });
+    env.resetMetrics();
+    const second = env.callPost({ action: 'list', sinceRev: first.data.rev, sinceScopes: first.data.scopeRevs });
+    assert(second.ok && second.data.unchanged === true, 'ต้องคืน unchanged: true');
+    assertEq(env.metrics.sheetReads, 0, 'ต้องไม่อ่าน Google Sheets');
+    assertEq(env.metrics.cacheGetAlls, 0, 'ต้องไม่ดึง Cache 5 ก้อนด้วย getAll');
+    assertEq(env.metrics.cacheGets, 1, 'ต้องตรวจเฉพาะ CAL_REV เพียง 1 ครั้ง');
+  });
+
+  test('A13. GAS Scoped Partial Sync', 'เมื่อเปลี่ยนเฉพาะ SystemMeta รอบซิงก์ที่มี sinceScopes ต้องคืนเฉพาะ meta (partial: true)', () => {
+    const env = createGasEnv();
+    env.callPost({ action: 'create', notifyLine: false, payload: { title: 'งานทดสอบ Partial', appointmentDate: '2026-12-20', appointmentTime: '10:00', location: 'ห้อง 1' } });
+    const full = env.callPost({ action: 'list' }).data;
+    assert(full.scopeRevs && full.scopeRevs.a && full.scopeRevs.m, 'Full bundle ต้องคืน scopeRevs ครบ');
+    env.callPost({ action: 'updateMeta', meta: { DAILY_DIGEST_HOUR: '7' } });
+    env.resetMetrics();
+    const delta = env.callPost({ action: 'list', sinceRev: full.rev, sinceScopes: full.scopeRevs });
+    assert(delta.ok && delta.data.partial === true && delta.data.meta && delta.data.meta.DAILY_DIGEST_HOUR === '7', 'ต้องคืน partial: true พร้อม meta ใหม่');
+    assert(delta.data.appointments === undefined && delta.data.users === undefined && delta.data.rescheduleLogs === undefined, 'ต้องไม่ส่ง appointments/users/logs ที่ไม่ได้เปลี่ยนกลับมาซ้ำ');
+    assertEq(env.metrics.sheetReads, 0, 'CAL_M ถูก Write-Through ไว้แล้วจึงอ่านชีต 0 ครั้ง');
+  });
+
+  test('A14. GAS Write-Through Cache', 'create พร้อม notifyLine: true ต้องไม่อ่าน SystemMeta ซ้ำหลังอัปเดตโควตา และ login ต้องอุ่น CAL_U', () => {
+    const env = createGasEnv();
+    env.propStore.LINE_CHANNEL_ACCESS_TOKEN = 'tok';
+    env.propStore.LINE_TARGET_ID = 'C_GRP';
+    env.callPost({ action: 'list' }); // warm initial caches
+    env.resetMetrics();
+    const cRes = env.callPost({ action: 'create', notifyLine: true, payload: { title: 'นัดส่ง LINE', appointmentDate: '2026-12-22', appointmentTime: '13:00', location: 'ห้อง A' } });
+    assert(cRes.ok && cRes.data.meta && cRes.data.meta.CACHED_QUOTA_USED === '1', 'ต้องคืนยอดโควตาใหม่กลับมาครบ');
+    assert(env.metrics.sheetReads <= 3, `ต้องไม่อ่าน SystemMeta ซ้ำหลังเขียนเสร็จ (sheetReads=${env.metrics.sheetReads})`);
+
+    env.cacheStore.delete('CAL_U');
+    const lg = env.callPost({ action: 'login', username: 'somchai', password: '1234' });
+    assert(lg.ok && env.cacheStore.has('CAL_U'), 'login ต้องอุ่น CAL_U ทันที');
+    env.resetMetrics();
+    const afterLg = env.callPost({ action: 'list' });
+    assert(afterLg.ok && env.metrics.sheetReads === 0, 'list ถัดจาก login ต้องได้ข้อมูลจาก Cache โดยอ่านชีต 0 ครั้ง');
+  });
+
+  testAsync('B10. Frontend Scoped Partial Sync', 'partial: true ที่มีเฉพาะ meta ต้องอัปเดต Header โดยไม่วาดรายการคิวงานใหม่', async () => {
+    const h = createFrontendHarness(async () => ({
+      json: async () => ({
+        ok: true, version: Logic.API_VERSION,
+        data: { partial: true, rev: 'r2', scopeRevs: { g: 'r2', a: 'r1', u: 'r1', m: 'r2', l: 'r1' }, meta: { CACHED_QUOTA_USED: '42' } }
+      })
+    }));
+    h.api.state.activeTab = 'tabList';
+    h.api.state.syncRev = 'r1';
+    h.api.state.scopeRevs = { g: 'r1', a: 'r1', u: 'r1', m: 'r1', l: 'r1' };
+    h.api.state.appointments = [{ id: 'APT-1', title: 'งานเดิม', appointmentDate: '2026-12-01', appointmentTime: '09:00', status: Logic.STATUS.CONFIRMED }];
+    const beforeRc = h.api.getListRenderCount();
+    await h.api.syncWithServer(true, true);
+    assertEq(h.api.state.meta.CACHED_QUOTA_USED, '42', 'ต้องอัปเดตค่าโควตาใน state.meta');
+    assertEq(h.api.state.syncRev, 'r2', 'ต้องเลื่อน syncRev เป็น r2');
+    assertEq(h.api.getListRenderCount(), beforeRc, 'การอัปเดตเฉพาะ meta ต้องไม่เรียก renderListTab ซ้ำ');
+    assertEq(h.api.state.appointments.length, 1, 'รายการนัดหมายเดิมต้องยังคงอยู่ครบ');
+  });
+
+  testAsync('B11. Surgical Per-Record Rollback', 'แก้ไข 2 นัดหมายพร้อมกัน ถ้านัดแรก error ต้องคืนค่าเฉพาะนัดแรกโดยไม่ทำลายนัดที่สอง', async () => {
+    const h = createFrontendHarness(async () => ({ json: async () => ({ ok: true, data: {} }) }));
+    const apt1Orig = { id: 'APT-1', title: 'งาน 1 เดิม', status: Logic.STATUS.CONFIRMED, appointmentDate: '2026-12-01', appointmentTime: '09:00' };
+    const apt2Orig = { id: 'APT-2', title: 'งาน 2 เดิม', status: Logic.STATUS.CONFIRMED, appointmentDate: '2026-12-01', appointmentTime: '10:00' };
+    const apt1Opt = { ...apt1Orig, status: Logic.STATUS.COMPLETED };
+    const apt2Opt = { ...apt2Orig, status: Logic.STATUS.COMPLETED };
+    h.api.state.appointments = [apt1Opt, apt2Opt];
+    h.api.state.rescheduleLogs = [
+      { logId: 'LOG-1', appointmentId: 'APT-1', fieldChanged: 'status' },
+      { logId: 'LOG-2', appointmentId: 'APT-2', fieldChanged: 'status' }
+    ];
+    let rej1, res2;
+    const p1 = new Promise((_, rej) => { rej1 = rej; });
+    const p2 = new Promise(res => { res2 = res; });
+    h.api.syncAptMutation('APT-1', apt1Orig, new Set(['LOG-1']), apt1Opt, () => p1, 'จำลองพลาด');
+    h.api.syncAptMutation('APT-2', apt2Orig, new Set(['LOG-2']), apt2Opt, () => p2, 'จำลองสำเร็จ');
+    rej1(new Error('Network fail on APT-1'));
+    res2({ appointment: apt2Opt, rev: 'r3', prevRev: '' });
+    await new Promise(r => setTimeout(r, 20));
+    assertEq(h.api.findApt('APT-1').status, Logic.STATUS.CONFIRMED, 'APT-1 ที่ล้มเหลวต้องถูกคืนค่าเป็น เริ่มนัด');
+    assertEq(h.api.findApt('APT-2').status, Logic.STATUS.COMPLETED, 'APT-2 ที่สำเร็จต้องไม่ถูกทับกลับเป็นค่าเก่า');
+    assert(!h.api.state.rescheduleLogs.some(l => l.logId === 'LOG-1') && h.api.state.rescheduleLogs.some(l => l.logId === 'LOG-2'), 'ต้องลบเฉพาะ Log ของรายการที่ล้มเหลว');
+  });
+
+  testAsync('B12. Admin Multi-Tab Cache Sync', 'การปลดระงับสมาชิกต้องบันทึก CAL_LIVE_CACHE_V2 ทันทีเพื่อซิงก์ข้ามแท็บ', async () => {
+    const h = createFrontendHarness(async () => ({
+      json: async () => ({
+        ok: true, version: Logic.API_VERSION,
+        data: { user: { userId: 'USR-003', username: 'wipada', displayName: 'คุณวิภาดา', role: 'STAFF', isActive: true, suspendedUntil: '', suspendReason: '' }, rev: 'r15', prevRev: 'r14', scopeRevs: { g: 'r15', a: 'r14', u: 'r15', m: 'r14', l: 'r14' } }
+      })
+    }));
+    h.api.state.syncRev = 'r14';
+    h.api.state.users = [{ userId: 'USR-001', username: 'admin', role: 'ADMIN', isActive: true }, { userId: 'USR-003', username: 'wipada', role: 'STAFF', isActive: false }];
+    await h.api.handleUnsuspendUser('USR-003');
+    const cached = JSON.parse(h.lsMap.get('CAL_LIVE_CACHE_V2') || 'null');
+    assert(cached && cached.rev === 'r15' && cached.users.find(u => u.userId === 'USR-003').isActive === true, 'ต้องอัปเดต LIVE_CACHE ทันทีหลังจัดการสมาชิก');
   });
 
   Promise.all(asyncTests).then(() => {
